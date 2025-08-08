@@ -1,7 +1,8 @@
 using Revise, Anemoi
+using FormationTemps; FT = FormationTemps
 using Korg, GRASS
 using HDF5, Printf
-using BenchmarkTools
+using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
 
@@ -29,7 +30,7 @@ ne = Korg.get_electron_number_densities(marcs_atm)
 nd = Korg.get_number_densities(marcs_atm)
 
 # get the line list
-valdfile = joinpath(Anemoi.datdir, "ryan_linelist.txt")
+valdfile = joinpath(FT.datdir, "full_linelist.lin")
 linelist = Korg.read_linelist(valdfile)
 linelist = linelist[154_500:155_500]
 
