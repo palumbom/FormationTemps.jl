@@ -1,27 +1,22 @@
-using Revise, Anemoi
+using Revise
+using FormationTemps; FT = FormationTemps
+using Korg, GRASS
+using HDF5, Printf
+using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using Korg, GRASS, CUDA, Adapt
-using BenchmarkTools
-using LinearAlgebra
-using NPZ, HDF5, Printf
-using EchelleCCFs: λ_air_to_vac, λ_vac_to_air
 using PyPlot, PyCall; mpl = plt.matplotlib
 
+# matplotlib backend
 mpl.use("Qt5Agg")
-mpl.style.use(GRASS.moddir * "fig.mplstyle")
+mpl.style.use(FT.moddir * "fig.mplstyle")
 
+# python interpolation for matplotlib stuff
 interp1d = pyimport("scipy.interpolate").interp1d
 
 # alias type 
 AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
-
-function round_to_power(x::Real)
-    iszero(x) && return 0
-    p = floor(Int, log10(abs(x)))
-    return round(x, digits = -p)
-end
 
 function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=240) where T<:AF
     # get the model atmosphere
@@ -53,12 +48,11 @@ function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=240) where 
 end
 
 # make plotdir
-plotdir = joinpath(pwd(), "plots", "form_temp")
+plotdir = joinpath(pwd(), "figures")
 !isdir(plotdir) && mkdir(plotdir)
 
 # get the linelist
-valdfile = joinpath(Anemoi.datdir, "linelist.h5")
-linelist, line_names = Anemoi.get_grass_linelist(return_names=true)
+linelist, line_names = FT.get_grass_linelist(return_names=true)
 linelist = linelist[end-1:end]
 
 # re-get values
@@ -85,14 +79,14 @@ ne = Korg.get_electron_number_densities(marcs_atm)
 nd = Korg.get_number_densities(marcs_atm)
 
 # make my atmosphere 
-atm_gpu = AtmosphereGPU(marcs_atm)
+atm_gpu = FT.AtmosphereGPU(marcs_atm)
 zs = atm_gpu.zs
 Ts = atm_gpu.Ts
 τ5000 = atm_gpu.τs
 
 # synthesis to get the alphas
 αs = zeros(length(atm_gpu.zs), length(λs_korg))
-Anemoi.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
 # allocate on device
 gpu_mem = GPUMemory(λs_korg, atm_gpu)
@@ -101,7 +95,7 @@ gpu_mem = GPUMemory(λs_korg, atm_gpu)
 Nλ = length(λs_korg)
 Natm = size(αs, 1)
 Npad = 100
-cmem = Anemoi.ConvolutionMemory(Nλ, Natm, Npad)
+cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # loop over mus 
 μs = range(0.1, 1.0, length=10)
@@ -111,12 +105,12 @@ cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs))
 intensities = zeros(length(λs_korg), length(μs))
 
 for i in eachindex(μs)
-    cfuncs[:,:,i] .= Anemoi.calculate_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfuncs[:,:,i] .= FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
     intensities[:,i] .= dropdims(sum(view(cfuncs,:,:,i), dims=1), dims=1)
 end
  
 # get disk integrated cfunc
-cfunc_flux = Anemoi.calculate_cfunc_disk_integrated(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
 flux_disk_integrated = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
 
 # get limits and such
@@ -136,7 +130,6 @@ lims_int = [minimum(intensities), round_to_power(maximum(intensities))] ./ 10^(e
 max_val_flux = maximum(abs.(flux_disk_integrated))
 exponent_flux = floor(Int, log10(max_val_flux))
 lims_flux = [minimum(flux_disk_integrated), round_to_power(maximum(flux_disk_integrated))] ./ 10^(exponent_flux)
-
 
 # now plot em 
 # cmap = plt.get_cmap("plasma")

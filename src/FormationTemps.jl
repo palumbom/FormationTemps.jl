@@ -1,7 +1,11 @@
 module FormationTemps
 
 # general imports
-using Anemoi
+using CUDA
+using Korg
+using AbstractFFTs
+using ImageFiltering
+using SpecialFunctions
 
 # abbreviations for commonly used types
 import Base: AbstractArray as AA
@@ -13,5 +17,20 @@ include("config.jl")
 
 # ancillary functions + constants
 include("utils.jl")
+
+# structures
+include("structures/ConvolutionMemory.jl")
+include("structures/AtmosphereGPU.jl")
+include("structures/GPUMemory.jl")
+
+# linelist + stellar model stuff
+include("linelist.jl")
+
+# radiative transport
+include("absorption.jl")
+include("contribution.jl")
+include("tau.jl")
+
+export round_to_power
 
 end
