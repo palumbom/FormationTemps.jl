@@ -1,6 +1,6 @@
 using Revise
 using FormationTemps; FT = FormationTemps
-using Korg, GRASS
+using Korg
 using HDF5, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
@@ -52,8 +52,19 @@ plotdir = joinpath(pwd(), "figures")
 !isdir(plotdir) && mkdir(plotdir)
 
 # get the linelist
-linelist, line_names = FT.get_grass_linelist(return_names=true)
-linelist = linelist[end-1:end]
+linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
+linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
+specs = [string(l.species) for l in linelist]
+
+# cut on species
+linelist = linelist[specs .== "Fe I"]
+
+# get the Fe I 6301 & 6302 lines (just cuz)
+wls = [l.wl for l in linelist] 
+idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
+idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
+linelist = vcat([linelist[idx1], linelist[idx2]])
+
 
 # re-get values
 wls = [l.wl * 1e8 for l in linelist]
@@ -305,8 +316,8 @@ fig, ax1 = plt.subplots()
 ax1.plot(elav(Ts), cum_cfunc_flux_norm[:,cont_idx], c="k", label=L"{\rm Flux}")
 ax1.plot(elav(Ts), cum_cfuncs_norm[:,cont_idx, length(μs)], c=colors[end,:], label=L"\mu = 1.0")
 
-itp1 = GRASS.linear_interp(cum_cfunc_flux_norm[:,cont_idx], elav(Ts))
-itp2 = GRASS.linear_interp(cum_cfuncs_norm[:,cont_idx, length(μs)], elav(Ts))
+itp1 = FT.linear_interp(cum_cfunc_flux_norm[:,cont_idx], elav(Ts))
+itp2 = FT.linear_interp(cum_cfuncs_norm[:,cont_idx, length(μs)], elav(Ts))
 
 x_data1 = itp1(0.5)
 x_data2 = itp2(0.5)
@@ -338,14 +349,14 @@ form_temps_flux = zeros(length(λs_korg))
 
 for i in eachindex(λs_korg)
     local xs = view(cum_cfunc_flux_norm, :, i)
-    local itp = GRASS.linear_interp(xs, elav(Ts))
+    local itp = FT.linear_interp(xs, elav(Ts))
     form_temps_flux[i] = itp(0.5)
 end
 
 for i in eachindex(λs_korg)
     for j in eachindex(μs)
         local xs = view(cum_cfuncs_norm, :, i, j)
-        local itp = GRASS.linear_interp(xs, elav(Ts))
+        local itp = FT.linear_interp(xs, elav(Ts))
         form_temps_intensity[i,j] = itp(0.5)
     end
 end

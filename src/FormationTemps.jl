@@ -17,6 +17,7 @@ include("config.jl")
 
 # ancillary functions + constants
 include("utils.jl")
+include("interpolations.jl")
 
 # structures
 include("structures/ConvolutionMemory.jl")

@@ -1,4 +1,4 @@
-using Revise, Anemoi
+using Revise
 using FormationTemps; FT = FormationTemps
 using Korg, GRASS
 using HDF5, Printf
@@ -54,7 +54,7 @@ Ts = atm_gpu.Ts
 
 # synthesis to get the alphas
 αs = zeros(length(atm_gpu.zs), length(λs_korg))
-Anemoi.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+FTAnemoi.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
 # allocate on device
 gpu_mem = GPUMemory(λs_korg, atm_gpu)
@@ -63,7 +63,7 @@ gpu_mem = GPUMemory(λs_korg, atm_gpu)
 Nλ = length(λs_korg)
 Natm = size(αs, 1)
 Npad = 100
-cmem = Anemoi.ConvolutionMemory(Nλ, Natm, Npad)
+cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # loop over mus 
 μs = range(0.1, 1.0, length=10)
@@ -73,12 +73,12 @@ cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs))
 intensities = zeros(length(λs_korg), length(μs))
 
 for i in eachindex(μs)
-    cfuncs[:,:,i] .= Anemoi.calculate_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfuncs[:,:,i] .= FT.calculate_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
     intensities[:,i] .= dropdims(sum(view(cfuncs,:,:,i), dims=1), dims=1)
 end
  
 # get disk integrated cfunc
-cfunc_flux = Anemoi.calculate_cfunc_disk_integrated(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux = FT.calculate_cfunc_disk_integrated(αs, atm_gpu, gpu_mem, cmem, σ_v)
 flux_disk_integrated = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
 
 # now get cumulative contribution functions
