@@ -3,7 +3,9 @@ module FormationTemps
 # general imports
 using CUDA
 using Korg
+using Statistics
 using AbstractFFTs
+using LinearAlgebra
 using ImageFiltering
 using SpecialFunctions
 
@@ -17,12 +19,16 @@ include("config.jl")
 
 # ancillary functions + constants
 include("utils.jl")
-include("interpolations.jl")
+include("constants.jl")
 
 # structures
 include("structures/ConvolutionMemory.jl")
 include("structures/AtmosphereGPU.jl")
 include("structures/GPUMemory.jl")
+
+# numerical stuff
+include("interpolations.jl")
+include("convolutions.jl")
 
 # linelist + stellar model stuff
 include("linelist.jl")

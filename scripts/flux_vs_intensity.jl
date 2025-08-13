@@ -100,7 +100,7 @@ Ts = atm_gpu.Ts
 FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
 # allocate on device
-gpu_mem = GPUMemory(λs_korg, atm_gpu)
+gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
 # allocate memory for convolutions
 Nλ = length(λs_korg)
