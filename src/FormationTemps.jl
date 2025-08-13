@@ -20,6 +20,7 @@ include("config.jl")
 # ancillary functions + constants
 include("utils.jl")
 include("constants.jl")
+include("functions.jl")
 
 # structures
 include("structures/ConvolutionMemory.jl")
@@ -38,6 +39,6 @@ include("absorption.jl")
 include("contribution.jl")
 include("tau.jl")
 
-export round_to_power
+export round_to_power, elav
 
 end
