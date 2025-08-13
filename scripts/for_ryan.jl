@@ -1,6 +1,6 @@
 using Revise
 using FormationTemps; FT = FormationTemps
-using Korg, GRASS
+using Korg
 using HDF5, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
@@ -8,7 +8,7 @@ using PyPlot, PyCall; mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
-mpl.style.use(GRASS.moddir * "fig.mplstyle")
+mpl.style.use(FT.moddir * "fig.mplstyle")
 
 # alias type 
 AA = AbstractArray
@@ -47,17 +47,17 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # make my atmosphere 
-atm_gpu = AtmosphereGPU(marcs_atm)
+atm_gpu = FT.AtmosphereGPU(marcs_atm)
 zs = atm_gpu.zs
 Ts = atm_gpu.Ts
 τ5000 = atm_gpu.τs
 
 # synthesis to get the alphas
 αs = zeros(length(atm_gpu.zs), length(λs_korg))
-FTAnemoi.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
 # allocate on device
-gpu_mem = GPUMemory(λs_korg, atm_gpu)
+gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
 # allocate memory for convolutions
 Nλ = length(λs_korg)
@@ -73,12 +73,12 @@ cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs))
 intensities = zeros(length(λs_korg), length(μs))
 
 for i in eachindex(μs)
-    cfuncs[:,:,i] .= FT.calculate_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfuncs[:,:,i] .= FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
     intensities[:,i] .= dropdims(sum(view(cfuncs,:,:,i), dims=1), dims=1)
 end
  
 # get disk integrated cfunc
-cfunc_flux = FT.calculate_cfunc_disk_integrated(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
 flux_disk_integrated = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
 
 # now get cumulative contribution functions
@@ -97,26 +97,26 @@ form_tau_flux = zeros(length(λs_korg))
 
 for i in eachindex(λs_korg)
     local xs = view(cum_cfunc_flux_norm, :, i)
-    local itp = GRASS.linear_interp(xs, elav(Ts))
+    local itp = FT.linear_interp(xs, elav(Ts))
     form_temps_flux[i] = itp(0.5)
 
-    local itp = GRASS.linear_interp(xs, elav(zs))
+    local itp = FT.linear_interp(xs, elav(zs))
     form_heights_flux[i] = itp(0.5)
 
-    local itp = GRASS.linear_interp(xs, elav(τ5000))
+    local itp = FT.linear_interp(xs, elav(τ5000))
     form_tau_flux[i] = itp(0.5)
 end
 
 for i in eachindex(λs_korg)
     for j in eachindex(μs)
         local xs = view(cum_cfuncs_norm, :, i, j)
-        local itp = GRASS.linear_interp(xs, elav(Ts))
+        local itp = FT.linear_interp(xs, elav(Ts))
         form_temps_intensity[i,j] = itp(0.5)
 
-        local itp = GRASS.linear_interp(xs, elav(zs))
+        local itp = FT.linear_interp(xs, elav(zs))
         form_heights_intensity[i,j] = itp(0.5)
 
-        local itp = GRASS.linear_interp(xs, elav(τ5000))
+        local itp = FT.linear_interp(xs, elav(τ5000))
         form_tau_intensity[i,j] = itp(0.5)
     end
 end
