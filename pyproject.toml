@@ -1,0 +1,10 @@
+[project]
+name = "formationtemps"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "juliacall>=0.9.26",
+    "juliapkg>=0.1.17",
+]
