@@ -14,6 +14,13 @@ import Base: AbstractArray as AA
 import Base: AbstractFloat as AF
 import CUDA: CuArray as CA, CuDeviceMatrix as CDM, CuDeviceVector as CDV
 
+# determine if there is a GPU
+if CUDA.functional() 
+    const GPU_DEFAULT = true
+else
+    const GPU_DEFAULT = false
+end
+
 # configure directories
 include("config.jl")
 
@@ -38,6 +45,9 @@ include("linelist.jl")
 include("absorption.jl")
 include("contribution.jl")
 include("tau.jl")
+
+# convenient high-level functions
+include("convenience.jl")
 
 export round_to_power, elav
 

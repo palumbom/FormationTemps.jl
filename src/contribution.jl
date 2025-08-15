@@ -163,3 +163,43 @@ function calc_intensity_cfunc_cpu(μ::T, Ts::AA{T,1}, λs::AA{T,1}, τs::AA{T,2}
     return cfunc
 end
 
+function calc_flux_cfunc_cpu(Ts::AA{T,1}, λs::AA{T,1}, τs::AA{T,2}) where {T<:AF}
+    # get dims, preallocate
+    Natm, Nλ = size(τs)
+    one_over_sqrt3 = 1.0 / sqrt(3.0)
+    cfunc = zeros(Natm - 1, Nλ)
+
+    # loop over wavelength
+    for j in 1:Nλ
+        # convert to cm
+        λ_cm = λs[j] * 1e-8
+
+        # loop over layers of atmospbere
+        for k in 1:Natm-1
+            # endpoints in τ-space
+            τ0 = τs[k, j]
+            τ1 = τs[k+1, j]
+            Δτ = τ1 - τ0
+            τ_mid = 0.5 * (τ0 + τ1)
+
+            # Gauss–Legendre nodes
+            τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
+            τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
+
+            # linear T interp wrt τ
+            dT = Ts[k+1] - Ts[k]
+            inv_Δτ = 1.0 / Δτ
+            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_Δτ)
+            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_Δτ)
+
+            # evaluate integrand f = B(T,λ) * exp(-τ)
+            f1 = Korg.blackbody(T1, λ_cm) * SpecialFunctions.expint(2, τp1)
+            f2 = Korg.blackbody(T2, λ_cm) * SpecialFunctions.expint(2, τp2)
+
+            # two-point Gauss weight = Δτ/2
+            cfunc[k, j] = 2π * (f1 + f2) * (Δτ * 0.5)
+        end
+    end
+    return cfunc
+end
+
