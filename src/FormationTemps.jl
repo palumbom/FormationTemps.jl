@@ -49,6 +49,6 @@ include("tau.jl")
 # convenient high-level functions
 include("convenience.jl")
 
-export round_to_power, elav
+export round_to_power, elav, calc_formation_temp
 
 end
