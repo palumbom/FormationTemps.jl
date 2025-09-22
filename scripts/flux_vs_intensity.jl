@@ -10,8 +10,17 @@ using PyPlot, PyCall; mpl = plt.matplotlib
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 
+# get fancy fonts
+plt.rc("text", usetex=true)
+plt.rc("text.latex", preamble="\\usepackage{amsmath}
+                            \\usepackage{mathrsfs}")
+
 # python interpolation for matplotlib stuff
 interp1d = pyimport("scipy.interpolate").interp1d
+
+# set colormaps
+img_cmap = "viridis"
+μ_cmap = "autumn"
 
 # alias type 
 AA = AbstractArray
@@ -21,7 +30,7 @@ AF = AbstractFloat
 function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=240) where T<:AF
     # get the model atmosphere
     marcs_atm = Korg.interpolate_marcs(Teff, logg, A_X)
-    τ_500 = Korg.get_tau_5000s(marcs_atm)
+    τ_500 = Korg.get_tau_refs(marcs_atm)
     zs = Korg.get_zs(marcs_atm)
     Ts = Korg.get_temps(marcs_atm)
     ne = Korg.get_electron_number_densities(marcs_atm)
@@ -44,7 +53,7 @@ function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=240) where 
     for i in eachindex(zs_new)
         ls[i] = Korg.PlanarAtmosphereLayer(τs_new[i], zs_new[i], Ts_new[i], ne_new[i], nd_new[i])
     end
-    return Korg.PlanarAtmosphere(ls)
+    return Korg.PlanarAtmosphere(ls, 5000.0 / 1e8)
 end
 
 # make plotdir
@@ -83,7 +92,7 @@ A_X = Korg.asplund_2020_solar_abundances
 
 # get the atmosphere
 marcs_atm = get_marcs_atm(5777.0, 4.44, A_X, n_layers=168 * 3)
-τ_500 = Korg.get_tau_5000s(marcs_atm)
+τ_500 = Korg.get_tau_refs(marcs_atm)
 zs = Korg.get_zs(marcs_atm)
 Ts = Korg.get_temps(marcs_atm)
 ne = Korg.get_electron_number_densities(marcs_atm)
@@ -143,9 +152,9 @@ exponent_flux = floor(Int, log10(max_val_flux))
 lims_flux = [minimum(flux_disk_integrated), round_to_power(maximum(flux_disk_integrated))] ./ 10^(exponent_flux)
 
 # now plot em 
-# cmap = plt.get_cmap("plasma")
-cmap = plt.get_cmap("autumn")
-norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
+cmap = plt.get_cmap(μ_cmap)
+# norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
+norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=1.075)
 colors = cmap(norm(μs))
 
 fig, ax1 = plt.subplots()
@@ -188,83 +197,126 @@ fig.savefig(joinpath(plotdir, "intensity_vs_limb_angle.pdf"), bbox_inches="tight
 plt.clf(); plt.close()
 
 # now plot the contribution functions 
-μ_vals_to_plot = [1, 4, length(μs)]
+μ_vals_to_plot = [1.0, 0.6, 0.3, 0.1]
 
-for i in eachindex(μs)
-    !(i in μ_vals_to_plot) && continue
+# make three panels
+fig, axs = plt.subplots(nrows=1, ncols=length(μ_vals_to_plot), sharey=true, figsize=(18.2, 4.2))#, layout="compressed")
+ax1, ax2, ax3 = axs
 
-    local fig = plt.figure(constrained_layout=true)
-    local gs = mpl.gridspec.GridSpec(2, 1, height_ratios=[1,20], figure=fig)#, width_ratios=[20,1])
-    local ax1 = fig.add_subplot(gs[1]); ax1.set_xticklabels([])
-    local ax2 = fig.add_subplot(gs[2])#; ax2.set_axis_off()
-    # local ax3 = fig.add_subplot(gs[3])
-    # local ax4 = fig.add_subplot(gs[4])
-    ax3 = ax2
-    ax4 = ax1
+idx1 = findfirst(x -> x .>= first(wls) - 0.75, λs_korg)
+idx2 = findfirst(x -> x .>= last(wls) + 0.75, λs_korg)
 
-    local idx1 = findfirst(x -> x .>= first(wls) - 0.75, λs_korg)
-    local idx2 = findfirst(x -> x .>= last(wls) + 0.75, λs_korg)
+z_grid = elav(zs)
+τ_grid = elav(τ_500)
+extent = [λs_korg[idx1], λs_korg[idx2], first(τ_500), last(τ_500)]
 
-    #= 
-    ll = ax1.plot(view(λs_korg, idx1:idx2), view(intensities, idx1:idx2,i), c="k")
-    ax1.set_ylim(ylims...)
+vmin = first(cb_lims)
+vmax = last(cb_lims)
+# vmax = func(6)
 
-    # ax1.set_ylabel(L"I_\nu^+\ {\rm [erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}")
-    val = μs[i]
-    ax1.set_ylabel(L"I_\nu^+(\mu\, =\, %$val)") 
-    =#
+function cmap_forward(x)
+    return sqrt.(x)
+end
 
-    z_grid = elav(zs)
-    τ_grid = elav(τ_500)
-    # extent = [λs_korg[idx1], λs_korg[idx2], last(z_grid)/1e7, first(z_grid)/1e7]
-    extent = [λs_korg[idx1], λs_korg[idx2], first(τ_500), last(τ_500)]
-    
-    # vmin = maximum([1.0, first(cb_lims)])
-    vmin = first(cb_lims)
-    vmax = last(cb_lims)
+function cmap_inverse(x)
+    return x.^2.0
+end
 
-    xedges = view(λs_korg, idx1:idx2)
-    yedges = log10.(elav(τ_500))
-    yedges2 = elav(zs ./ 1e7)
-    cfunc_view = view(cfuncs,:,idx1:idx2,i)  ./ 10^(exponent)
+# norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+norm = mpl.colors.FuncNorm((cmap_forward, cmap_inverse), vmin=vmin, vmax=vmax)
 
-    # local norm = mpl.colors.SymLogNorm(vmin=vmin, vmax=vmax, linthresh=1.0, linscale=1.0)
-    local norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+xedges = view(λs_korg, idx1:idx2)
+yedges = log10.(elav(τ_500))
+yedges2 = elav(zs ./ 1e7)
+
+imgs = []
+
+# fig.colorbar(im, ax=axes.ravel().tolist())
+for i in eachindex(μ_vals_to_plot)
+    # !(i in μ_vals_to_plot) && continue
+    μ_idx = findfirst(μs .== μ_vals_to_plot[i])
+
+    # get view of cfunc
+    cfunc_view = view(cfuncs,:,idx1:idx2,μ_idx)  ./ 10^(exponent)
 
     # img = ax3.imshow(cfunc_view, aspect="auto", extent=extent, vmin=vmin, vmax=vmax)
-    img = ax3.pcolormesh(xedges, yedges2, cfunc_view, 
-                         shading="gouraud", cmap="viridis", 
-                         edgecolors="none", norm=norm)
-    ax3.axvline(xedges[cont_idx - idx1], c="k", ls=":", lw=2.5)
+    img = axs[i].pcolormesh(xedges, yedges2, cfunc_view, 
+                            shading="gouraud", cmap=img_cmap, 
+                            edgecolors="none", norm=norm)
 
-    ax3.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
+    push!(imgs, img)
+    axs[i].axvline(xedges[cont_idx - idx1], c="white", ls=":", lw=2.5)
+
+    # axs[i].set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
     # ax3.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
-    ax3.set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
+    # ax3.set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
+    mu_val = string(μ_vals_to_plot[i])
+    axs[i].set_title(L"\mu = %$mu_val")
 
     local fwd = interp1d(yedges2, yedges, fill_value="extrapolate")
     local inv = interp1d(yedges, yedges2, fill_value="extrapolate")    
 
-    ax3_right = ax3.secondary_yaxis("right", functions=(fwd, inv))
+    # ax3_right = ax3.secondary_yaxis("right", functions=(fwd, inv))
     # ax3_right.set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
-    ax3_right.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
-    ax3_right.yaxis.set_ticks([0, -1, -2, -3, -4])
-
-    mu_val = string(μs[i])
-    cb = fig.colorbar(img, cax=ax4, orientation="horizontal")
-    cb.set_label(L"C_\nu(t_\nu, \mu=%$mu_val)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}", labelpad=10.0)
-    # cb.ax.xaxis.set_ticks_position("top")
-    cb.ax.xaxis.set_label_position("top")
-    # cb.ax.ticklabel_format(style="scientific", axis="both", scilimits=(0, 0), useOffset=false)
-    ax4.grid(false)
-
-    val = replace(string(μs[i]), '.'=>"")
-    fig.savefig(joinpath(plotdir, "cfunc_mu_$val.pdf"), bbox_inches="tight")
-    plt.clf(); plt.close()
+    # ax3_right.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
+    # ax3_right.yaxis.set_ticks([0, -1, -2, -3, -4])
 end
 
-# plot slices through the contribution function at different limb angles 
+fwd = interp1d(elav(zs ./ 1e7), elav(log10.(τ_500)), fill_value="extrapolate")
+inv = interp1d(elav(log10.(τ_500)), elav(zs ./ 1e7), fill_value="extrapolate")
 
-fig, ax1 = plt.subplots()
+ax1_b1 = ax1.twinx()
+ax1_b1.yaxis.set_ticks_position("left")
+ax1_b1.yaxis.set_label_position("left")
+ax1_b1.spines["left"].set_position(("axes", -0.3))
+ax1_b1.set_frame_on(true)
+ax1_b1.patch.set_visible(false)
+for sp in ax1_b1.spines.values()
+    sp.set_visible(false)
+end
+ax1_b1.spines["left"].set_visible(true)
+new_yticks = [2, 1, 0, -1, -2, -3, -4, -5]
+ax1_b1.set_yticks(inv(new_yticks))
+ax1_b1.set_yticklabels(latexstring.(new_yticks))
+ax1_b1.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}", labelpad=8)
+ax1_b1.set_ylim(ax1.get_ylim()...)
+ax1_b1.grid(false)
+
+fwd = interp1d(elav(zs ./ 1e7), elav(Ts), fill_value="extrapolate")
+inv = interp1d(elav(Ts), elav(zs ./ 1e7), fill_value="extrapolate")
+
+ax1_b2 = ax1.twinx()
+ax1_b2.yaxis.set_ticks_position("left")
+ax1_b2.yaxis.set_label_position("left")
+ax1_b2.spines["left"].set_position(("axes", -0.6))
+ax1_b2.set_frame_on(true)
+ax1_b2.patch.set_visible(false)
+for sp in ax1_b2.spines.values()
+    sp.set_visible(false)
+end
+ax1_b2.spines["left"].set_visible(true)
+new_yticks = [9000, 6250, 5500, 5000, 4750, 4500, 4250]
+ax1_b2.set_yticks(inv(new_yticks))
+ax1_b2.set_yticklabels(latexstring.(new_yticks))
+ax1_b2.set_ylabel(L"{\rm Temperature\ [K]}", labelpad=8)
+ax1_b2.set_ylim(ax1.get_ylim()...)
+ax1_b2.grid(false)
+
+fig.supxlabel(L"{\rm Air\ Wavelength\ [\AA]}", y=-0.02, x=0.45)
+axs[1].set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
+fig.subplots_adjust(wspace=0.05)
+
+cb = fig.colorbar(imgs[end], ax=axs, pad=0.01)
+cb.set_label(L"C_\nu(t_\nu, \mu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}", labelpad=10.0)
+cb.ax.xaxis.set_label_position("top")
+
+fig.savefig(joinpath(plotdir, "cfunc_mus.pdf"), bbox_inches="tight")
+plt.clf(); plt.close()
+
+# plot slices through the contribution function at different limb angles 
+fig, ax1 = plt.subplots(figsize=(7.2, 5.6))
+fig.subplots_adjust(bottom=0.3)
+
 ax2 = ax1.twinx()
 ax2.plot(elav(zs) ./ 1e7 , cfunc_flux[:,cont_idx] ./ 10^(exponent_cflux) , c="k", label=L"{\rm Flux}")
 for i in eachindex(μs)
@@ -276,18 +328,59 @@ for i in eachindex(μs)
     ax1.plot(xs, ys, c=colors[i,:], lw=1.75, label=L"\mu = %$mu_val")
 end 
 
+ax1.set_xticks([-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+ax1.set_xlim(-1.25, 5.25)
+
 fwd = interp1d(elav(zs ./ 1e7), elav(log10.(τ_500)), fill_value="extrapolate")
 inv = interp1d(elav(log10.(τ_500)), elav(zs ./ 1e7), fill_value="extrapolate")
-ax1_top = ax1.secondary_xaxis("top", functions=(fwd, inv))
-ax1_top.xaxis.set_ticks([2, 1, 0, -1, -2, -3, -4, -5])
+
+# ax1_b1 = ax1.secondary_xaxis("top", functions=(fwd, inv))
+# ax1_b1.xaxis.set_ticks([2, 1, 0, -1, -2, -3, -4, -5])
+# ax1_b1.set_xlabel(L"{\rm \log _{10} (\tau_{5000})}", labelpad=10)
+
+ax1_b1 = ax1.twiny()
+ax1_b1.xaxis.set_ticks_position("top")
+ax1_b1.xaxis.set_label_position("top")
+ax1_b1.spines["top"].set_position(("axes", +1.0))#-0.25))
+ax1_b1.set_frame_on(true)
+ax1_b1.patch.set_visible(false)
+for sp in ax1_b1.spines.values()
+    sp.set_visible(false)
+end
+new_xticks = [2, 1, 0, -1, -2, -3, -4, -5]
+ax1_b1.spines["top"].set_visible(true)
+ax1_b1.set_xticks(inv(new_xticks))
+ax1_b1.set_xticklabels(latexstring.(new_xticks))
+ax1_b1.set_xlabel(L"{\rm \log _{10} (\tau_{5000})}", labelpad=10)
+ax1_b1.set_xlim(ax1.get_xlim()...)
+ax1_b1.grid(false)
+
+fwd = interp1d(elav(zs ./ 1e7), elav(Ts), fill_value="extrapolate")
+inv = interp1d(elav(Ts), elav(zs ./ 1e7), fill_value="extrapolate")
+
+ax1_b2 = ax1.twiny()
+ax1_b2.xaxis.set_ticks_position("top")
+ax1_b2.xaxis.set_label_position("top")
+ax1_b2.spines["top"].set_position(("axes", +1.25))#-0.5))
+ax1_b2.set_frame_on(true)
+ax1_b2.patch.set_visible(false)
+for sp in ax1_b2.spines.values()
+    sp.set_visible(false)
+end
+ax1_b2.spines["top"].set_visible(true)
+new_xticks = [9000, 6250, 5500, 5000, 4750, 4500]
+ax1_b2.set_xticks(inv(new_xticks))
+ax1_b2.set_xticklabels(latexstring.(new_xticks))
+ax1_b2.set_xlabel(L"{\rm Temperature\ [K]}", labelpad=10)
+ax1_b2.set_xlim(ax1.get_xlim()...)
+ax1_b2.grid(false)
 
 wav_val = string(round(λs_korg[cont_idx], digits=1))
-# ax1.set_xscale("symlog", linthresh=1.0)
-ax1.set_xlabel(L"{\rm Physical\ Depth\ [Mm]}")
-ax1_top.set_xlabel(L"{\rm \log _{10} (\tau_{5000})}", labelpad=10)
 # ax1.set_ylabel(L"C_\nu(%$wav_val\ {\rm \AA})\ {\rm [erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}")
+ax1.set_xlabel(L"{\rm Physical\ Depth\ [Mm]}")
 ax1.set_ylabel(L"C_{\nu}(t_\nu, \mu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}")
-ax2.set_ylabel(L"\mathcal{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
+# ax2.set_ylabel(L"\mathcal{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
+ax2.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
 ax1.legend()
 
 ax1.set_ylim(cb_lims)

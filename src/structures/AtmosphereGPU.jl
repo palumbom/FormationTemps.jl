@@ -17,7 +17,7 @@ end
 
 function AtmosphereGPU(atm_korg)
     # Korg atmosphere parameters
-    τs = Korg.get_tau_5000s(atm_korg)
+    τs = Korg.get_tau_refs(atm_korg)
     zs = Korg.get_zs(atm_korg)
     Ts = Korg.get_temps(atm_korg)
     ne = Korg.get_electron_number_densities(atm_korg)
