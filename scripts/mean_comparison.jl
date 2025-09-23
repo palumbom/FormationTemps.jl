@@ -126,6 +126,56 @@ end =#
 ftemp = 5000.0
 idx = isapprox.(ftemp, form_temps_flux, atol=0.1e1)
 
+# find the lines they are nearest
+λs_interest = view(λs_korg, idx)
+idx_idx = findall(idx)
+idx_wls = [FT.searchsortednearest(wls, i) for i in λs_interest]
+wls_interest = wls[idx_wls]
+
+# format species name
+specs_interest = string.(species[idx_wls])
+specs_interest_latex = latexstring.(specs_interest)
+for i in eachindex(specs_interest)
+    parts = split(specs_interest[i])
+    part3 = string(round(wls_interest[i], digits=1))
+    specs_interest_latex[i] = L"{\rm %$(parts[1])\, %$(parts[2])\, %$part3\, \AA}"
+end
+
+# make figure objects
+fig, ax1 = plt.subplots()
+
+xticks = zeros(length(idx_wls))
+
+# iterate over lines
+for i in eachindex(idx_wls)
+    # isolate the lines
+    buffer = 25
+    idx_λs = findfirst(x -> x .>= wls[idx_wls[i]], λs_korg)
+
+    # get an offset 
+    offset = 0.3 * (i - 1)
+    xticks[i] = offset
+
+    # plot the lines
+    λs_view = view(λs_korg, idx_λs-buffer:idx_λs+buffer) .- wls[idx_wls[i]] .+ offset
+    flux_view = view(flux, idx_λs-buffer:idx_λs+buffer)
+    temp_view = view(form_temps_flux, idx_λs-buffer:idx_λs+buffer)
+    ax1.plot(λs_view, temp_view, zorder=0)
+
+    # get data for scatter
+    xscatter = [λs_korg[idx_idx[i]]] .- wls[idx_wls[i]] .+ offset
+    yscatter = [form_temps_flux[idx_idx[i]]]
+    ax1.scatter(xscatter, yscatter, c="k", zorder=1)
+end
+ax1.set_xticks(xticks)
+ax1.set_xticklabels(specs_interest_latex, rotation=45, ha="right")
+# ax1.set_xticks([])
+
+# ax1.set_xlabel(L"{\rm Air\ Wavelength\ +\ Offset\ [\AA]}")
+ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
+fig.tight_layout()
+plt.show()
+
 # plot the form temp spectra
 # plt.plot(λs_korg, flux, c="k")
 # plt.scatter(λs_korg[idx], flux[idx])
@@ -151,4 +201,4 @@ ax2.set_ylabel(L"{\rm Normalized\ Cumulative\ Flux\ Cont.\ Fn.}")
 
 fig.subplots_adjust(wspace=0.25)
 fig.savefig(joinpath(plotdir, "mean_comparison.pdf"), bbox_inches="tight")
-plt.show()
+plt.clf(); plt.close()
