@@ -3,7 +3,7 @@ using FormationTemps; FT = FormationTemps
 using Korg
 using HDF5, Printf
 using CUDA, BenchmarkTools
-using CSV, DataFrames, Statistics
+using CSV, DataFrames, Statistics, NaNMath
 using PyPlot, PyCall; mpl = plt.matplotlib
 
 # matplotlib backend
@@ -21,6 +21,7 @@ interp1d = pyimport("scipy.interpolate").interp1d
 # set colormaps
 img_cmap = "viridis"
 μ_cmap = "autumn"
+vmic_cmap = "autumn"
 
 # alias type 
 AA = AbstractArray
@@ -118,7 +119,8 @@ Npad = 100
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # make array of vmics 
-vmics = range(0.0, 4800.0, step=400.0)
+mic_min = 0.1
+vmics = range(mic_min, 8000.0 + mic_min, step=800.0)
 
 # loop over vmics
 μs = 1.0
@@ -137,3 +139,45 @@ for i in eachindex(vmics)
     cfuncs_flux[:,:,i] = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
     fluxes[:,i] = 2π .* dropdims(sum(view(cfuncs_flux,:,:,i), dims=1), dims=1) 
 end
+
+cum_cfuncs_norm = cumsum(cfuncs, dims=1) 
+cum_cfuncs_norm ./= maximum(cum_cfuncs_norm, dims=1)
+cum_cfuncs_flux_norm = cumsum(cfuncs_flux, dims=1) 
+cum_cfuncs_flux_norm ./= maximum(cum_cfuncs_flux_norm, dims=1)
+
+form_temps_int = zeros(length(λs_korg), length(vmics))
+form_temps_flux = zeros(length(λs_korg), length(vmics))
+
+for i in eachindex(λs_korg)
+    for j in eachindex(vmics)
+        local xs1 = view(cum_cfuncs_norm, :, i, j)
+        local xs2 = view(cum_cfuncs_flux_norm, :, i, j)
+        local itp1 = FT.linear_interp(xs1, elav(Ts))
+        local itp2 = FT.linear_interp(xs2, elav(Ts))
+        form_temps_int[i, j] = itp1(0.5)
+        form_temps_flux[i, j] = itp2(0.5)
+    end
+end
+
+# get colormaps
+cmap = plt.get_cmap(vmic_cmap)
+# norm = mpl.colors.Normalize(vmin=minimum(vmics), vmax=maximum(vmics) + 50.0)
+norm = mpl.colors.Normalize(vmin=0.0, vmax=8000.0)
+colors = cmap(norm(vmics))
+
+# do some plotting 
+fig, ax1 = plt.subplots()
+for i in eachindex(vmics)
+    ax1.plot(λs_korg, form_temps_flux[:,i], c=colors[i,:])
+end
+
+sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+cbar = plt.colorbar(sm, ax=ax1)
+cbar.set_label(L"v_{\rm mic}\ {\rm[km\ s}^{-1}{\rm ]}")
+cbar.set_ticklabels(latexstring.(cbar.get_ticks() ./ 1000.0))
+
+ax1.set_xlim(first(wls) - 0.75, last(wls) + 0.75)
+ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
+ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
+fig.savefig(joinpath(plotdir, "vmic.pdf"), bbox_inches="tight")
+plt.show()
