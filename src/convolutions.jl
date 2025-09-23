@@ -1,6 +1,10 @@
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::T, σ_v::T) where {T<:AF}
+    # clamp broadening to prevent div by 0
+    Δλ = median(diff(xs))
+    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+
     # gaussian width depends on wavelength (constant in velocity)
-    σ(x) = x * (σ_v / c_ms)
+    σ(x) = max(x * (σ_v / c_ms), σ_floor)
     g(x, n) = exp(-((x - n) / σ(x))^2.0)
 
     # offset the kernel by the velocity
@@ -30,10 +34,14 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, σ_v:
     # allocate array for output spectrum
     ys_out = zeros(size(ys))
 
+    # clamp broadening to prevent div by 0
+    Δλ = median(diff(xs))
+    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+
     # loop over slices of atmosphere
     for t in axes(ys, 1)
         # gaussian width depends on wavelength (constant in velocity)
-        σ(x) = x * (σ_v[t] / c_ms)
+        σ(x) = max(x * (σ_v[t] / c_ms), σ_floor)
         g(x, n) = exp(-((x - n) / σ(x))^2.0)
 
         # offset the kernel by the velocity
@@ -51,7 +59,7 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, σ_v:
     return ys_out
 end
 
-function compute_padded_kernel2D!(kernel, xs, λc, σ_fac, Nλ, pad_left)
+function compute_padded_kernel2D!(kernel, xs, λc, σ_fac, Nλ, pad_left, σ_floor)
     # get thread indices
     i = (blockIdx().y-1) * blockDim().y + threadIdx().y
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
@@ -59,9 +67,9 @@ function compute_padded_kernel2D!(kernel, xs, λc, σ_fac, Nλ, pad_left)
     # loop over wavelength and atmosphere layer
     if i <= size(kernel,1) && j <= Nλ
         xj = xs[j]
-        σi = xj * σ_fac[i]
+        # σi = xj * σ_fac[i]
+        σi = max(xj * σ_fac[i], σ_floor)
         @inbounds kernel[i, j + pad_left] = exp(-((xj - λc[i]) / σi)^2.0)
-        # TODO: handle denom going to zero^^^
     end
     return nothing
 end
@@ -99,6 +107,10 @@ function convolve_wavelength_axis_gpu(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, �
     λc = λ0 .+ (μ_v ./ c_ms) .* λ0
     σ_fac = σ_v ./ c_ms 
 
+    # clamp broadening to prevent div by 0
+    Δλ = median(diff(xs))
+    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+
     # allocate on and send data to gpu
     ys_gpu = CuArray{T}(ys)
     signal_gpu = CUDA.zeros(T, Natm, L)
@@ -116,10 +128,13 @@ function convolve_wavelength_axis_gpu(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, �
     ts = (32,32)
     bs = (cld(Nλ, ts[1]), cld(Natm, ts[2]))
     @cuda threads=ts blocks=bs compute_padded_kernel2D!(kernel_gpu, xs_gpu, λc_gpu, 
-                                                        σ_fac_gpu, Nλ, pad_left)
+                                                        σ_fac_gpu, Nλ, pad_left, 
+                                                        σ_floor)
 
     # synchronize before normalizing the kernel and shifting for fft
-    kernel_gpu ./= sum(kernel_gpu, dims=2)
+    norm = CUDA.sum(kernel_gpu, dims=2)
+    replace!(norm, 0 => one(T))
+    kernel_gpu ./= norm
     kernel_gpu = ifftshift(kernel_gpu, 2)
 
     # convolution theorem
@@ -141,6 +156,10 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     copyto!(cmem.λc_gpu, λ0 .* (1 .+ μ_v ./ c_ms))
     copyto!(cmem.σ_fac_gpu, σ_v ./ c_ms)
 
+    # clamp broadening to prevent div by 0
+    Δλ = median(diff(xs))
+    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+
     # pad the signal
     ts = (32,32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
@@ -155,7 +174,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     @cuda threads=ts blocks=bs compute_padded_kernel2D!(cmem.padded_kernel_gpu,
                                                         cmem.xs_gpu, cmem.λc_gpu,
                                                         cmem.σ_fac_gpu,
-                                                        cmem.Nλ, cmem.pad_left)
+                                                        cmem.Nλ, cmem.pad_left,
+                                                        σ_floor)
 
     # normalize the kernel
     cmem.norm_buffer .= CUDA.sum(cmem.padded_kernel_gpu, dims=2)
@@ -194,6 +214,10 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     copyto!(cmem.λc_gpu, cmem.λc_vec)
     copyto!(cmem.σ_fac_gpu, cmem.σ_fac_vec)
 
+    # clamp broadening to prevent div by 0
+    Δλ = median(diff(xs))
+    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+
     # pad the signal
     ts = (32,32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
@@ -208,7 +232,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     @cuda threads=ts blocks=bs compute_padded_kernel2D!(cmem.padded_kernel_gpu,
                                                         cmem.xs_gpu, cmem.λc_gpu,
                                                         cmem.σ_fac_gpu,
-                                                        cmem.Nλ, cmem.pad_left)
+                                                        cmem.Nλ, cmem.pad_left,
+                                                        σ_floor)
 
     # normalize the kernel
     cmem.norm_buffer .= CUDA.sum(cmem.padded_kernel_gpu, dims=2)

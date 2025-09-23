@@ -119,7 +119,7 @@ Npad = 100
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # make array of vmics 
-mic_min = 0.1
+mic_min = 0.0
 vmics = range(mic_min, 8000.0 + mic_min, step=800.0)
 
 # loop over vmics
