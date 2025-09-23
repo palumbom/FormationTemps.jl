@@ -133,7 +133,7 @@ function convolve_wavelength_axis_gpu(xs::AA{T,1}, ys::AA{T,2}, Î¼_v::AA{T,1}, Ï
 
     # synchronize before normalizing the kernel and shifting for fft
     norm = CUDA.sum(kernel_gpu, dims=2)
-    replace!(norm, 0 => one(T))
+    # norm .= ifelse.(norm .== 0 .| .!isfinite.(norm), one(T), norm)
     kernel_gpu ./= norm
     kernel_gpu = ifftshift(kernel_gpu, 2)
 
