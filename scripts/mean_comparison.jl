@@ -9,6 +9,7 @@ using PyPlot, PyCall; mpl = plt.matplotlib
 # matplotlib backend
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
+# mpl.style.use("tableau-colorblind10")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
@@ -21,6 +22,9 @@ interp1d = pyimport("scipy.interpolate").interp1d
 # set colormaps
 img_cmap = "viridis"
 μ_cmap = "autumn"
+seq_cmap = "Set3"
+ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
+
 
 # alias type 
 AA = AbstractArray
@@ -141,12 +145,16 @@ for i in eachindex(specs_interest)
     specs_interest_latex[i] = L"{\rm %$(parts[1])\, %$(parts[2])\, %$part3\, \AA}"
 end
 
-# make figure objects
-fig, ax1 = plt.subplots()
+# get colors 
+cmap = plt.get_cmap(seq_cmap)
+norm = mpl.colors.Normalize(vmin=1, vmax=length(wls_interest))
+colors = cmap(norm(1:length(wls_interest)))
 
-xticks = zeros(length(idx_wls))
+# make figure objects
+fig, ax1 = plt.subplots(figsize=(6.4, 4.8) .* 1.33)
 
 # iterate over lines
+xticks = zeros(length(idx_wls))
 for i in eachindex(idx_wls)
     # isolate the lines
     buffer = 25
@@ -160,7 +168,8 @@ for i in eachindex(idx_wls)
     λs_view = view(λs_korg, idx_λs-buffer:idx_λs+buffer) .- wls[idx_wls[i]] .+ offset
     flux_view = view(flux, idx_λs-buffer:idx_λs+buffer)
     temp_view = view(form_temps_flux, idx_λs-buffer:idx_λs+buffer)
-    ax1.plot(λs_view, temp_view, zorder=0)
+    # ax1.plot(λs_view, temp_view, zorder=0, c=colors[i,:])
+    ax1.plot(λs_view, temp_view, zorder=0, c=ncolors[i])
 
     # get data for scatter
     xscatter = [λs_korg[idx_idx[i]]] .- wls[idx_wls[i]] .+ offset
@@ -174,30 +183,30 @@ ax1.set_xticklabels(specs_interest_latex, rotation=45, ha="right")
 # ax1.set_xlabel(L"{\rm Air\ Wavelength\ +\ Offset\ [\AA]}")
 ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
 fig.tight_layout()
-plt.show()
+fig.savefig(joinpath(plotdir, "line_lineup.pdf"), bbox_inches="tight")
+plt.clf(); plt.close()
 
-# plot the form temp spectra
-# plt.plot(λs_korg, flux, c="k")
-# plt.scatter(λs_korg[idx], flux[idx])
-# plt.show()
+# get views of cfuncs at indices of interest
+cfuncs_sim = view(cfunc_flux, :, idx)
+cfuncs_cum_sim = view(cum_cfunc_flux_norm, :, idx)
 
-cfuncs_sim = view(cfunc_flux, :, idx)#[:, end-3:end]
-cfuncs_cum_sim = view(cum_cfunc_flux_norm, :, idx)#[:, end-3:end]
-
+# get exponent for units
 max_val = maximum(abs.(cfuncs_sim))
 exponent = floor(Int, log10(max_val))
 
-fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(8.6, 4.8), sharex=true)
-
-ax1.plot(elav(Ts), cfuncs_sim / 10^exponent)
-ax2.plot(elav(Ts), cfuncs_cum_sim)
-
+# plot each curve
+fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(9.2, 4.8), sharex=true)
+for i in eachindex(idx_wls)
+    ax1.plot(elav(Ts), cfuncs_sim[:,i] / 10^exponent, c=ncolors[i])
+    ax2.plot(elav(Ts), cfuncs_cum_sim[:,i], c=ncolors[i], label=specs_interest_latex[i])
+end
 
 ax1.set_xlabel(L"{\rm Temperature\ [K]}")
 ax2.set_xlabel(L"{\rm Temperature\ [K]}")
 
 ax1.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
 ax2.set_ylabel(L"{\rm Normalized\ Cumulative\ Flux\ Cont.\ Fn.}")
+ax2.legend()#bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
 
 fig.subplots_adjust(wspace=0.25)
 fig.savefig(joinpath(plotdir, "mean_comparison.pdf"), bbox_inches="tight")
