@@ -151,7 +151,7 @@ norm = mpl.colors.Normalize(vmin=1, vmax=length(wls_interest))
 colors = cmap(norm(1:length(wls_interest)))
 
 # make figure objects
-fig, ax1 = plt.subplots(figsize=(6.4, 4.8) .* 1.33)
+fig, ax1 = plt.subplots(figsize=(9.2,4.8))
 
 # iterate over lines
 xticks = zeros(length(idx_wls))
@@ -206,7 +206,7 @@ ax2.set_xlabel(L"{\rm Temperature\ [K]}")
 
 ax1.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
 ax2.set_ylabel(L"{\rm Normalized\ Cumulative\ Flux\ Cont.\ Fn.}")
-ax2.legend()#bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
+ax2.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
 
 fig.subplots_adjust(wspace=0.25)
 fig.savefig(joinpath(plotdir, "mean_comparison.pdf"), bbox_inches="tight")

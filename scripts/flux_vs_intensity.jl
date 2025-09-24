@@ -74,7 +74,6 @@ idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
 idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
 
-
 # re-get values
 wls = [l.wl * 1e8 for l in linelist]
 log_gf =  [l.log_gf for l in linelist]
@@ -106,7 +105,9 @@ Ts = atm_gpu.Ts
 
 # synthesis to get the alphas
 αs = zeros(length(atm_gpu.zs), length(λs_korg))
-FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
+# FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
 # allocate on device
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
@@ -123,10 +124,14 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs))
 intensities = zeros(length(λs_korg), length(μs))
+continuum = zeros(length(λs_korg), length(μs))
 
 for i in eachindex(μs)
     cfuncs[:,:,i] .= FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
     intensities[:,i] .= dropdims(sum(view(cfuncs,:,:,i), dims=1), dims=1)
+
+    cfunc_cont = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    continuum[:,i] .= dropdims(sum(cfunc_cont, dims=1), dims=1)
 end
  
 # get disk integrated cfunc
@@ -170,30 +175,28 @@ cbar.set_label(L"\mu")
 ax1.set_xlim(first(wls) - 0.75, last(wls) + 0.75)
 ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
 
-ylims = ax1.get_ylim()
+# ax1.set_ylabel(L"I_\nu\," * offset * L"{\rm\, (erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} )}")
+ax1.set_ylabel(L"I_\nu^+(\mu)\ {\rm [10^{%$exponent_int}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}")
+fig.savefig(joinpath(plotdir, "intensity_vs_limb_angle.pdf"), bbox_inches="tight")
+plt.clf(); plt.close()
 
-# tick format 
-# function sci_notation_formatter(x, pos)
-#     if x == 0.0
-#         return "\$0\$"
-#     end
-#     exponent = floor(Int, log10(abs(x)))
-#     coeff = x / 10.0^exponent
-#     # return "\$" * @sprintf("%.1f", coeff) * "\\times 10^{$exponent}" * "\$"
-#     return "\$" * @sprintf("%.1f", coeff) * "\$"
-# end
-# formatter = mpl.ticker.FuncFormatter(PyObject(sci_notation_formatter))
-# ax1.yaxis.set_major_formatter(sci_notation_formatter)
+# plot the ratios of the intensities
+fig, ax1 = plt.subplots()
+for i in eachindex(μs)
+    i == 1 && continue
+    plt.plot(λs_korg, intensities[:,i] ./ continuum[:,i], c=colors[i,:], lw=1.75)
+end 
 
-# exponent = log10.(ax1.get_yticks())
-# fig.canvas.draw()
-# offset = ax1.yaxis.get_major_formatter().get_offset()
-# offset = replace(offset, "\\times" => "/")
-# ax1.yaxis.get_offset_text().set_visible(false)
+sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+cbar = plt.colorbar(sm, ax=ax1)
+cbar.set_label(L"\mu")
+
+ax1.set_xlim(first(wls) - 0.75, last(wls) + 0.75)
+ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
 
 # ax1.set_ylabel(L"I_\nu\," * offset * L"{\rm\, (erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} )}")
-ax1.set_ylabel(L"I_\nu^+\ {\rm [10^{%$exponent_int}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}")
-fig.savefig(joinpath(plotdir, "intensity_vs_limb_angle.pdf"), bbox_inches="tight")
+ax1.set_ylabel(L"I_\nu(\mu)\ /\ I_c(\mu)")
+fig.savefig(joinpath(plotdir, "intensity_continuum_normalized.pdf"), bbox_inches="tight")
 plt.clf(); plt.close()
 
 # now plot the contribution functions 
