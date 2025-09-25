@@ -40,6 +40,7 @@ include("convolutions.jl")
 
 # linelist + stellar model stuff
 include("linelist.jl")
+include("atmosphere.jl")
 
 # radiative transport
 include("absorption.jl")

@@ -1,39 +1,72 @@
-function calc_stellar_grid!(gprops::GridProperties, μs::CuArray{T,2},
-                            ld::CuArray{T,2}, dA::CuArray{T,2},
-                            z_rot::CuArray{T,2}, z_cbs::CuArray{T,2}) where T<:AF
+function calc_stellar_grid(ρs::T1, i::T1, A::T1, B::T1, C::T1, v0::T1, Nϕ::Int) where T1<:AF
+    # allocate on GPU
+    μs = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
+    dA = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
+    z_rot = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
+    z_cbs = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
+
+    # calculate in place and return
+    calc_stellar_grid!(ρs, i, A, B, C, v0, Nϕ, μs, dA, z_rot, z_cbs)
+    return μs, dA, z_rot, z_cbs
+end
+
+function calc_stellar_grid!(ρs::T1, inclination::T1, A::T1, B::T1, C::T1, v0::T1, Nϕ::Int,
+                            μs::CuArray{T2,2}, dA::CuArray{T2,2},
+                            z_rot::CuArray{T2,2}, z_cbs::CuArray{T2,2}) where {T1<:AF, T2<:AF}
     # get precision from GPU allocs
     precision = eltype(μs)
 
     # convert scalars from disk params to desired precision
-    ρs = convert(precision, gprops.ρs)
-    A = convert(precision, gprops.A)
-    B = convert(precision, gprops.B)
-    C = convert(precision, gprops.C)
-    v0 = convert(precision, gprops.v0)
+    ρs = convert(precision, ρs)
+    A = convert(precision, A)
+    B = convert(precision, B)
+    C = convert(precision, C)
+    v0 = convert(precision, v0)
 
-    # get size of sub-tiled grid
-    Nϕ = gprops.N
-    Nθ_max = maximum(gprops.Nθ)
+    # get latitude grid
+    ϕe = range(deg2rad(-90.0), deg2rad(90.0), length=Nϕ+1)
+    ϕc = get_grid_centers(ϕe)
+
+    # make longitude grid
+    Nθ = ceil.(Int, 2π .* cos.(ϕc) ./ step(ϕe))
+    θe = zeros(Nϕ+1, maximum(Nθ)+1)
+    θc = zeros(Nϕ, maximum(Nθ))
+    for i in eachindex(Nθ)
+        # initialize edges
+        edges = collect(range(0.0, 2π, length=Nθ[i]+1))
+
+        # assign grid center and edges values
+        θc[i, 1:Nθ[i]] .= get_grid_centers(edges)
+        θe[i, 1:Nθ[i]+1] .= collect(edges)
+    end
+    Nθ_max = maximum(Nθ)
+
+    # create rotation matrix for inclination
+    @assert -90.0 <= inclination <= 90.0
+    iₛ = deg2rad(90.0 - inclination)
+    R_x = [1.0 0.0 0.0;
+           0.0 cos(iₛ) -sin(iₛ);
+           0.0 sin(iₛ) cos(iₛ)]
 
     # copy data to GPU
     @cusync begin
         # get observer vector and rotation matrix
-        O⃗ = CuArray{precision}(gprops.O⃗)
-        Nθ = CuArray{Int32}(gprops.Nθ)
-        R_x = CuArray{precision}(gprops.R_x)
+        O⃗ = CuArray{precision}([0.0, 0.0, 1e6]) # CuArray{precision}(gprops.O⃗)
+        Nθ = CuArray{Int32}(Nθ)
+        R_x = CuArray{precision}(R_x)
     end
 
     # compute geometric parameters, average over subtiles
     threads1 = 512
     blocks1 = cld(Nϕ * Nθ_max, prod(threads1))
-    @cusync @captured @cuda threads=threads1 blocks=blocks1 calc_stellar_grid!(μs, ld, dA, z_rot, Nϕ,
+    @cusync @captured @cuda threads=threads1 blocks=blocks1 calc_stellar_grid!(μs, dA, z_rot, Nϕ,
                                                                                Nθ_max, Nθ, R_x, O⃗,
-                                                                               ρs, A, B, C, v0, u1, u2)
+                                                                               ρs, A, B, C, v0)
 
     return nothing
 end
 
-function calc_stellar_grid!(μs, ld, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, A, B, C, v0, u1, u2)
+function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, A, B, C, v0)
     # get indices from GPU blocks + threads
     idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
     sdx = gridDim().x * blockDim().x
@@ -85,7 +118,7 @@ function calc_stellar_grid!(μs, ld, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρ
         f /= def_norm
 
         # set magnitude by differential rotation
-        rp = 2π * ρs * CUDA.cos(ϕc) / GRASS.rotation_period_gpu(ϕc, A, B, C)
+        rp = 2π * ρs * CUDA.cos(ϕc) / rotation_period(ϕc, A, B, C)
 
         # get in units of c
         rp /= c_Rsun_day
@@ -96,20 +129,20 @@ function calc_stellar_grid!(μs, ld, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρ
         f *= rp
 
         # rotate xyz by inclination
-        x, y, z = rotate_vector_gpu(x, y, z, R_x)
+        x, y, z = rotate_vector(x, y, z, R_x)
 
         # rotate xyz by inclination and calculate mu
-        μ_tile = calc_mu_gpu(x, y, z, O⃗)
+        μ_tile = calc_mu(x, y, z, O⃗)
         if μ_tile <= 0.0
             continue
         end
         @inbounds μs[m,n] = μ_tile
 
         # get projected area element
-        @inbounds dA[m,n] = calc_dA_gpu(ρs, ϕc, dϕ, dθ) * μ_tile
+        @inbounds dA[m,n] = calc_dA(ρs, ϕc, dϕ, dθ) * μ_tile
 
         # rotate the velocity vectors by inclination
-        d, e, f = rotate_vector_gpu(d, e, f, R_x)
+        d, e, f = rotate_vector(d, e, f, R_x)
 
         # get vector pointing from observer to surface patch
         a = x - O⃗[1]
