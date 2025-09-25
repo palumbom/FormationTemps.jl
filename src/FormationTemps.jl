@@ -46,6 +46,10 @@ include("absorption.jl")
 include("contribution.jl")
 include("tau.jl")
 
+# disk integration
+include("geometry.jl")
+include("disk_calculations.jl")
+
 # convenient high-level functions
 include("convenience.jl")
 
