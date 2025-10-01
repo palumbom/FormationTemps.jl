@@ -31,6 +31,6 @@ df = load(mfile)
 
 # parse out 
 flux_m = df["flux"]
-temp_k = df["form_temps_flux"]
-wave_k = df["λs_korg"]
-cfunc_k = df["cfunc_flux"]
+temp_m = df["form_temps_flux"]
+wave_m = df["λs_korg"]
+cfunc_m = df["cfunc_flux"]
