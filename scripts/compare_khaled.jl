@@ -30,7 +30,24 @@ mfile = joinpath(FT.datdir, "solar_temps.jld2")
 df = load(mfile)
 
 # parse out 
-flux_m = df["flux"]
-temp_m = df["form_temps_flux"]
-wave_m = df["λs_korg"]
-cfunc_m = df["cfunc_flux"]
+λs_korg = df["λs_korg"]
+zs = df["zs"]
+Ts = df["Ts"]
+τ_500 = df["τ_500"]
+μs = df["μs"]
+intensities = df["intensities"]
+cfuncs_int = df["cfuncs_int"]
+continuum_int = df["continuum_int"]
+cfuncs_int_cont = df["cfuncs_int_cont"]
+flux = df["flux"]
+cfunc_flux = df["cfunc_flux"]
+continuum_flux = df["continuum_flux"]
+cfunc_flux_cont = df["cfunc_flux_cont"]
+form_temps_intensity = df["form_temps_intensity"]
+form_temps_flux = df["form_temps_flux"]
+
+# compare 
+plt.plot(wave_k, flux_k)
+plt.plot(λs_korg, flux ./ continuum_flux)
+plt.ylim(0.0, 1.1)
+plt.show()

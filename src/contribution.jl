@@ -114,10 +114,13 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
 
             # Evaluate integrand: B(T) * E2(τ)
-            f1 = blackbody_gpu(T1, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp1) # SpecialFunctions.expint(2, τp1)
-            f2 = blackbody_gpu(T2, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp2) # SpecialFunctions.expint(2, τp2)
+            f1 = blackbody_gpu(T1, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp1)
+            # f1 = blackbody_gpu(T1, λ_cm) * SpecialFunctions.expint(2, τp1)
+            f2 = blackbody_gpu(T2, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp2)
+            # f2 = blackbody_gpu(T2, λ_cm) * SpecialFunctions.expint(2, τp2)
 
-            @inbounds cfunc[k, j] = 2π * (f1 + f2) * (Δτ * 0.5)
+            # convert to per angstrom
+            @inbounds cfunc[k, j] = (f1 + f2) * (Δτ * 0.5) * 1e-8
         end
     end
     return nothing
@@ -197,7 +200,8 @@ function calc_flux_cfunc_cpu(Ts::AA{T,1}, λs::AA{T,1}, τs::AA{T,2}) where {T<:
             f2 = Korg.blackbody(T2, λ_cm) * SpecialFunctions.expint(2, τp2)
 
             # two-point Gauss weight = Δτ/2
-            cfunc[k, j] = 2π * (f1 + f2) * (Δτ * 0.5)
+            # convert to per angstrom 
+            cfunc[k, j] = (f1 + f2) * (Δτ * 0.5) * 1e-8
         end
     end
     return cfunc

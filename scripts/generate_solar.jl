@@ -14,24 +14,10 @@ mpl.style.use(FT.moddir * "fig.mplstyle")
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
-
-# python interpolation for matplotlib stuff
-interp1d = pyimport("scipy.interpolate").interp1d
-
-# set colormaps
-img_cmap = "viridis"
-μ_cmap = "autumn"
-seq_cmap = "Set3"
-ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
-
-# alias type 
-AA = AbstractArray
-CA = CuArray
-AF = AbstractFloat
+                               \\usepackage{mathrsfs}")
 
 # get the linelist
-linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
+linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[5500:5505]
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 
@@ -45,6 +31,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 λs_korg = range(3500, 7000.0, step=0.01)
+λs_korg = range(first(wls) - 0.5, last(wls) + 0.5, step=0.01)
 
 # get some abundances
 A_X = Korg.asplund_2020_solar_abundances
@@ -129,11 +116,31 @@ for i in eachindex(λs_korg)
     end
 end
 
+# write it out 
+zs = Array(zs)
+Ts = Array(Ts)
+jldsave(joinpath(FT.datdir, "solar_temps.jld2"); 
+        λs_korg, zs, Ts, τ_500, μs,
+        intensities, cfuncs_int, 
+        continuum_int, cfuncs_int_cont,
+        flux, cfunc_flux, 
+        continuum_flux, cfunc_flux_cont,
+        form_temps_intensity, form_temps_flux)
 
 
-# # write it out 
-# zs = Array(zs)
-# Ts = Array(Ts)
-# jldsave(joinpath(FT.datdir, "solar_temps.jld2"); 
-#         λs_korg, zs, Ts, τ_500, flux, 
-#         cfunc_flux, form_temps_flux)
+# sanity check against Korg
+#= 
+korg_res = Korg.synthesize(marcs_atm, linelist, A_X, λs_korg, vmic=1.2, tau_scheme="bezier", mu_values=μs)
+korg_flux = korg_res.flux
+korg_cntm = korg_res.cntm
+korg_mu = korg_res.mu_grid
+korg_int = collect(korg_res.intensity')
+
+plt.plot(λs_korg, intensities[:,end])
+plt.plot(λs_korg, korg_int[:,end])
+plt.show()
+
+plt.plot(λs_korg, flux ./ continuum_flux)
+plt.plot(λs_korg, korg_flux ./ korg_cntm)
+plt.show()
+ =#
