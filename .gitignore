@@ -16,3 +16,4 @@ uv.lock
 *.png
 *.python-version
 *.venv
+*.npz

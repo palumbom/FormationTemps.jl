@@ -35,7 +35,7 @@ AF = AbstractFloat
 plotdir = joinpath(pwd(), "figures")
 !isdir(plotdir) && mkdir(plotdir)
 
-#= # get the linelist
+# get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist][17500:end]
 specs = [string(l.species) for l in linelist]
@@ -95,7 +95,7 @@ for i in eachindex(λs_korg)
     local xs = view(cum_cfunc_flux_norm, :, i)
     local itp = FT.linear_interp(xs, elav(Ts))
     form_temps_flux[i] = itp(0.5)
-end =#
+end
 
 # get indices with similar formation temperatures
 ftemp = 5000.0
