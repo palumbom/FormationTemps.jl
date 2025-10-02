@@ -240,9 +240,13 @@ for j in eachindex(ftemps)
         cfuncs_sim = cfunc_list[i][:, this_idx] # view(cfunc_flux, :, idx)
         cfuncs_cum_sim = cfunc_cum_list[i][:, this_idx] # view(cum_cfunc_flux_norm, :, idx)
 
+        # get the mean 
+        # mean_to_plot = sum(cfuncs_sim .* elav(Ts)) ./ sum(cfuncs_sim)
+
         ax1.plot(elav(Ts), cfuncs_sim / 10^exponent, c=ncolors[i])
         ax2.plot(elav(Ts), cfuncs_cum_sim, c=ncolors[i], label=specs_interest_latex[i])
         ax1.axvline(ftemps[j], ls="--", c="k", alpha=0.9)
+        # ax1.axvline(mean_to_plot, ls=":", c="k", alpha=0.9)
         ax2.axvline(ftemps[j], ls="--", c="k", alpha=0.9)
     end
 
