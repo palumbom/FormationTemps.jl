@@ -39,15 +39,16 @@ temps = Korg.get_temps(atm_korg)
 
 # set the velocity broadening and flow
 val = 1.2e3
-σ_v = fill(val, length(zs))
-μ_v = fill(0.0, length(zs))
+σ_v = CuArray{Float64}(fill(val, length(zs)))
+μ_v = CuArray{Float64}(fill(0.0, length(zs)))
 
 # set disk positions
 μ_vals = 0.2:0.05:1.0
 μ_idx = 1
 
 # do canconical synthesis
-sol = synthesize(atm_korg, linelist, A_X, λs_korg; vmic=val/1e3, tau_scheme="bezier", mu_values=μ_vals);
+sol = synthesize(atm_korg, linelist, A_X, λs_korg; vmic=val/1e3, tau_scheme="bezier", mu_values=μ_vals, hydrogen_lines=false);
+αs_korg = sol.alpha
 
 # get the absorption coeffs
 αs = zeros(length(atm_gpu.zs), length(λs_korg))
@@ -60,6 +61,8 @@ Natm = length(zs)
 Npad = 100
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 αs_gpu = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, μ_v, σ_v)
+
+# 100 .* (Array(αs_gpu) .- αs_korg) ./ αs_korg
 
 # TODO bad things happen if I reuse cmem?
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
@@ -96,7 +99,7 @@ ts = (32,32)
 bs = (cld(length(λs_korg), ts[1]), cld(size(αs,1), ts[2]))
 @cuda threads=ts blocks=bs FT.calc_flux_cfunc!(Ts_gpu, λs_gpu, τs_gpu, cfunc_flux_gpu)
 CUDA.synchronize()
-flux_gpu = vec(Array(CUDA.sum(cfunc_flux_gpu, dims=1)))
+flux_gpu = 2π .* vec(Array(CUDA.sum(cfunc_flux_gpu, dims=1)))
 
 # get continuum flux
 τs_gpu .= 0.0
@@ -108,8 +111,7 @@ ts = (32,32)
 bs = (cld(length(λs_korg), ts[1]), cld(size(αs,1), ts[2]))
 @cuda threads=ts blocks=bs FT.calc_flux_cfunc!(Ts_gpu, λs_gpu, τs_gpu, cfunc_flux_cont_gpu)
 CUDA.synchronize()
-flux_cont_gpu = vec(Array(CUDA.sum(cfunc_flux_cont_gpu, dims=1)))
-
+flux_cont_gpu = 2π .* vec(Array(CUDA.sum(cfunc_flux_cont_gpu, dims=1)))
 
 # plot the results
 grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
@@ -124,6 +126,8 @@ ax2.set_ylabel("Percent Error")
 ax1.set_xticklabels([])
 ax1.set_title("mu = " * string(sol.mu_grid[μ_idx][1]))
 ax1.legend()
+ax1.set_xlim(λ0 - 0.25, λ0 + 0.25)
+ax2.set_xlim(λ0 - 0.25, λ0 + 0.25)
 plt.show()
 
 grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
@@ -139,6 +143,6 @@ ax1.set_ylabel("Emergent Flux (idk units lol)")
 ax2.set_ylabel("Percent Error")
 ax1.set_xticklabels([])
 ax1.legend()
+ax1.set_xlim(λ0 - 0.25, λ0 + 0.25)
+ax2.set_xlim(λ0 - 0.25, λ0 + 0.25)
 plt.show()
-
-println()

@@ -17,7 +17,7 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
 # get the linelist
-linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[5500:5505]
+linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[1:5000]
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 
@@ -30,8 +30,9 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-λs_korg = range(3500, 7000.0, step=0.01)
+# λs_korg = range(3500, 7000.0, step=0.01)
 λs_korg = range(first(wls) - 0.5, last(wls) + 0.5, step=0.01)
+println(length(λs_korg))
 
 # get some abundances
 A_X = Korg.asplund_2020_solar_abundances
@@ -129,18 +130,20 @@ jldsave(joinpath(FT.datdir, "solar_temps.jld2");
 
 
 # sanity check against Korg
-#= 
-korg_res = Korg.synthesize(marcs_atm, linelist, A_X, λs_korg, vmic=1.2, tau_scheme="bezier", mu_values=μs)
+korg_res = Korg.synthesize(marcs_atm, linelist, A_X, λs_korg, 
+                           vmic=0.0,  tau_scheme="bezier", 
+                           mu_values=μs, hydrogen_lines=false)
 korg_flux = korg_res.flux
 korg_cntm = korg_res.cntm
 korg_mu = korg_res.mu_grid
 korg_int = collect(korg_res.intensity')
 
-plt.plot(λs_korg, intensities[:,end])
-plt.plot(λs_korg, korg_int[:,end])
-plt.show()
 
-plt.plot(λs_korg, flux ./ continuum_flux)
-plt.plot(λs_korg, korg_flux ./ korg_cntm)
+fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(12.2, 4.8))
+ax1.plot(λs_korg, intensities[:,end])
+ax1.plot(λs_korg, korg_int[:,end])
+
+ax2.plot(λs_korg, flux ./ continuum_flux, label="me")
+ax2.plot(λs_korg, korg_flux ./ korg_cntm, label="Korg")
+ax2.legend()
 plt.show()
- =#
