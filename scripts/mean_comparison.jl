@@ -138,7 +138,9 @@ end
 # get views of the lines
 wavs_list = []
 flux_list = [] 
-temp_list = [] 
+temp_list = []
+cfunc_list = []
+cfunc_cum_list = [] 
 
 buffer = ceil(Int, 0.25 / δλ)
 offset_scale = 0.65
@@ -153,11 +155,15 @@ for i in eachindex(wls)
     λs_view = view(λs_korg, idx_λs-buffer:idx_λs+buffer) .- wls[i] .+ offset
     flux_view = view(flux, idx_λs-buffer:idx_λs+buffer)
     temp_view = view(form_temps_flux, idx_λs-buffer:idx_λs+buffer)
+    cfunc_view = view(cfunc_flux, :, idx_λs-buffer:idx_λs+buffer)
+    cfunc_cum_view = view(cum_cfunc_flux_norm, :, idx_λs-buffer:idx_λs+buffer)
 
     # push 
     push!(wavs_list, collect(λs_view))
     push!(flux_list, collect(flux_view))
     push!(temp_list, collect(temp_view))
+    push!(cfunc_list, collect(cfunc_view))
+    push!(cfunc_cum_list, collect(cfunc_cum_view))
 end
 
 # find temperatures to loop over
@@ -212,20 +218,28 @@ for j in eachindex(ftemps)
     fig.savefig(joinpath(framedir, "line_lineup_$j.pdf"), bbox_inches="tight")
     plt.clf(); plt.close()
 
-    # # get views of cfuncs at indices of interest
-    # cfuncs_sim = view(cfunc_flux, :, idx)
-    # cfuncs_cum_sim = view(cum_cfunc_flux_norm, :, idx)
+    # now do each contribution slice
+    fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(9.2, 4.8), sharex=true)
 
-    # # get exponent for units
-    # max_val = maximum(abs.(cfuncs_sim))
-    # exponent = floor(Int, log10(max_val))
+    for i in eachindex(idx_wls)
+        # get the index of the minimum
+        idx_min = argmin(temp_list[i])
 
-    # # plot each curve
-    # fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(9.2, 4.8), sharex=true)
-    # for i in eachindex(idx_wls)
-    #     ax1.plot(elav(Ts), cfuncs_sim[:,i] / 10^exponent, c=ncolors[i])
-    #     ax2.plot(elav(Ts), cfuncs_cum_sim[:,i], c=ncolors[i], label=specs_interest_latex[i])
-    # end
+        # get the index of the temperature for each line
+        tdiffs = abs.(temp_list[i][idx_min+1:end] .- ftemps[j])
+        this_idx = argmin(tdiffs) .+ idx_min
+
+        # get views of cfuncs at indices of interest
+        cfuncs_sim = view(cfunc_flux, :, idx)
+        cfuncs_cum_sim = view(cum_cfunc_flux_norm, :, idx)
+
+        # get exponent for units
+        max_val = maximum(abs.(cfuncs_sim))
+        exponent = floor(Int, log10(max_val))
+
+        ax1.plot(elav(Ts), cfuncs_sim[:,i] / 10^exponent, c=ncolors[i])
+        ax2.plot(elav(Ts), cfuncs_cum_sim[:,i], c=ncolors[i], label=specs_interest_latex[i])
+    end
 
     # ax1.set_xlabel(L"{\rm Temperature\ [K]}")
     # ax2.set_xlabel(L"{\rm Temperature\ [K]}")
