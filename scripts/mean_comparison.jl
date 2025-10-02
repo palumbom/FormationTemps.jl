@@ -96,23 +96,24 @@ function synth_given_linelist(linelist; δλ=0.005)
         local itp = FT.linear_interp(xs, elav(Ts))
         form_temps_flux[i] = itp(0.5)
     end
-    return λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux
+    return λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux, Ts
 end
 
-#= # get the linelist
+# get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist][16000:end]
 wls = [l.wl * 1e8 for l in linelist]
 species = [l.species for l in linelist]
 
 # do the synthesis
-λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux = synth_given_linelist(linelist)
+λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux, Ts = synth_given_linelist(linelist)
 
 # get indices with similar formation temperatures
 ftemp = 4750.0
 atol = 0.5e1
-idx = findall(isapprox.(ftemp, form_temps_flux, atol=atol))
-idx = idx[1:min(10, length(idx))]
+all_idx = findall(isapprox.(ftemp, form_temps_flux, atol=atol))
+# idx = all_idx[sort(rand(1:length(all_idx), 10))]
+idx = all_idx[1:min(10, length(all_idx))]
 
 # find the lines they are nearest
 λs_interest = view(λs_korg, idx)
@@ -120,11 +121,11 @@ idx_wls = [FT.searchsortednearest(wls, i) for i in λs_interest]
 wls_interest = wls[idx_wls]
 
 # redo the synthesis just with these lines on a finer grid
-δλ = 0.001
+δλ = 0.0005
 linelist = linelist[idx_wls]
-λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux = synth_given_linelist(linelist, δλ=δλ)
+λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux, Ts = synth_given_linelist(linelist, δλ=δλ)
 wls = [l.wl * 1e8 for l in linelist]
-species =  [l.species for l in linelist] =#
+species =  [l.species for l in linelist]
 
 # format species name
 specs_interest = string.(species)
@@ -142,7 +143,7 @@ temp_list = []
 cfunc_list = []
 cfunc_cum_list = [] 
 
-buffer = ceil(Int, 0.25 / δλ)
+buffer = ceil(Int, 0.25 / mean(diff(λs_korg)))
 offset_scale = 0.65
 for i in eachindex(wls)
     # isolate the lines
@@ -167,9 +168,9 @@ for i in eachindex(wls)
 end
 
 # find temperatures to loop over
-min_temp = 5000.0 # maximum(minimum.(temp_list))
-max_temp = 6000.0 # minimum(maximum.(temp_list))
-ftemps = range(ceil(min_temp+1), floor(max_temp-1), length=5)
+min_temp = maximum(minimum.(temp_list))
+max_temp = minimum(maximum.(temp_list))
+ftemps = range(ceil(min_temp+1), floor(max_temp-1), length=50)
 
 # get colors 
 cmap = plt.get_cmap(seq_cmap)
@@ -215,11 +216,17 @@ for j in eachindex(ftemps)
     # ax1.set_xlabel(L"{\rm Air\ Wavelength\ +\ Offset\ [\AA]}")
     ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
     fig.tight_layout()
-    fig.savefig(joinpath(framedir, "line_lineup_$j.pdf"), bbox_inches="tight")
+    fig.savefig(joinpath(framedir, "line_lineup_$j.png"), bbox_inches="tight")
     plt.clf(); plt.close()
 
     # now do each contribution slice
     fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(9.2, 4.8), sharex=true)
+
+    # get exponent for units
+    max_val = maximum(abs.(vcat(cfunc_list...)))
+    exponent = floor(Int, log10(max_val))
+    the_ymin = 0.0
+    the_ymax = max_val / 10^exponent + 0.5 
 
     for i in eachindex(idx_wls)
         # get the index of the minimum
@@ -230,25 +237,25 @@ for j in eachindex(ftemps)
         this_idx = argmin(tdiffs) .+ idx_min
 
         # get views of cfuncs at indices of interest
-        cfuncs_sim = view(cfunc_flux, :, idx)
-        cfuncs_cum_sim = view(cum_cfunc_flux_norm, :, idx)
+        cfuncs_sim = cfunc_list[i][:, this_idx] # view(cfunc_flux, :, idx)
+        cfuncs_cum_sim = cfunc_cum_list[i][:, this_idx] # view(cum_cfunc_flux_norm, :, idx)
 
-        # get exponent for units
-        max_val = maximum(abs.(cfuncs_sim))
-        exponent = floor(Int, log10(max_val))
-
-        ax1.plot(elav(Ts), cfuncs_sim[:,i] / 10^exponent, c=ncolors[i])
-        ax2.plot(elav(Ts), cfuncs_cum_sim[:,i], c=ncolors[i], label=specs_interest_latex[i])
+        ax1.plot(elav(Ts), cfuncs_sim / 10^exponent, c=ncolors[i])
+        ax2.plot(elav(Ts), cfuncs_cum_sim, c=ncolors[i], label=specs_interest_latex[i])
+        ax1.axvline(ftemps[j], ls="--", c="k", alpha=0.9)
+        ax2.axvline(ftemps[j], ls="--", c="k", alpha=0.9)
     end
 
-    # ax1.set_xlabel(L"{\rm Temperature\ [K]}")
-    # ax2.set_xlabel(L"{\rm Temperature\ [K]}")
+    ax1.set_xlabel(L"{\rm Temperature\ [K]}")
+    ax2.set_xlabel(L"{\rm Temperature\ [K]}")
 
-    # ax1.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
-    # ax2.set_ylabel(L"{\rm Normalized\ Cumulative\ Flux\ Cont.\ Fn.}")
-    # ax2.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
+    ax1.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
+    ax2.set_ylabel(L"{\rm Normalized\ Cumulative\ Flux\ Cont.\ Fn.}")
+    ax2.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
 
-    # fig.subplots_adjust(wspace=0.25)
-    # fig.savefig(joinpath(plotdir, "mean_comparison.pdf"), bbox_inches="tight")
-    # plt.clf(); plt.close()
+    ax1.set_ylim(the_ymin, the_ymax)
+
+    fig.subplots_adjust(wspace=0.25)
+    fig.savefig(joinpath(framedir, "cont_comparison_$j.png"), bbox_inches="tight")
+    plt.clf(); plt.close()
 end
