@@ -94,8 +94,8 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get the nominal answer
-cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-flux = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
+cfunc_flux = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
+flux = dropdims(sum(cfunc_flux, dims=1), dims=1)
 
 # get disk stuff 
 ρstar = 1.0
@@ -104,7 +104,7 @@ A = 1.0
 B = 0.0
 C = 0.0
 v0 = 2000.0
-Nϕ = 64
+Nϕ = 32
 μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
 # flatten, move to cpu
@@ -121,10 +121,10 @@ flux_test = zeros(length(λs_korg))
 for i in eachindex(μs_cpu)
     # μ_v .= z_rot_cpu[i] .* FT.c_ms
 
-    int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-    ints[:, i] .= sum(int_i, dims=1)'
+    cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+    ints[:, i] .= sum(cfunc_int_i, dims=1)'
 
-    cfuncs_int .+= int_i .* dA_cpu[i]
+    cfuncs_int .+= cfunc_int_i .* dA_cpu[i]
     flux_test .+= ints[:,i] .* dA_cpu[i]
 end
 
@@ -134,6 +134,6 @@ flux_test .*= 1e-8 .* π
 @show extrema(flux_test ./ flux)
 
 # integrate the cfuncs 
-cfunc_flux_test = 1e-8 .* cfuncs_int ./ sum(dA_cpu) 
+cfunc_flux_test = π .* 1e-8 .* cfuncs_int ./ sum(dA_cpu) 
 @show extrema(cfunc_flux_test ./ cfunc_flux)
 println()
