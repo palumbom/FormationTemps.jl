@@ -54,14 +54,14 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-λs_korg = range(first(wls) - 5.0, last(wls) + 5.0, step=0.005)
+λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=0.01)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
 A_X = Korg.asplund_2020_solar_abundances
 
 # get the atmosphere
-marcs_atm = FT.get_marcs_atm(5777.0, 4.44, A_X, n_layers=168 * 3)
+marcs_atm = FT.get_marcs_atm(5777.0, 4.44, A_X, n_layers=56)
 τ_500 = Korg.get_tau_refs(marcs_atm)
 zs = Korg.get_zs(marcs_atm)
 Ts = Korg.get_temps(marcs_atm)
@@ -86,8 +86,16 @@ Natm = size(αs, 1)
 Npad = 100
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
+# allocate on device
+gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
+
+# velocities
+μ_v = CUDA.zeros(Float64, length(zs))
+σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+
 # get the nominal answer
 cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
+flux = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
 
 # get disk stuff 
 ρstar = 1.0
@@ -96,28 +104,36 @@ A = 1.0
 B = 0.0
 C = 0.0
 v0 = 2000.0
-Nϕ = 250
+Nϕ = 64
 μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
-# velocities
-μ_v = CUDA.zeros(Float64, length(zs))
-σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-
-# loop over μs 
-idx = findall(x -> .!iszero(x), Array(μs))
+# flatten, move to cpu
+idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
 μs_cpu = Array(μs)[idx]
 dA_cpu = Array(dA)[idx]
 z_rot_cpu = Array(z_rot)[idx]
-# cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs_cpu))
-cfuncs = zeros(length(zs)-1, length(λs_korg))
+
+# allocate for output
+cfuncs_int = zeros(length(zs)-1, length(λs_korg))
+ints = zeros(length(λs_korg), length(μs))
+flux_test = zeros(length(λs_korg))
 
 for i in eachindex(μs_cpu)
     # μ_v .= z_rot_cpu[i] .* FT.c_ms
-    # cfuncs[:,:,i] .= FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-    # cfuncs[:,:,i] .*= μs_cpu[i] .* dA_cpu[i]
-    cfuncs .+= (FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v) .*  μs_cpu[i] .* dA_cpu[i])
+
+    int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+    ints[:, i] .= sum(int_i, dims=1)'
+
+    cfuncs_int .+= int_i .* dA_cpu[i]
+    flux_test .+= ints[:,i] .* dA_cpu[i]
 end
 
+# test the flux
+flux_test ./= sum(dA_cpu) #  .* sqrt(2)
+flux_test .*= 1e-8 .* π
+@show extrema(flux_test ./ flux)
+
 # integrate the cfuncs 
-# cfunc_test = sum(cfuncs, dims=3)
-cfunc_test = 2π .* cfuncs ./ sum(dA_cpu .* μs_cpu)
+cfunc_flux_test = 1e-8 .* cfuncs_int ./ sum(dA_cpu) 
+@show extrema(cfunc_flux_test ./ cfunc_flux)
+println()
