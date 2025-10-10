@@ -114,24 +114,25 @@ for i in eachindex(λs_korg)
 end
 
 # set equatorial velocities 
-vsinis = range(0.00, 10_000, step=5_000)
-vmacs = range(0.0, 10_000, step=5_000)
+vsinis = range(0.00, 25_000, step=5_000)
+vmacs = range(0.0, 5_000, step=1_000)
 
 vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
 
 # set up a figure
 # fig1, axs1 = plt.subplots(nrows=length(vsinis), ncols=length(vmacs), sharex=true, sharey=true)
-fig, ax1 = plt.subplots(figsize=(8,8))
+fig, ax1 = plt.subplots(figsize=(12,12))
 ax1.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}")
 ax1.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}")
 ax1.set_xticks(vsinis_kms)
 ax1.set_yticks(vmacs_kms)
 ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/2, last(vsinis_kms) + step(vsinis_kms)/2)
 ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/2, last(vmacs_kms) + step(vmacs_kms)/2)
+# ax1.grid(false)
 
-wstr = "100%"
-hstr = "100%"
+wstr = "150%"
+hstr = "150%"
 
 mtrans = pyimport("matplotlib.transforms")
 sx = 0.1*(maximum(vsinis ./ 1000) - minimum(vsinis ./ 1000))
@@ -148,7 +149,7 @@ for k in eachindex(vsinis)
     B = 0.0
     C = 0.0
     v0 = vsinis[k]
-    Nϕ = 16
+    Nϕ = 64
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
     # flatten, move to cpu
@@ -163,9 +164,6 @@ for k in eachindex(vsinis)
 
     # loop over macro
     for j in eachindex(vmacs)
-        @show j
-        println()
-
         # allocate for output
         ints = zeros(length(λs_korg), length(μs))
         flux_rotating = zeros(length(λs_korg))
