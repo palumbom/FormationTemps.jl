@@ -54,7 +54,8 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=0.01)
+buffer = 0.5
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.01)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -77,7 +78,6 @@ Ts = atm_gpu.Ts
 # synthesis to get the alphas
 αs = zeros(length(atm_gpu.zs), length(λs_korg))
 αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-# FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
 # allocate memory for convolutions
@@ -94,17 +94,17 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get the nominal answer
-cfunc_flux = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-flux = dropdims(sum(cfunc_flux, dims=1), dims=1)
+cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
+flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
 
 # get disk stuff 
 ρstar = 1.0
 istar = 90.0
-A = 1.0
+A = 14.48
 B = 0.0
 C = 0.0
 v0 = 2000.0
-Nϕ = 32
+Nϕ = 128
 μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
 # flatten, move to cpu
@@ -114,26 +114,59 @@ dA_cpu = Array(dA)[idx]
 z_rot_cpu = Array(z_rot)[idx]
 
 # allocate for output
-cfuncs_int = zeros(length(zs)-1, length(λs_korg))
 ints = zeros(length(λs_korg), length(μs))
-flux_test = zeros(length(λs_korg))
+flux_rotating = zeros(length(λs_korg))
+cfunc_flux_rotating = zeros(length(zs)-1, length(λs_korg))
 
 for i in eachindex(μs_cpu)
-    # μ_v .= z_rot_cpu[i] .* FT.c_ms
+    μ_v .= z_rot_cpu[i] .* FT.c_ms
 
     cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
     ints[:, i] .= sum(cfunc_int_i, dims=1)'
 
-    cfuncs_int .+= cfunc_int_i .* dA_cpu[i]
-    flux_test .+= ints[:,i] .* dA_cpu[i]
+    flux_rotating .+= ints[:,i] .* dA_cpu[i]
+    cfunc_flux_rotating .+= cfunc_int_i .* dA_cpu[i]
 end
 
-# test the flux
-flux_test ./= sum(dA_cpu) #  .* sqrt(2)
-flux_test .*= 1e-8 .* π
-@show extrema(flux_test ./ flux)
+# get the flux and cfucn
+flux_rotating .*= 1e-8
+cfunc_flux_rotating .*= 1e-8
 
-# integrate the cfuncs 
-cfunc_flux_test = π .* 1e-8 .* cfuncs_int ./ sum(dA_cpu) 
-@show extrema(cfunc_flux_test ./ cfunc_flux)
-println()
+# now get cumulative cfuncs 
+cum_cfunc_flux_stationary = cumsum(cfunc_flux_stationary, dims=1)
+cum_cfunc_flux_stationary ./= maximum(cum_cfunc_flux_stationary, dims=1)
+cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)
+cum_cfunc_flux_rotating ./= maximum(cum_cfunc_flux_rotating, dims=1)
+
+# loop over wavelength
+form_temp_stationary = zeros(length(λs_korg))
+form_temp_rotating = zeros(length(λs_korg))
+for i in eachindex(λs_korg)
+    xs = view(cum_cfunc_flux_stationary, :, i)
+    itp = FT.linear_interp(xs, elav(Ts))
+    form_temp_stationary[i] = itp(0.5)
+
+    xs = view(cum_cfunc_flux_rotating, :, i)
+    itp = FT.linear_interp(xs, elav(Ts))
+    form_temp_rotating[i] = itp(0.5)
+end
+
+# overplot the flux
+fig, ax1 = plt.subplots()
+ax1.plot(λs_korg, flux_stationary, c="k", ls="--", label="Stationary")
+ax1.plot(λs_korg, flux_rotating, c="tab:blue", label="Solid Body Rotation")
+ax1.set_xlabel("Wavelength")
+ax1.set_ylabel("Flux")
+ax1.legend()
+fig.savefig("figures/flux_rotation.pdf", bbox_inches="tight")
+plt.clf(); plt.close();
+
+# overplot the temperature
+fig, ax1 = plt.subplots()
+ax1.plot(λs_korg, form_temp_stationary, c="k", ls="--", label="Stationary")
+ax1.plot(λs_korg, form_temp_rotating, c="tab:blue", label="Solid Body Rotation")
+ax1.set_xlabel("Wavelength")
+ax1.set_ylabel("Formation Temperature")
+ax1.legend()
+fig.savefig("figures/temp_rotation.pdf", bbox_inches="tight")
+plt.clf(); plt.close();

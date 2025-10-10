@@ -2,7 +2,7 @@ function calc_intensity_cfunc(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPU
                               cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
     # perturb the alphas
     αs_gpu = CuArray{Float64}(αs_init)
-    # αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, αs_gpu, μ_v, σ_v)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, αs_gpu, μ_v, σ_v)
     CUDA.synchronize()
 
     # compute taus
@@ -21,9 +21,9 @@ end
 function calc_flux_cfunc(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                                          cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
     # move alphas to GPU
-    αs_gpu = CuArray{Float64}(αs_init)
     μ_v = CUDA.zeros(T, length(σ_v))
-    # αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, αs_gpu, μ_v, σ_v)
+    αs_gpu = CuArray{Float64}(αs_init)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, αs_gpu, μ_v, σ_v)
     CUDA.synchronize()
 
     # compute taus

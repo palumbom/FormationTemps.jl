@@ -54,7 +54,8 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-λs_korg = range(first(wls) - 5.0, last(wls) + 5.0, step=0.005)
+buffer = 1.5
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
