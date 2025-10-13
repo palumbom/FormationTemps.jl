@@ -14,7 +14,7 @@ inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
+                               \\usepackage{mathrsfs}")
 
 # python interpolation for matplotlib stuff
 interp1d = pyimport("scipy.interpolate").interp1d
@@ -99,7 +99,7 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
 cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
-# get the nominal answer
+# get the formation temperature for a stationary star
 cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
 flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
 
@@ -113,12 +113,15 @@ for i in eachindex(λs_korg)
     form_temp_stationary[i] = itp(0.5)
 end
 
-# set equatorial velocities 
-vsinis = range(0.00, 25_000, step=5_000)
+# set rotational and macroturbulence grids 
+vsinis = range(2_000.00, 10_000.0, step=2_000)
 vmacs = range(0.0, 5_000, step=1_000)
-
 vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
+
+# set limb darkening
+u1 = 0.4
+u2 = 0.26
 
 # set up a figure
 # fig1, axs1 = plt.subplots(nrows=length(vsinis), ncols=length(vmacs), sharex=true, sharey=true)
@@ -166,9 +169,10 @@ for k in eachindex(vsinis)
     for j in eachindex(vmacs)
         # allocate for output
         ints = zeros(length(λs_korg), length(μs))
-        flux_rotating = zeros(length(λs_korg))
-        cfunc_flux_rotating = zeros(length(zs)-1, length(λs_korg))
+        flux_integration = zeros(length(λs_korg))
+        cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
 
+        # do the disk integration
         for i in eachindex(μs_cpu)
             μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
 
@@ -181,28 +185,34 @@ for k in eachindex(vsinis)
 
             ints[:, i] .= sum(cfunc_int_i_mac, dims=1)'
 
-            flux_rotating .+= ints[:,i] .* dA_cpu[i]
-            cfunc_flux_rotating .+= cfunc_int_i_mac .* dA_cpu[i]
+            flux_integration .+= ints[:,i] .* dA_cpu[i]
+            cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
         end
 
-        # get the flux and cfucn
-        flux_rotating .*= 1e-8
-        cfunc_flux_rotating .*= 1e-8
+        # convert units on disk integration
+        flux_integration .*= 1e-8
+        cfunc_flux_integration .*= 1e-8
+
+        # get the convolution
+        cfunc_flux_convolution = FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsinis[k], u1)
+        flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
 
         # now get cumulative cfuncs 
-        cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)
-        cum_cfunc_flux_rotating ./= maximum(cum_cfunc_flux_rotating, dims=1)
+        cum_cfunc_flux_integration = cumsum(cfunc_flux_integration, dims=1)
+        cum_cfunc_flux_integration ./= maximum(cum_cfunc_flux_integration, dims=1)
+        cum_cfunc_flux_convolution = cumsum(cfunc_flux_convolution, dims=1)
+        cum_cfunc_flux_convolution ./= maximum(cum_cfunc_flux_convolution, dims=1)
 
         # loop over wavelength
         form_temp_rotating = zeros(length(λs_korg))
         for i in eachindex(λs_korg)
-            xs = view(cum_cfunc_flux_rotating, :, i)
+            xs = view(cum_cfunc_flux_integration, :, i)
             itp = FT.linear_interp(xs, elav(Ts))
             form_temp_rotating[i] = itp(0.5)
         end
 
         # overplot the flux
-        resid_pct = 100 .* (flux_rotating .- flux_stationary) ./ flux_rotating
+        resid_pct = 100 .* (flux_integration .- flux_convolution) ./ flux_integration
 
         # inset axes
         bbox = mtrans[:Bbox][:from_bounds](vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
@@ -239,3 +249,4 @@ fig.tight_layout()
 fig.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
 plt.show()
 plt.clf(); plt.close();
+
