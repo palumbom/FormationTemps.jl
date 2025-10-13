@@ -5,6 +5,7 @@ using HDF5, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+plt.ioff()
 
 # matplotlib backend
 mpl.use("Qt5Agg")
@@ -115,13 +116,14 @@ end
 
 # set rotational and macroturbulence grids 
 vsinis = range(2_000.00, 10_000.0, step=2_000)
-vmacs = range(0.0, 5_000, step=1_000)
+vmacs = range(0.0, 5_000, step=5_000)
 vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
 
 # set limb darkening
 u1 = 0.4
 u2 = 0.26
+
 
 # set up a figure
 # fig1, axs1 = plt.subplots(nrows=length(vsinis), ncols=length(vmacs), sharex=true, sharey=true)
@@ -152,7 +154,7 @@ for k in eachindex(vsinis)
     B = 0.0
     C = 0.0
     v0 = vsinis[k]
-    Nϕ = 64
+    Nϕ = 32
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
     # flatten, move to cpu
@@ -194,9 +196,9 @@ for k in eachindex(vsinis)
         cfunc_flux_integration .*= 1e-8
 
         # get the convolution
-        cfunc_flux_convolution = FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsinis[k], u1)
+        cfunc_flux_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsinis[k], u1))
         flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-
+        
         # now get cumulative cfuncs 
         cum_cfunc_flux_integration = cumsum(cfunc_flux_integration, dims=1)
         cum_cfunc_flux_integration ./= maximum(cum_cfunc_flux_integration, dims=1)
@@ -204,11 +206,16 @@ for k in eachindex(vsinis)
         cum_cfunc_flux_convolution ./= maximum(cum_cfunc_flux_convolution, dims=1)
 
         # loop over wavelength
-        form_temp_rotating = zeros(length(λs_korg))
+        form_temp_integration = zeros(length(λs_korg))
+        form_temp_convolution = zeros(length(λs_korg))
         for i in eachindex(λs_korg)
             xs = view(cum_cfunc_flux_integration, :, i)
             itp = FT.linear_interp(xs, elav(Ts))
-            form_temp_rotating[i] = itp(0.5)
+            form_temp_integration[i] = itp(0.5)
+
+            xs = view(cum_cfunc_flux_convolution, :, i)
+            itp = FT.linear_interp(xs, elav(Ts))
+            form_temp_convolution[i] = itp(0.5)
         end
 
         # overplot the flux
