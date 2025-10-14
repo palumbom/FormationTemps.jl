@@ -124,32 +124,31 @@ vmacs_kms = vmacs ./ 1000
 u1 = 0.4
 u2 = 0.26
 
-
 # set up a figure for flux
-fig1, ax1 = plt.subplots(figsize=(12,12))
-ax1.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}")
-ax1.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}")
+fig1, ax1 = plt.subplots(figsize=(12.25,12.25))
+ax1.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax1.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax1.set_xticks(vsinis_kms)
 ax1.set_yticks(vmacs_kms)
-ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/2, last(vsinis_kms) + step(vsinis_kms)/2)
-ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/2, last(vmacs_kms) + step(vmacs_kms)/2)
+ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.25, last(vsinis_kms) + step(vsinis_kms)/denom)
+ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.25, last(vmacs_kms) + step(vmacs_kms)/denom)
 # ax1.grid(false)
 
 # set up a figure for temp
 fig2, ax2 = plt.subplots(figsize=(12,12))
-ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}")
-ax2.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}")
+ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax2.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_xticks(vsinis_kms)
 ax2.set_yticks(vmacs_kms)
-ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/2, last(vsinis_kms) + step(vsinis_kms)/2)
-ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/2, last(vmacs_kms) + step(vmacs_kms)/2)
+ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.25, last(vsinis_kms) + step(vsinis_kms)/denom)
+ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.25, last(vmacs_kms) + step(vmacs_kms)/denom)
 
-wstr = "150%"
-hstr = "150%"
+wstr = "175%"
+hstr = "175%"
 
 mtrans = pyimport("matplotlib.transforms")
-sx = 0.1*(maximum(vsinis ./ 1000) - minimum(vsinis ./ 1000))
-sy = 0.1*(maximum(vmacs ./ 1000)  - minimum(vmacs ./ 1000))
+sx = 0.1 * (maximum(vsinis ./ 1000) - minimum(vsinis ./ 1000))
+sy = 0.1 * (maximum(vmacs ./ 1000)  - minimum(vmacs ./ 1000))
 
 # loop over vsini
 for k in eachindex(vsinis)
@@ -233,6 +232,10 @@ for k in eachindex(vsinis)
         resid_flux_pct = 100 .* (flux_integration .- flux_convolution) ./ flux_integration
         resid_temp_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
 
+        # get rmse error 
+        rmse_flux = sqrt(sum((flux_integration .- flux_convolution).^2.0) / length(flux_integration))
+        rmse_temp = sqrt(sum((form_temp_integration .- form_temp_convolution).^2.0) / length(form_temp_integration))
+
         # inset axes for flux
         bbox = mtrans[:Bbox][:from_bounds](vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
         iax1 = inset.inset_axes(ax1, width=wstr, height=hstr, loc="center",
@@ -250,16 +253,23 @@ for k in eachindex(vsinis)
         iax2.set_frame_on(true)
         iax2.set_ylim(-25, 25)
 
-        if k == 1
+        if (k == 1) & (j == 1)
+            iax1.set_xlabel(L"{\rm Wavelength\ [\AA]}")
+            iax1.set_ylabel(L"{\rm \%\ Flux\ Error}")
+            iax2.set_xlabel(L"{\rm Wavelength\ [\AA]}")
+            iax2.set_ylabel(L"{\rm \%\ } T_{1/2}\ {\rm Error}")
+        elseif k == 1
             iax1.set_xticks([])
-            # iax1.set_yticks([])
             iax2.set_xticks([])
-            # iax2.set_yticks([])
+
+            iax1.set_ylabel(L"{\rm \%\ Flux\ Error}")
+            iax2.set_ylabel(L"{\rm \%\ } T_{1/2}\ {\rm Error}")
         elseif j == 1
-            # iax1.set_xticks([])
             iax1.set_yticks([])
-            # iax2.set_xticks([])
             iax2.set_yticks([])
+
+            iax1.set_xlabel(L"{\rm Wavelength\ [\AA]}")
+            iax2.set_xlabel(L"{\rm Wavelength\ [\AA]}")
         else
             iax1.set_xticks([])
             iax1.set_yticks([])
