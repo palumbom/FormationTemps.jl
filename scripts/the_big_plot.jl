@@ -115,7 +115,7 @@ for i in eachindex(λs_korg)
 end
 
 # set rotational and macroturbulence grids 
-vsinis = range(2_000.00, 10_000.0, step=2_000)
+vsinis = range(0.00, 10_000.0, step=2_000)
 vmacs = range(0.0, 5_000, step=1_000)
 vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
@@ -125,23 +125,28 @@ u1 = 0.4
 u2 = 0.26
 
 # set up a figure for flux
+figsize=(13,13)
 plt.clf(); plt.close("all")
-fig1, ax1 = plt.subplots(figsize=(12.25,12.25))
+fig1, ax1 = plt.subplots(figsize=figsize)
 ax1.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax1.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax1.set_xticks(vsinis_kms)
 ax1.set_yticks(vmacs_kms)
-ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.25, last(vsinis_kms) + step(vsinis_kms)/2.0)
+ax1.xaxis.set_tick_params(labelsize=18)
+ax1.yaxis.set_tick_params(labelsize=18)
+ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(vsinis_kms)/1.8)
 ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
 # ax1.grid(false)
 
 # set up a figure for temp
-fig2, ax2 = plt.subplots(figsize=(12.25,12.25))
+fig2, ax2 = plt.subplots(figsize=figsize)
 ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_xticks(vsinis_kms)
 ax2.set_yticks(vmacs_kms)
-ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.25, last(vsinis_kms) + step(vsinis_kms)/2.0)
+ax2.xaxis.set_tick_params(labelsize=18)
+ax2.yaxis.set_tick_params(labelsize=18)
+ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(vsinis_kms)/1.8)
 ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
 
 wstr = "175%"
@@ -207,8 +212,13 @@ for k in eachindex(vsinis)
         cfunc_flux_integration .*= 1e-8
 
         # get the convolution
-        cfunc_flux_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsinis[k], u1))
-        flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
+        if vsinis[k] == 0.0
+            cfunc_flux_convolution = cfunc_flux_stationary
+            flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
+        else
+            cfunc_flux_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsinis[k], u1))
+            flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
+        end
         
         # now get cumulative cfuncs 
         cum_cfunc_flux_integration = cumsum(cfunc_flux_integration, dims=1)
@@ -244,7 +254,8 @@ for k in eachindex(vsinis)
                                bbox_transform=ax1.transData, borderpad=0)
         iax1.plot(λs_korg, resid_flux_pct, c="tab:blue")
         iax1.set_frame_on(true)
-        iax1.set_ylim(-50, 50)
+        iax1.set_ylim(-55, 55)
+        iax1.grid(false)
         # iax1.text(0.05, 0.05, L"\mathrm{RMSE} = %$rmse_flux", transform=iax1.transAxes, fontsize=12, va="bottom", ha="left")
 
         # inset axes for temperature 
@@ -254,6 +265,7 @@ for k in eachindex(vsinis)
         iax2.plot(λs_korg, resid_temp_pct, c="tab:blue")
         iax2.set_frame_on(true)
         iax2.set_ylim(-25, 25)
+        iax2.grid(false)
         iax2.text(0.5, 0.05, L"\mathrm{RMSE} \approx %$rmse_temp \ \mathrm{K}", transform=iax2.transAxes, fontsize=12, va="bottom", ha="center")
                 
 
@@ -280,6 +292,7 @@ for k in eachindex(vsinis)
             iax2.set_xticks([])
             iax2.set_yticks([])
         end
+
     end
 end
 
