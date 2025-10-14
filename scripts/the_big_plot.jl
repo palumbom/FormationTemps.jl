@@ -116,7 +116,7 @@ end
 
 # set rotational and macroturbulence grids 
 vsinis = range(2_000.00, 10_000.0, step=2_000)
-vmacs = range(0.0, 5_000, step=5_000)
+vmacs = range(0.0, 5_000, step=1_000)
 vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
 
@@ -231,7 +231,7 @@ for k in eachindex(vsinis)
 
         # overplot the flux
         resid_flux_pct = 100 .* (flux_integration .- flux_convolution) ./ flux_integration
-        resid_tempp_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
+        resid_temp_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
 
         # inset axes for flux
         bbox = mtrans[:Bbox][:from_bounds](vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
@@ -239,20 +239,33 @@ for k in eachindex(vsinis)
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax1.transData, borderpad=0)
         iax1.plot(λs_korg, resid_flux_pct, c="tab:blue")
-        iax1.set_xticks([])
-        iax1.set_yticks([])
         iax1.set_frame_on(true)
-        iax1.set_ylim(-75, 75)
+        iax1.set_ylim(-50, 50)
 
         # inset axes for temperature 
         iax2 = inset.inset_axes(ax2, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax2.transData, borderpad=0)
-        iax2.plot(λs_korg, resid_tempp_pct, c="tab:blue")
-        iax2.set_xticks([])
-        iax2.set_yticks([])
+        iax2.plot(λs_korg, resid_temp_pct, c="tab:blue")
         iax2.set_frame_on(true)
-        iax2.set_ylim(-75, 75)
+        iax2.set_ylim(-25, 25)
+
+        if k == 1
+            iax1.set_xticks([])
+            # iax1.set_yticks([])
+            iax2.set_xticks([])
+            # iax2.set_yticks([])
+        elseif j == 1
+            # iax1.set_xticks([])
+            iax1.set_yticks([])
+            # iax2.set_xticks([])
+            iax2.set_yticks([])
+        else
+            iax1.set_xticks([])
+            iax1.set_yticks([])
+            iax2.set_xticks([])
+            iax2.set_yticks([])
+        end
     end
 end
 
