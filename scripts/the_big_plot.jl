@@ -125,23 +125,24 @@ u1 = 0.4
 u2 = 0.26
 
 # set up a figure for flux
+plt.clf(); plt.close("all")
 fig1, ax1 = plt.subplots(figsize=(12.25,12.25))
 ax1.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax1.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax1.set_xticks(vsinis_kms)
 ax1.set_yticks(vmacs_kms)
-ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.25, last(vsinis_kms) + step(vsinis_kms)/denom)
-ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.25, last(vmacs_kms) + step(vmacs_kms)/denom)
+ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.25, last(vsinis_kms) + step(vsinis_kms)/1.25)
+ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.25, last(vmacs_kms) + step(vmacs_kms)/1.25)
 # ax1.grid(false)
 
 # set up a figure for temp
-fig2, ax2 = plt.subplots(figsize=(12,12))
+fig2, ax2 = plt.subplots(figsize=(12.25,12.25))
 ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_xticks(vsinis_kms)
 ax2.set_yticks(vmacs_kms)
-ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.25, last(vsinis_kms) + step(vsinis_kms)/denom)
-ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.25, last(vmacs_kms) + step(vmacs_kms)/denom)
+ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.25, last(vsinis_kms) + step(vsinis_kms)/1.25)
+ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.25, last(vmacs_kms) + step(vmacs_kms)/1.25)
 
 wstr = "175%"
 hstr = "175%"
@@ -233,8 +234,8 @@ for k in eachindex(vsinis)
         resid_temp_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
 
         # get rmse error 
-        rmse_flux = sqrt(sum((flux_integration .- flux_convolution).^2.0) / length(flux_integration))
-        rmse_temp = sqrt(sum((form_temp_integration .- form_temp_convolution).^2.0) / length(form_temp_integration))
+        rmse_flux = round(sqrt(sum((flux_integration .- flux_convolution).^2.0) / length(flux_integration)), digits=3)
+        rmse_temp = round(sqrt(sum((form_temp_integration .- form_temp_convolution).^2.0) / length(form_temp_integration)), digits=0)
 
         # inset axes for flux
         bbox = mtrans[:Bbox][:from_bounds](vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
@@ -244,6 +245,7 @@ for k in eachindex(vsinis)
         iax1.plot(λs_korg, resid_flux_pct, c="tab:blue")
         iax1.set_frame_on(true)
         iax1.set_ylim(-50, 50)
+        # iax1.text(0.05, 0.05, L"\mathrm{RMSE} = %$rmse_flux", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
 
         # inset axes for temperature 
         iax2 = inset.inset_axes(ax2, width=wstr, height=hstr, loc="center",
@@ -252,6 +254,8 @@ for k in eachindex(vsinis)
         iax2.plot(λs_korg, resid_temp_pct, c="tab:blue")
         iax2.set_frame_on(true)
         iax2.set_ylim(-25, 25)
+        iax2.text(0.05, 0.05, L"\mathrm{RMSE} \approx %$rmse_temp", transform=iax2.transAxes, fontsize=12, va="bottom", ha="center")
+                
 
         if (k == 1) & (j == 1)
             iax1.set_xlabel(L"{\rm Wavelength\ [\AA]}")
@@ -283,5 +287,5 @@ fig1.tight_layout()
 fig1.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
 fig2.tight_layout()
 fig2.savefig("figures/big_plot_temperature.pdf", bbox_inches="tight")
-plt.clf(); plt.close();
+plt.clf(); plt.close("all");
 
