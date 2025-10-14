@@ -125,9 +125,8 @@ u1 = 0.4
 u2 = 0.26
 
 
-# set up a figure
-# fig1, axs1 = plt.subplots(nrows=length(vsinis), ncols=length(vmacs), sharex=true, sharey=true)
-fig, ax1 = plt.subplots(figsize=(12,12))
+# set up a figure for flux
+fig1, ax1 = plt.subplots(figsize=(12,12))
 ax1.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}")
 ax1.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}")
 ax1.set_xticks(vsinis_kms)
@@ -135,6 +134,15 @@ ax1.set_yticks(vmacs_kms)
 ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/2, last(vsinis_kms) + step(vsinis_kms)/2)
 ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/2, last(vmacs_kms) + step(vmacs_kms)/2)
 # ax1.grid(false)
+
+# set up a figure for temp
+fig2, ax2 = plt.subplots(figsize=(12,12))
+ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}")
+ax2.set_ylabel(L"\xi \ {\rm [km\ s}^{-1} {\rm ]}")
+ax2.set_xticks(vsinis_kms)
+ax2.set_yticks(vmacs_kms)
+ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/2, last(vsinis_kms) + step(vsinis_kms)/2)
+ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/2, last(vmacs_kms) + step(vmacs_kms)/2)
 
 wstr = "150%"
 hstr = "150%"
@@ -176,17 +184,20 @@ for k in eachindex(vsinis)
 
         # do the disk integration
         for i in eachindex(μs_cpu)
+            # set the rotational velocity
             μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
 
+            # get the intensity contribution function
             cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
 
-            # convolve the cfunc with macroturbulence
+            # convolve the cfunc with RT macroturbulence
             σ_v_mac .= vmacs[j]
             cfunc_int_i_mac = Array(FT.convolve_wavelength_axis_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_i), μ_v_mac, σ_v_mac))
 
-
+            # tabulate the intensity
             ints[:, i] .= sum(cfunc_int_i_mac, dims=1)'
 
+            # add to the flux integral
             flux_integration .+= ints[:,i] .* dA_cpu[i]
             cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
         end
@@ -219,41 +230,35 @@ for k in eachindex(vsinis)
         end
 
         # overplot the flux
-        resid_pct = 100 .* (flux_integration .- flux_convolution) ./ flux_integration
+        resid_flux_pct = 100 .* (flux_integration .- flux_convolution) ./ flux_integration
+        resid_tempp_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
 
-        # inset axes
+        # inset axes for flux
         bbox = mtrans[:Bbox][:from_bounds](vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
-        iax = inset.inset_axes(ax1, width=wstr, height=hstr, loc="center",
+        iax1 = inset.inset_axes(ax1, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax1.transData, borderpad=0)
-        iax.plot(λs_korg, resid_pct, c="tab:blue")
-        iax.set_xticks([])
-        iax.set_yticks([])
-        iax.set_frame_on(true)
-        iax.set_ylim(-75, 75)
+        iax1.plot(λs_korg, resid_flux_pct, c="tab:blue")
+        iax1.set_xticks([])
+        iax1.set_yticks([])
+        iax1.set_frame_on(true)
+        iax1.set_ylim(-75, 75)
 
-        # kplot = length(vsinis)-k+1
-        # jplot = j
-        # axs1[kplot,jplot].plot(λs_korg, resid_pct, c="tab:blue")
-        # axs1[kplot,jplot].set_axis_off()
-        # axs1[k,j].set_xlabel("Wavelength")
-        # axs1[k,j].set_ylabel("Flux")
-        # axs1[k,j].legend()
-
-        # # overplot the temperature
-        # fig, ax1 = plt.subplots()
-        # ax1.plot(λs_korg, form_temp_stationary, c="k", ls="--", label="Stationary")
-        # ax1.plot(λs_korg, form_temp_rotating, c="tab:blue", label="Solid Body Rotation")
-        # ax1.set_xlabel("Wavelength")
-        # ax1.set_ylabel("Formation Temperature")
-        # ax1.legend()
-        # fig.savefig("figures/temp_rotation.pdf", bbox_inches="tight")
-        # plt.clf(); plt.close();
+        # inset axes for temperature 
+        iax2 = inset.inset_axes(ax2, width=wstr, height=hstr, loc="center",
+                               bbox_to_anchor=bbox, 
+                               bbox_transform=ax2.transData, borderpad=0)
+        iax2.plot(λs_korg, resid_tempp_pct, c="tab:blue")
+        iax2.set_xticks([])
+        iax2.set_yticks([])
+        iax2.set_frame_on(true)
+        iax2.set_ylim(-75, 75)
     end
 end
 
-fig.tight_layout()
-fig.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
-plt.show()
+fig1.tight_layout()
+fig1.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
+fig2.tight_layout()
+fig2.savefig("figures/big_plot_temperature.pdf", bbox_inches="tight")
 plt.clf(); plt.close();
 
