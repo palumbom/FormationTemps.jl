@@ -36,9 +36,8 @@ include("structures/GPUMemory.jl")
 
 # numerical stuff
 include("interpolations.jl")
-include("convolutions.jl")
-include("rotation.jl")
-include("macroturbulence.jl")
+include("microturbulence.jl")
+include("rotmacro.jl")
 
 # linelist + stellar model stuff
 include("linelist.jl")

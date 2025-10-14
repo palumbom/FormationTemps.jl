@@ -125,15 +125,16 @@ u1 = 0.4
 u2 = 0.26
 
 # set up a figure for flux
-figsize=(13,13)
+figsize=(15,15)
+ticklabelsize = 24
 plt.clf(); plt.close("all")
 fig1, ax1 = plt.subplots(figsize=figsize)
 ax1.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax1.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax1.set_xticks(vsinis_kms)
 ax1.set_yticks(vmacs_kms)
-ax1.xaxis.set_tick_params(labelsize=18)
-ax1.yaxis.set_tick_params(labelsize=18)
+ax1.xaxis.set_tick_params(labelsize=ticklabelsize)
+ax1.yaxis.set_tick_params(labelsize=ticklabelsize)
 ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(vsinis_kms)/1.8)
 ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
 # ax1.grid(false)
@@ -144,8 +145,8 @@ ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_xticks(vsinis_kms)
 ax2.set_yticks(vmacs_kms)
-ax2.xaxis.set_tick_params(labelsize=18)
-ax2.yaxis.set_tick_params(labelsize=18)
+ax2.xaxis.set_tick_params(labelsize=ticklabelsize)
+ax2.yaxis.set_tick_params(labelsize=ticklabelsize)
 ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(vsinis_kms)/1.8)
 ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
 
@@ -275,22 +276,22 @@ for k in eachindex(vsinis)
             iax2.set_xlabel(L"{\rm Wavelength\ [\AA]}")
             iax2.set_ylabel(L"{\rm \%\ } T_{1/2}\ {\rm Error}")
         elseif k == 1
-            iax1.set_xticks([])
-            iax2.set_xticks([])
+            iax1.set_xticklabels([])
+            iax2.set_xticklabels([])
 
             iax1.set_ylabel(L"{\rm \%\ Flux\ Error}")
             iax2.set_ylabel(L"{\rm \%\ } T_{1/2}\ {\rm Error}")
         elseif j == 1
-            iax1.set_yticks([])
-            iax2.set_yticks([])
+            iax1.set_yticklabels([])
+            iax2.set_yticklabels([])
 
             iax1.set_xlabel(L"{\rm Wavelength\ [\AA]}")
             iax2.set_xlabel(L"{\rm Wavelength\ [\AA]}")
         else
-            iax1.set_xticks([])
-            iax1.set_yticks([])
-            iax2.set_xticks([])
-            iax2.set_yticks([])
+            iax1.set_xticklabels([])
+            iax1.set_yticklabels([])
+            iax2.set_xticklabels([])
+            iax2.set_yticklabels([])
         end
 
     end

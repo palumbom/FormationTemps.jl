@@ -21,10 +21,31 @@ end
 Equation B12 from Hirano et al. (2011). NOTE: This is returns the Fourier
 Transform of the convolution kernel!! 
 """
-function hirano_rotmacro_ft_kernel(vs, σ, ξmac, vsini, u1, u2)
-
+function hirano_rotmacro_ft_kernel(vs, σ, ξ_rt, vsini, u1, u2)
+    
     return nothing 
 end
+
+function convolve_isotropic_macroturbulence(xs, ys, ξmac)
+
+    return nothing
+end
+
+function convolve_isotropic_macroturbulence_gpu(xs, ys, ξmac)
+
+    return nothing
+end
+
+function convolve_rt_macroturbulence(xs, ys, ξ_rt)
+
+    return nothing
+end
+
+function convolve_rt_macroturbulence_gpu(xs, ys, ξ_rt)
+
+    return nothing
+end
+
 
 function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,1}, vsini::T, u1::T) where T<:AF
     # offset the kernel by the velocity
