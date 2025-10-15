@@ -3,6 +3,7 @@ module FormationTemps
 # general imports
 using CUDA
 using Korg
+using FFTW
 using Statistics
 using AbstractFFTs
 using LinearAlgebra

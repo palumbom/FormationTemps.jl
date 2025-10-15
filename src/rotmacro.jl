@@ -19,11 +19,28 @@ end
 
 """
 Equation B12 from Hirano et al. (2011). NOTE: This is returns the Fourier
-Transform of the convolution kernel!! 
+Transform of the rotmacro convolution kernel, not the kernel itself!! 
 """
-function hirano_rotmacro_ft_kernel(vs, σ, ξ_rt, vsini, u1, u2)
-    
-    return nothing 
+function hirano_rotmacro_ft_kernel(σs::AA{T,1}, ξ_rt::T, vsini::T; u1::T=0.43, u2::T=0.31, intres::Int=100) where T<:AF
+    # quadrature grid in t∈[0,1]
+    t = reshape(collect(range(zero(T), one(T), length=intres)), :, 1)
+    dt = t[2] - t[1]
+
+    # limb-darkening factor (normalized)
+    μ = sqrt.(max.(zero(T), one(T) .- t.^2))  # guard tiny negatives at t≈1
+    t1 = (one(T) .- u1 .* (one(T) .- μ) .- u2 .* (one(T) .- μ).^2) ./ (one(T) .- u1/3 - u2/6)
+
+    # macroturbulence × rotation factor
+    a = (π^2) * (ξ_rt^2) .* (σs.^2)
+
+    # assemble the integrand
+    expterm = exp.(-a .* (one(T) .- t.^2)') .+ exp.(-a .* (t.^2)')
+    j0 = besselj0.(2π .* σs .* vsini .* t')
+    m = t1' .* expterm .* j0 .* t'
+
+    # integrate
+    s = sum(m; dims=2) .- 0.5 .* (m[:, 1] .+ m[:, end])
+    return vec(s) .* dt
 end
 
 function convolve_isotropic_macroturbulence(xs, ys, ξmac)
@@ -36,14 +53,37 @@ function convolve_isotropic_macroturbulence_gpu(xs, ys, ξmac)
     return nothing
 end
 
-function convolve_rt_macroturbulence(xs, ys, ξ_rt)
+function convolve_hirano_macroturbulence(xs::AA{T,1}, ys::AA{T,2}, vsini::T, ξ_rt::T, u1::T, u2::T) where T<:AF
 
     return nothing
 end
 
-function convolve_rt_macroturbulence_gpu(xs, ys, ξ_rt)
+function convolve_hirano_macroturbulence_gpu(xs::AA{T,1}, ys::AA{T,2}, vsini::T, 
+                                             ξ_rt::T, u1::T, u2::T; 
+                                             intres::Int=100) where T<:AF
+    # velocity grid
+    N = length(xs)
+    λ0 = mean(xs)
+    vs = c_ms .* (xs .- λ0) ./ λ0
+    Δv = (vs[end] - vs[1]) / (N - 1)
+    dv = diff(vs)
+
+    # frequency grid and kernel FT
+    σ = FFTW.fftfreq(N) ./ Δv
+    Kσ = hirano_rotmacro_ft_kernel(σ, ξ_rt, vsini; u1=u1, u2=u2, intres=intres)
+    Kσ_gpu = CuArray(reshape(complex.(Kσ), 1, N))  # broadcast across rows
 
     return nothing
+
+    # # GPU FFT along wavelength axis (dim=2)
+    # on_gpu = ys isa CuArray
+    # Y_gpu = on_gpu ? ys : CuArray(ys)
+    # Yf = CUDA.fft(Y_gpu, 2)
+    # Yf .*= Kσ_gpu
+    # conv_gpu = CUDA.ifft(Yf, 2)
+    # out_gpu = real.(conv_gpu)
+
+    # return on_gpu ? out_gpu : Array(out_gpu)
 end
 
 
