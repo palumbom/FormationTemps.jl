@@ -53,14 +53,14 @@ function convolve_isotropic_macroturbulence_gpu(xs, ys, ξmac)
     return nothing
 end
 
-function convolve_hirano_macroturbulence(xs::AA{T,1}, ys::AA{T,2}, vsini::T, ξ_rt::T, u1::T, u2::T) where T<:AF
+function convolve_hirano_macroturbulence_gpu(xs::AA{T,1}, ys::AA{T,2}, vsini::T, ξ_rt::T, u1::T, u2::T) where T<:AF
 
     return nothing
 end
 
-function convolve_hirano_macroturbulence_gpu(xs::AA{T,1}, ys::AA{T,2}, vsini::T, 
-                                             ξ_rt::T, u1::T, u2::T; 
-                                             intres::Int=100) where T<:AF
+function convolve_hirano_macroturbulence(xs::AA{T,1}, ys::AA{T,1}, vsini::T, 
+                                         ξ_rt::T, u1::T, u2::T; 
+                                         intres::Int=100) where T<:AF
     # velocity grid
     N = length(xs)
     λ0 = mean(xs)
@@ -73,17 +73,42 @@ function convolve_hirano_macroturbulence_gpu(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     Kσ = hirano_rotmacro_ft_kernel(σ, ξ_rt, vsini; u1=u1, u2=u2, intres=intres)
     Kσ_gpu = CuArray(reshape(complex.(Kσ), 1, N))  # broadcast across rows
 
-    return nothing
+    # inverse FT
+    K_dft = Kσ ./ Δv
+    k_circ = real(ifft(K_dft))              # circular kernel, zero-lag at index 1
+    kernel  = FFTW.fftshift(k_circ)          # center the kernel around v=0
+    kernel ./= sum(kernel)
 
-    # # GPU FFT along wavelength axis (dim=2)
-    # on_gpu = ys isa CuArray
-    # Y_gpu = on_gpu ? ys : CuArray(ys)
-    # Yf = CUDA.fft(Y_gpu, 2)
-    # Yf .*= Kσ_gpu
-    # conv_gpu = CUDA.ifft(Yf, 2)
-    # out_gpu = real.(conv_gpu)
+    return imfilter(ys, reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
+end
 
-    # return on_gpu ? out_gpu : Array(out_gpu)
+function convolve_hirano_macroturbulence(xs::AA{T,1}, ys::AA{T,2}, vsini::T, 
+                                         ξ_rt::T, u1::T, u2::T; 
+                                         intres::Int=100) where T<:AF
+    # velocity grid
+    N = length(xs)
+    λ0 = mean(xs)
+    vs = c_ms .* (xs .- λ0) ./ λ0
+    Δv = (vs[end] - vs[1]) / (N - 1)
+    dv = diff(vs)
+
+    # frequency grid and kernel FT
+    σ = FFTW.fftfreq(N) ./ Δv
+    Kσ = hirano_rotmacro_ft_kernel(σ, ξ_rt, vsini; u1=u1, u2=u2, intres=intres)
+    Kσ_gpu = CuArray(reshape(complex.(Kσ), 1, N))  # broadcast across rows
+
+    # inverse FT
+    K_dft = Kσ ./ Δv
+    k_circ = real(ifft(K_dft))              # circular kernel, zero-lag at index 1
+    kernel  = FFTW.fftshift(k_circ)          # center the kernel around v=0
+    kernel ./= sum(kernel)
+
+    # allocate array for output spectrum
+    ys_out = zeros(size(ys))
+    for t in axes(ys, 1)
+        ys_out[t, :] .= imfilter(ys[t, :], reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
+    end
+    return ys_out
 end
 
 

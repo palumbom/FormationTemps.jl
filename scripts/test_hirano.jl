@@ -116,17 +116,19 @@ for i in eachindex(λs_korg)
 end
 
 # set rotational and macroturbulence 
-vsini = 0.0
-ξ_rt = 2100.0
+vsini = 2100.0
+ξ_rt = 1500.0
 
 # set limb darkening
 u1 = 0.4
-u2 = 0.26
+u2 = 0.0
 
 xs = λs_korg
 ys = cfunc_flux_stationary
-intres = 100
+intres = range(50, 1000, step=50)
+intres = 500
 
+# for i in intres
 N = length(xs)
 λ0 = mean(xs)
 vs = FT.c_ms .* (xs .- λ0) ./ λ0
@@ -149,10 +151,21 @@ v_ctr = n .* Δv
 # Optional: enforce exact normalization (numerical drift)
 k_ctr ./= sum(k_ctr)
 
-plt.plot(λs_korg, k_ctr)
-plt.show()
+# plt.plot(λs_korg, k_ctr)
+# end
+
+# plt.show()
 
 # plt.plot(σ, Kσ)
 # plt.show()
 
-# cfunc_flux_rotmacro = FT.convolve_hirano_macroturbulence_gpu(xs_gpu, ys_gpu, vsini, ξ_rt, u1, u2)
+cfunc_flux_rotmacro = FT.convolve_hirano_macroturbulence(xs, ys, vsini, ξ_rt, u1, u2, intres=intres)
+cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
+
+flux_rotmacro = dropdims(sum(cfunc_flux_rotmacro, dims=1), dims=1)
+flux_rotgray = dropdims(sum(cfunc_flux_rotgray, dims=1), dims=1)
+
+plt.plot(λs_korg, flux_stationary)
+plt.plot(λs_korg, flux_rotmacro)
+plt.plot(λs_korg, flux_rotgray)
+plt.show()
