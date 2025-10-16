@@ -158,7 +158,7 @@ hstr = "175%"
 
 mtrans = pyimport("matplotlib.transforms")
 sx = 0.1 * (maximum(vsinis ./ 1000) - minimum(vsinis ./ 1000))
-sy = 0.1 * (maximum(vmacs ./ 1000)  - minimum(vmacs ./ 1000))
+sy = 0.1 * (maximum(vmacs ./ 1000)  - minimum(vmacs ./ 1000)) 
 
 # loop over vsini
 for k in eachindex(vsinis)
@@ -171,7 +171,7 @@ for k in eachindex(vsinis)
     B = 0.0
     C = 0.0
     v0 = vsinis[k]
-    Nϕ = 64
+    Nϕ = 8
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
     # flatten, move to cpu
@@ -189,6 +189,7 @@ for k in eachindex(vsinis)
         # allocate for output
         ints = zeros(length(λs_korg), length(μs))
         flux_integration = zeros(length(λs_korg))
+        flux_cont_integration = zeros(length(λs_korg))
         cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
 
         # do the disk integration
@@ -198,26 +199,31 @@ for k in eachindex(vsinis)
 
             # get the intensity contribution function
             cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+            cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
 
             # convolve the cfunc with RT macroturbulence TODO
             σ_v_mac .= vmacs[j]
             cfunc_int_i_mac = Array(FT.convolve_wavelength_axis_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_i), μ_v_mac, σ_v_mac))
+            cfunc_int_cont_i_mac = Array(FT.convolve_wavelength_axis_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_cont_i), μ_v_mac, σ_v_mac))
 
             # tabulate the intensity
             ints[:, i] .= sum(cfunc_int_i_mac, dims=1)'
 
             # add to the flux integral
             flux_integration .+= ints[:,i] .* dA_cpu[i]
+            flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
             cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
         end
 
         # convert units on disk integration
         flux_integration .*= 1e-8
+        flux_cont_integration .*= 1e-8
         cfunc_flux_integration .*= 1e-8
 
         # get the convolution
         cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsinis[k], vmacs[j], u1, u2))
         flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
+        flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_cont_integration, vsinis[k], vmacs[j], u1, u2))
         
         # now get cumulative cfuncs 
         cum_cfunc_flux_integration = cumsum(cfunc_flux_integration, dims=1)
@@ -238,12 +244,19 @@ for k in eachindex(vsinis)
             form_temp_convolution[i] = itp(0.5)
         end
 
-        # overplot the flux
-        resid_flux_pct = 100 .* (flux_integration .- flux_convolution) ./ flux_integration
-        resid_temp_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
+        # get normalized flux
+        flux_integration_norm = flux_integration ./ flux_cont_integration
+        flux_convolution_norm = flux_convolution ./ flux_cont_convolution
+
+         # overplot the flux
+        flux_err_pct = 100 .* (flux_integration .- flux_convolution) ./ flux_integration
+        flux_err_cont_pct = 100 .* (flux_integration_norm .- flux_convolution_norm) ./ flux_integration_norm
+        temp_err_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
+        temp_err = form_temp_integration .- form_temp_convolution
 
         # get rmse error 
         rmse_flux = round(sqrt(sum((flux_integration .- flux_convolution).^2.0) / length(flux_integration)), digits=3)
+        rmse_flux_cont = round(sqrt(sum((100 .* flux_integration_norm .- 100 .* flux_convolution_norm).^2.0) / length(flux_integration_norm)), digits=3)
         rmse_temp = round(sqrt(sum((form_temp_integration .- form_temp_convolution).^2.0) / length(form_temp_integration)), digits=1)
 
         # inset axes for flux
@@ -251,35 +264,36 @@ for k in eachindex(vsinis)
         iax1 = inset.inset_axes(ax1, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax1.transData, borderpad=0)
-        iax1.plot(λs_korg, resid_flux_pct, c="tab:blue")
+        # iax1.plot(λs_korg, flux_err_pct, c="tab:blue")
+        iax1.plot(λs_korg, flux_err_cont_pct, c="tab:blue")
         iax1.set_frame_on(true)
-        iax1.set_ylim(-55, 55)
+        iax1.set_ylim(-25, 25)
         iax1.grid(false)
-        # iax1.text(0.05, 0.05, L"\mathrm{RMSE} = %$rmse_flux", transform=iax1.transAxes, fontsize=12, va="bottom", ha="left")
+        # iax1.text(0.5, 0.05, L"\mathrm{RMSE} = %$rmse_flux_cont \ \mathrm{\%}", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
 
         # inset axes for temperature 
         iax2 = inset.inset_axes(ax2, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax2.transData, borderpad=0)
-        # iax2.plot(λs_korg, resid_temp_pct, color=cmap(norm(rmse_temp)))#c="tab:blue")
-        iax2.plot(λs_korg, resid_temp_pct, c="tab:blue")
+        # iax2.plot(λs_korg, temp_err_pct, color=cmap(norm(rmse_temp)))#c="tab:blue")
+        # iax2.plot(λs_korg, temp_err_pct, c="tab:blue")
+        iax2.plot(λs_korg, temp_err, c="tab:blue")
         iax2.set_frame_on(true)
-        iax2.set_ylim(-25, 25)
+        iax2.set_ylim(-425, 425)
         iax2.grid(false)
         iax2.text(0.5, 0.05, L"\mathrm{RMSE} \approx %$rmse_temp \ \mathrm{K}", transform=iax2.transAxes, fontsize=12, va="bottom", ha="center")
-                
 
         if (k == 1) & (j == 1)
             iax1.set_xlabel(L"{\rm Wavelength\ [\AA]}")
             iax1.set_ylabel(L"{\rm \%\ Flux\ Error}")
             iax2.set_xlabel(L"{\rm Wavelength\ [\AA]}")
-            iax2.set_ylabel(L"{\rm \%\ } T_{1/2}\ {\rm Error}")
+            iax2.set_ylabel(L"T_{1/2}\ {\rm Error\ [K]}")
         elseif k == 1
             iax1.set_xticklabels([])
             iax2.set_xticklabels([])
 
             iax1.set_ylabel(L"{\rm \%\ Flux\ Error}")
-            iax2.set_ylabel(L"{\rm \%\ } T_{1/2}\ {\rm Error}")
+            iax2.set_ylabel(L"T_{1/2}\ {\rm Error\ [K]}")
         elseif j == 1
             iax1.set_yticklabels([])
             iax2.set_yticklabels([])
@@ -292,10 +306,10 @@ for k in eachindex(vsinis)
             iax2.set_xticklabels([])
             iax2.set_yticklabels([])
         end
-
-    end
+    end 
 end
 
+#  write out
 fig1.tight_layout()
 fig1.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
 
@@ -307,4 +321,3 @@ fig1.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
 fig2.tight_layout()
 fig2.savefig("figures/big_plot_temperature.pdf", bbox_inches="tight")
 plt.clf(); plt.close("all");
-

@@ -56,7 +56,7 @@ function calc_stellar_grid!(ρs::T1, inclination::T1, A::T1, B::T1, C::T1, v0::T
         R_x = CuArray{precision}(R_x)
     end
 
-    # compute geometric parameters, average over subtiles
+    # compute geometric parameters
     threads1 = 512
     blocks1 = cld(Nϕ * Nθ_max, prod(threads1))
     @cusync @captured @cuda threads=threads1 blocks=blocks1 calc_stellar_grid!(μs, dA, z_rot, Nϕ,
