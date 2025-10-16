@@ -159,7 +159,7 @@ k_ctr ./= sum(k_ctr)
 # plt.plot(σ, Kσ)
 # plt.show()
 
-cfunc_flux_rotmacro = FT.convolve_hirano_macroturbulence(xs, ys, vsini, ξ_rt, u1, u2, intres=intres)
+cfunc_flux_rotmacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, ξ_rt, u1, u2, intres=intres)
 cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
 
 flux_rotmacro = dropdims(sum(cfunc_flux_rotmacro, dims=1), dims=1)

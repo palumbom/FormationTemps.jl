@@ -58,9 +58,9 @@ function convolve_hirano_macroturbulence_gpu(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     return nothing
 end
 
-function convolve_hirano_macroturbulence(xs::AA{T,1}, ys::AA{T,1}, vsini::T, 
-                                         ξ_rt::T, u1::T, u2::T; 
-                                         intres::Int=100) where T<:AF
+function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T, 
+                                  ξ_rt::T, u1::T, u2::T; 
+                                  intres::Int=100) where T<:AF
     # velocity grid
     N = length(xs)
     λ0 = mean(xs)
@@ -82,9 +82,9 @@ function convolve_hirano_macroturbulence(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
     return imfilter(ys, reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
 end
 
-function convolve_hirano_macroturbulence(xs::AA{T,1}, ys::AA{T,2}, vsini::T, 
-                                         ξ_rt::T, u1::T, u2::T; 
-                                         intres::Int=100) where T<:AF
+function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T, 
+                                  ξ_rt::T, u1::T, u2::T; 
+                                  intres::Int=100) where T<:AF
     # velocity grid
     N = length(xs)
     λ0 = mean(xs)

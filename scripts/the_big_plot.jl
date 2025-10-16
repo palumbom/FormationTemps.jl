@@ -11,14 +11,12 @@ plt.ioff()
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
-
-# python interpolation for matplotlib stuff
-interp1d = pyimport("scipy.interpolate").interp1d
 
 # set colormaps
 img_cmap = "viridis"
@@ -124,6 +122,11 @@ vmacs_kms = vmacs ./ 1000
 u1 = 0.4
 u2 = 0.26
 
+# get a colormap 
+cmap = plt.get_cmap("viridis")#colormaps.batlowk
+norm = mpl.colors.Normalize(vmin=0.0, vmax=125.0)
+sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+
 # set up a figure for flux
 figsize=(15,15)
 ticklabelsize = 24
@@ -168,7 +171,7 @@ for k in eachindex(vsinis)
     B = 0.0
     C = 0.0
     v0 = vsinis[k]
-    Nϕ = 32
+    Nϕ = 64
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
     # flatten, move to cpu
@@ -196,7 +199,7 @@ for k in eachindex(vsinis)
             # get the intensity contribution function
             cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
 
-            # convolve the cfunc with RT macroturbulence
+            # convolve the cfunc with RT macroturbulence TODO
             σ_v_mac .= vmacs[j]
             cfunc_int_i_mac = Array(FT.convolve_wavelength_axis_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_i), μ_v_mac, σ_v_mac))
 
@@ -213,13 +216,8 @@ for k in eachindex(vsinis)
         cfunc_flux_integration .*= 1e-8
 
         # get the convolution
-        if vsinis[k] == 0.0
-            cfunc_flux_convolution = cfunc_flux_stationary
-            flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-        else
-            cfunc_flux_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsinis[k], u1))
-            flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-        end
+        cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsinis[k], vmacs[j], u1, u2))
+        flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
         
         # now get cumulative cfuncs 
         cum_cfunc_flux_integration = cumsum(cfunc_flux_integration, dims=1)
@@ -263,6 +261,7 @@ for k in eachindex(vsinis)
         iax2 = inset.inset_axes(ax2, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax2.transData, borderpad=0)
+        # iax2.plot(λs_korg, resid_temp_pct, color=cmap(norm(rmse_temp)))#c="tab:blue")
         iax2.plot(λs_korg, resid_temp_pct, c="tab:blue")
         iax2.set_frame_on(true)
         iax2.set_ylim(-25, 25)
@@ -299,6 +298,12 @@ end
 
 fig1.tight_layout()
 fig1.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
+
+
+# axins = inset.inset_axes(ax2, width="5%",height="100%", loc="lower left",
+#                          bbox_to_anchor=(1.05, 0., 1, 1),
+#                          bbox_transform=ax2.transAxes,borderpad=0)
+# fig2.colorbar(sm, cax=axins)
 fig2.tight_layout()
 fig2.savefig("figures/big_plot_temperature.pdf", bbox_inches="tight")
 plt.clf(); plt.close("all");
