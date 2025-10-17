@@ -305,27 +305,29 @@ for k in eachindex(vsinis)
         iax3 = inset.inset_axes(ax3, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax3.transData, borderpad=0)
-        # iax3.plot(λs_korg, flux_err_pct, c="tab:blue")
-        iax3.plot(λs_korg, flux_integration_norm, c="k")
-        iax3.plot(λs_korg, flux_convolution_norm, c="tab:blue")
+        iax3.plot(λs_korg, flux_integration_norm, c="k", label=L"{\rm Integration}")
+        iax3.plot(λs_korg, flux_convolution_norm, c="tab:blue", label=L"{\rm Convolution}")
         iax3.set_frame_on(true)
         iax3.set_ylim(0.1, 1.1)
         iax3.grid(false)
-        # iax3.text(0.5, 0.05, L"\mathrm{RMSE} = %$rmse_flux_cont \ \mathrm{\%}", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
 
         # inset axes for temperature 
         iax4 = inset.inset_axes(ax4, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax4.transData, borderpad=0)
-        # iax4.plot(λs_korg, temp_err_pct, color=cmap(norm(rmse_temp)))#c="tab:blue")
-        # iax4.plot(λs_korg, temp_err_pct, c="tab:blue")
-        iax4.plot(λs_korg, form_temp_integration, c="k")
-        iax4.plot(λs_korg, form_temp_convolution, c="tab:blue")
+        iax4.plot(λs_korg, form_temp_integration, c="k", label=L"{\rm Integration}")
+        iax4.plot(λs_korg, form_temp_convolution, c="tab:blue", label=L"{\rm Convolution}")
         iax4.set_frame_on(true)
         iax4.set_ylim(4000, 6200)
         iax4.grid(false)
-        # iax4.text(0.5, 0.05, L"\mathrm{RMSE} \approx %$rmse_temp \ \mathrm{K}", transform=iax2.transAxes, fontsize=12, va="bottom", ha="center")
 
+        # create legend
+        if (k == length(vsinis)) & (j == length(vmacs))
+            iax3.legend(loc="lower center")
+            iax3.legend(loc="lower center")
+        end
+
+        # axis labels
         if (k == 1) & (j == 1)
             iax1.set_xlabel(L"{\rm Wavelength\ [\AA]}")
             iax1.set_ylabel(L"{\rm \%\ Flux\ Error}")
