@@ -116,8 +116,8 @@ for i in eachindex(λs_korg)
 end
 
 # set rotational and macroturbulence 
-vsini = 2100.0
-ξ_rt = 1500.0
+vsini = 0.0
+ξ_rt = 2100.0
 
 # set limb darkening
 u1 = 0.4
@@ -151,10 +151,10 @@ v_ctr = n .* Δv
 # Optional: enforce exact normalization (numerical drift)
 k_ctr ./= sum(k_ctr)
 
-# plt.plot(λs_korg, k_ctr)
+plt.plot(λs_korg, k_ctr)
 # end
 
-# plt.show()
+plt.show()
 
 # plt.plot(σ, Kσ)
 # plt.show()

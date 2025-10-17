@@ -127,7 +127,7 @@ cmap = plt.get_cmap("viridis")#colormaps.batlowk
 norm = mpl.colors.Normalize(vmin=0.0, vmax=125.0)
 sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
-# set up a figure for flux
+# set up figures
 figsize=(15,15)
 ticklabelsize = 24
 plt.clf(); plt.close("all")
@@ -142,7 +142,6 @@ ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(v
 ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
 # ax1.grid(false)
 
-# set up a figure for temp
 fig2, ax2 = plt.subplots(figsize=figsize)
 ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
@@ -153,6 +152,27 @@ ax2.yaxis.set_tick_params(labelsize=ticklabelsize)
 ax2.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(vsinis_kms)/1.8)
 ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
 
+fig3, ax3 = plt.subplots(figsize=figsize)
+ax3.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax3.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax3.set_xticks(vsinis_kms)
+ax3.set_yticks(vmacs_kms)
+ax3.xaxis.set_tick_params(labelsize=ticklabelsize)
+ax3.yaxis.set_tick_params(labelsize=ticklabelsize)
+ax3.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(vsinis_kms)/1.8)
+ax3.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
+
+fig4, ax4 = plt.subplots(figsize=figsize)
+ax4.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax4.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax4.set_xticks(vsinis_kms)
+ax4.set_yticks(vmacs_kms)
+ax4.xaxis.set_tick_params(labelsize=ticklabelsize)
+ax4.yaxis.set_tick_params(labelsize=ticklabelsize)
+ax4.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(vsinis_kms)/1.8)
+ax4.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
+
+# parameters for inset axes
 wstr = "175%"
 hstr = "175%"
 
@@ -171,7 +191,7 @@ for k in eachindex(vsinis)
     B = 0.0
     C = 0.0
     v0 = vsinis[k]
-    Nϕ = 8
+    Nϕ = 12
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
     # flatten, move to cpu
@@ -259,7 +279,7 @@ for k in eachindex(vsinis)
         rmse_flux_cont = round(sqrt(sum((100 .* flux_integration_norm .- 100 .* flux_convolution_norm).^2.0) / length(flux_integration_norm)), digits=3)
         rmse_temp = round(sqrt(sum((form_temp_integration .- form_temp_convolution).^2.0) / length(form_temp_integration)), digits=1)
 
-        # inset axes for flux
+        # inset axes 
         bbox = mtrans[:Bbox][:from_bounds](vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
         iax1 = inset.inset_axes(ax1, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
@@ -271,7 +291,6 @@ for k in eachindex(vsinis)
         iax1.grid(false)
         # iax1.text(0.5, 0.05, L"\mathrm{RMSE} = %$rmse_flux_cont \ \mathrm{\%}", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
 
-        # inset axes for temperature 
         iax2 = inset.inset_axes(ax2, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 
                                bbox_transform=ax2.transData, borderpad=0)
@@ -283,28 +302,68 @@ for k in eachindex(vsinis)
         iax2.grid(false)
         iax2.text(0.5, 0.05, L"\mathrm{RMSE} \approx %$rmse_temp \ \mathrm{K}", transform=iax2.transAxes, fontsize=12, va="bottom", ha="center")
 
+        iax3 = inset.inset_axes(ax3, width=wstr, height=hstr, loc="center",
+                               bbox_to_anchor=bbox, 
+                               bbox_transform=ax3.transData, borderpad=0)
+        # iax3.plot(λs_korg, flux_err_pct, c="tab:blue")
+        iax3.plot(λs_korg, flux_integration_norm, c="k")
+        iax3.plot(λs_korg, flux_convolution_norm, c="tab:blue")
+        iax3.set_frame_on(true)
+        iax3.set_ylim(0.1, 1.1)
+        iax3.grid(false)
+        # iax3.text(0.5, 0.05, L"\mathrm{RMSE} = %$rmse_flux_cont \ \mathrm{\%}", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
+
+        # inset axes for temperature 
+        iax4 = inset.inset_axes(ax4, width=wstr, height=hstr, loc="center",
+                               bbox_to_anchor=bbox, 
+                               bbox_transform=ax4.transData, borderpad=0)
+        # iax4.plot(λs_korg, temp_err_pct, color=cmap(norm(rmse_temp)))#c="tab:blue")
+        # iax4.plot(λs_korg, temp_err_pct, c="tab:blue")
+        iax4.plot(λs_korg, form_temp_integration, c="k")
+        iax4.plot(λs_korg, form_temp_convolution, c="tab:blue")
+        iax4.set_frame_on(true)
+        iax4.set_ylim(4000, 6200)
+        iax4.grid(false)
+        # iax4.text(0.5, 0.05, L"\mathrm{RMSE} \approx %$rmse_temp \ \mathrm{K}", transform=iax2.transAxes, fontsize=12, va="bottom", ha="center")
+
         if (k == 1) & (j == 1)
             iax1.set_xlabel(L"{\rm Wavelength\ [\AA]}")
             iax1.set_ylabel(L"{\rm \%\ Flux\ Error}")
             iax2.set_xlabel(L"{\rm Wavelength\ [\AA]}")
             iax2.set_ylabel(L"T_{1/2}\ {\rm Error\ [K]}")
+            iax3.set_xlabel(L"{\rm Wavelength\ [\AA]}")
+            iax3.set_ylabel(L"{\rm Rel.\ Flux}")
+            iax4.set_xlabel(L"{\rm Wavelength\ [\AA]}")
+            iax4.set_ylabel(L"T_{1/2}\ {\rm [K]}")
         elseif k == 1
             iax1.set_xticklabels([])
             iax2.set_xticklabels([])
+            iax3.set_xticklabels([])
+            iax4.set_xticklabels([])
 
             iax1.set_ylabel(L"{\rm \%\ Flux\ Error}")
             iax2.set_ylabel(L"T_{1/2}\ {\rm Error\ [K]}")
+            iax3.set_ylabel(L"{\rm Rel.\ Flux}")
+            iax4.set_ylabel(L"T_{1/2}\ {\rm [K]}")
         elseif j == 1
             iax1.set_yticklabels([])
             iax2.set_yticklabels([])
+            iax3.set_yticklabels([])
+            iax4.set_yticklabels([])
 
             iax1.set_xlabel(L"{\rm Wavelength\ [\AA]}")
             iax2.set_xlabel(L"{\rm Wavelength\ [\AA]}")
+            iax3.set_xlabel(L"{\rm Wavelength\ [\AA]}")
+            iax4.set_xlabel(L"{\rm Wavelength\ [\AA]}")
         else
             iax1.set_xticklabels([])
             iax1.set_yticklabels([])
             iax2.set_xticklabels([])
             iax2.set_yticklabels([])
+            iax3.set_xticklabels([])
+            iax3.set_yticklabels([])
+            iax4.set_xticklabels([])
+            iax4.set_yticklabels([])
         end
     end 
 end
@@ -320,4 +379,11 @@ fig1.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
 # fig2.colorbar(sm, cax=axins)
 fig2.tight_layout()
 fig2.savefig("figures/big_plot_temperature.pdf", bbox_inches="tight")
+
+fig3.tight_layout()
+fig3.savefig("figures/other_big_plot_flux.pdf", bbox_inches="tight")
+
+fig4.tight_layout()
+fig4.savefig("figures/other_big_plot_temperature.pdf", bbox_inches="tight")
+
 plt.clf(); plt.close("all");
