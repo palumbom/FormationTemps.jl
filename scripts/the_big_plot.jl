@@ -1,7 +1,7 @@
 using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
-using HDF5, Printf
+using HDF5, Printf, JLD2
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
@@ -119,8 +119,9 @@ vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
 
 # set limb darkening
-u1 = 0.4
-u2 = 0.26
+@load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
+# u1 = 0.4
+# u2 = 0.26
 
 # get a colormap 
 cmap = plt.get_cmap("viridis")#colormaps.batlowk
@@ -140,7 +141,6 @@ ax1.xaxis.set_tick_params(labelsize=ticklabelsize)
 ax1.yaxis.set_tick_params(labelsize=ticklabelsize)
 ax1.set_xlim(first(vsinis_kms) - step(vsinis_kms)/1.1, last(vsinis_kms) + step(vsinis_kms)/1.8)
 ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vmacs_kms)/2.0)
-# ax1.grid(false)
 
 fig2, ax2 = plt.subplots(figsize=figsize)
 ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
@@ -180,6 +180,11 @@ mtrans = pyimport("matplotlib.transforms")
 sx = 0.1 * (maximum(vsinis ./ 1000) - minimum(vsinis ./ 1000))
 sy = 0.1 * (maximum(vmacs ./ 1000)  - minimum(vmacs ./ 1000)) 
 
+# allocate for output
+flux_integration = zeros(length(λs_korg))
+flux_cont_integration = zeros(length(λs_korg))
+cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
+
 # loop over vsini
 for k in eachindex(vsinis)
     @show k 
@@ -191,7 +196,7 @@ for k in eachindex(vsinis)
     B = 0.0
     C = 0.0
     v0 = vsinis[k]
-    Nϕ = 12
+    Nϕ = 128
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
     # flatten, move to cpu
@@ -206,11 +211,10 @@ for k in eachindex(vsinis)
 
     # loop over macro
     for j in eachindex(vmacs)
-        # allocate for output
-        ints = zeros(length(λs_korg), length(μs))
-        flux_integration = zeros(length(λs_korg))
-        flux_cont_integration = zeros(length(λs_korg))
-        cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
+        # re-zero output
+        flux_integration .= 0.0
+        flux_cont_integration .= 0.0
+        cfunc_flux_integration .= 0.0
 
         # do the disk integration
         for i in eachindex(μs_cpu)
@@ -226,11 +230,8 @@ for k in eachindex(vsinis)
             cfunc_int_i_mac = Array(FT.convolve_wavelength_axis_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_i), μ_v_mac, σ_v_mac))
             cfunc_int_cont_i_mac = Array(FT.convolve_wavelength_axis_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_cont_i), μ_v_mac, σ_v_mac))
 
-            # tabulate the intensity
-            ints[:, i] .= sum(cfunc_int_i_mac, dims=1)'
-
             # add to the flux integral
-            flux_integration .+= ints[:,i] .* dA_cpu[i]
+            flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
             flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
             cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
         end
@@ -324,7 +325,7 @@ for k in eachindex(vsinis)
         # create legend
         if (k == length(vsinis)) & (j == length(vmacs))
             iax3.legend(loc="lower center")
-            iax3.legend(loc="lower center")
+            iax4.legend(loc="lower center")
         end
 
         # axis labels
@@ -370,10 +371,9 @@ for k in eachindex(vsinis)
     end 
 end
 
-#  write out
+#  write them out
 fig1.tight_layout()
 fig1.savefig("figures/big_plot_flux.pdf", bbox_inches="tight")
-
 
 # axins = inset.inset_axes(ax2, width="5%",height="100%", loc="lower left",
 #                          bbox_to_anchor=(1.05, 0., 1, 1),
