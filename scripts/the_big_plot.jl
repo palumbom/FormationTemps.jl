@@ -105,6 +105,9 @@ flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
 cum_cfunc_flux_stationary = cumsum(cfunc_flux_stationary, dims=1)
 cum_cfunc_flux_stationary ./= maximum(cum_cfunc_flux_stationary, dims=1)
 
+cfunc_flux_cont_stationary = 2π .* FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+flux_cont_stationary = dropdims(sum(cfunc_flux_cont_stationary, dims=1), dims=1)
+
 form_temp_stationary = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
     xs = view(cum_cfunc_flux_stationary, :, i)
@@ -113,8 +116,8 @@ for i in eachindex(λs_korg)
 end
 
 # set rotational and macroturbulence grids 
-vsinis = range(0.00, 10_000.0, step=2_000)
-vmacs = range(0.0, 5_000, step=1_000)
+vsinis = range(0.00, 10_000.0, step=2_000.0)
+vmacs = range(0.0, 5_000.0, step=1_000.0)
 vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
 
@@ -196,7 +199,7 @@ for k in eachindex(vsinis)
     B = 0.0
     C = 0.0
     v0 = vsinis[k]
-    Nϕ = 24
+    Nϕ = 12
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
     # flatten, move to cpu
@@ -225,10 +228,9 @@ for k in eachindex(vsinis)
             cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
             cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
 
-            # convolve the cfunc with RT macroturbulence TODO
-            σ_v_mac .= vmacs[j]
-            cfunc_int_i_mac = Array(FT.convolve_wavelength_axis_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_i), μ_v_mac, σ_v_mac))
-            cfunc_int_cont_i_mac = Array(FT.convolve_wavelength_axis_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_cont_i), μ_v_mac, σ_v_mac))
+            # convolve the cfunc with RT macroturbulence
+            cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_i), vmacs[j]))
+            cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_cont_i), vmacs[j]))
 
             # add to the flux integral
             flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
@@ -244,7 +246,8 @@ for k in eachindex(vsinis)
         # get the convolution
         cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsinis[k], vmacs[j], u1, u2))
         flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-        flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_cont_integration, vsinis[k], vmacs[j], u1, u2))
+        cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_cont_stationary, vsinis[k], vmacs[j], u1, u2))
+        flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
         
         # now get cumulative cfuncs 
         cum_cfunc_flux_integration = cumsum(cfunc_flux_integration, dims=1)
@@ -269,7 +272,7 @@ for k in eachindex(vsinis)
         flux_integration_norm = flux_integration ./ flux_cont_integration
         flux_convolution_norm = flux_convolution ./ flux_cont_convolution
 
-         # overplot the flux
+        # overplot the flux
         flux_err_pct = 100 .* (flux_integration .- flux_convolution) ./ flux_integration
         flux_err_cont_pct = 100 .* (flux_integration_norm .- flux_convolution_norm) ./ flux_integration_norm
         temp_err_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
