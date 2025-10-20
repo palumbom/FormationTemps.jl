@@ -120,13 +120,13 @@ vsini = 2100.0
 ζ_rt = 1400.0
 
 # set limb darkening
-u1 = 0.0
-u2 = 0.0
+u1 = 0.4
+u2 = 0.26
 
 xs = λs_korg
 ys = cfunc_flux_stationary
 intres = range(50, 1000, step=50)
-intres = 2400
+intres = 10_000
 
 # for i in intres
 N = length(xs)
@@ -160,12 +160,14 @@ rt_macro_kernel = FT.gray_rt_macro_kernel(vs, ζ_rt)
 gray_rot_kernel = FT.gray_rot_kernel(vs, vsini, u1)
 
 # plot the RT case
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+plt.close("all")
+#= fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
 ax1.plot(λs_korg, rt_macro_kernel, label="gray")
 ax1.plot(λs_korg, hirano_no_rot, label="hirano")
 ax2.scatter(λs_korg, hirano_no_rot .- rt_macro_kernel, c="tab:blue", s=2)
 ax1.set_xlim(6301.8, 6302.2)
 ax1.legend()
+ax1.set_title("Macro Only")
 plt.show()
 
 # plot the vsini case
@@ -174,19 +176,40 @@ ax1.plot(λs_korg, gray_rot_kernel, label="gray")
 ax1.plot(λs_korg, hirano_no_macro, label="hirano")
 ax2.scatter(λs_korg, hirano_no_macro .- gray_rot_kernel, c="tab:blue", s=2)
 ax1.set_xlim(6301.8, 6302.2)
+ax1.set_title("Rotation Only")
 ax1.legend()
 plt.show()
-
+ =#
 # now get contribution functions + flux
 cfunc_flux_hirano_norot = FT.convolve_hirano_rotmacro(xs, ys, 0.0, ζ_rt, u1, u2, intres=intres)
 cfunc_flux_hirano_nomacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, 0.0, u1, u2, intres=intres)
 
 cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
-cfunc_flux_macrogray = FT.convolve_gray_rt_macro(xs, ys, vsini, u1)
+cfunc_flux_macrogray = FT.convolve_gray_rt_macro(xs, ys, ζ_rt)
 
-flux_rotmacro = dropdims(sum(cfunc_flux_rotmacro, dims=1), dims=1)
+flux_hirano_norot = dropdims(sum(cfunc_flux_hirano_norot, dims=1), dims=1)
+flux_hirano_nomacro = dropdims(sum(cfunc_flux_hirano_nomacro, dims=1), dims=1)
+
 flux_rotgray = dropdims(sum(cfunc_flux_rotgray, dims=1), dims=1)
+flux_macrogray = dropdims(sum(cfunc_flux_macrogray, dims=1), dims=1)
 
+# plot the RT case
+fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+ax1.plot(λs_korg, flux_macrogray, label="gray")
+ax1.plot(λs_korg, flux_hirano_norot, label="hirano")
+ax2.scatter(λs_korg, 100 .* (flux_hirano_norot .- flux_macrogray) ./ flux_hirano_norot, c="tab:blue", s=2)
+ax1.legend()
+ax1.set_title("Macro Only")
+plt.show()
+
+# plot the vsini case
+fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+ax1.plot(λs_korg, flux_rotgray, label="gray")
+ax1.plot(λs_korg, flux_hirano_nomacro, label="hirano")
+ax2.scatter(λs_korg, 100 .* (flux_hirano_nomacro .- flux_rotgray) ./ flux_hirano_nomacro, c="tab:blue", s=2)
+ax1.legend()
+ax1.set_title("Rotation Only")
+plt.show()
 # # plt.plot(λs_korg, flux_stationary)
 # plt.plot(λs_korg, flux_rotmacro)
 # plt.plot(λs_korg, flux_rotgray)

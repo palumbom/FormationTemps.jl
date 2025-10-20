@@ -9,7 +9,7 @@ function gray_rt_macro_kernel(vs::AA{T,1}, ζ_rt::T) where T<:AF
 end
 
 
-function convolve_gray_rt_macro()
+function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T) where T<:AF
     # offset the kernel by the velocity
     λ0 = mean(xs)
     vs = c_ms .* (xs .- λ0) ./ λ0
@@ -19,24 +19,24 @@ function convolve_gray_rt_macro()
     vs = c_ms .* (xs .- λ0) ./ λ0
 
     # get the normalized kernel
-    kernel = gray_rt_macro_kernel(vs, vsini)
+    kernel = gray_rt_macro_kernel(vs, ζ_rt)
 
     # return convolution
     return imfilter(ys, reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
 end 
 
-function convolve_gray_rt_macro()
-    # offset the kernel by the velocity
-    λ0 = mean(xs)
-    vs = c_ms .* (xs .- λ0) ./ λ0
-
+function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
     # offset the kernel by the velocity
     λ0 = mean(xs)
     vs = c_ms .* (xs .- λ0) ./ λ0
 
     # get the normalized kernel
-    kernel = gray_rt_macro_kernel(vs, vsini)
+    kernel = gray_rt_macro_kernel(vs, ζ_rt)
 
-    # return convolution
-    return imfilter(ys, reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
+    # allocate array for output spectrum
+    ys_out = zeros(size(ys))
+    for t in axes(ys, 1)
+        ys_out[t, :] .= imfilter(ys[t, :], reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
+    end
+    return ys_out
 end 

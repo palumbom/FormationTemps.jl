@@ -37,8 +37,15 @@ include("structures/GPUMemory.jl")
 
 # numerical stuff
 include("interpolations.jl")
+
+# microturbulence
 include("microturbulence.jl")
-include("rotmacro.jl")
+
+# macroturbulence
+include("macroturbulence/gray_rot.jl")
+include("macroturbulence/gray_rt.jl")
+include("macroturbulence/hirano.jl")
+include("macroturbulence/isotropic.jl")
 
 # linelist + stellar model stuff
 include("linelist.jl")
