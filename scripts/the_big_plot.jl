@@ -137,7 +137,7 @@ ticklabelsize = 24
 plt.clf(); plt.close("all")
 fig1, ax1 = plt.subplots(figsize=figsize)
 ax1.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
-ax1.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax1.set_ylabel(L"\zeta_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax1.set_xticks(vsinis_kms)
 ax1.set_yticks(vmacs_kms)
 ax1.xaxis.set_tick_params(labelsize=ticklabelsize)
@@ -147,7 +147,7 @@ ax1.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vma
 
 fig2, ax2 = plt.subplots(figsize=figsize)
 ax2.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
-ax2.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax2.set_ylabel(L"\zeta_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax2.set_xticks(vsinis_kms)
 ax2.set_yticks(vmacs_kms)
 ax2.xaxis.set_tick_params(labelsize=ticklabelsize)
@@ -157,7 +157,7 @@ ax2.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vma
 
 fig3, ax3 = plt.subplots(figsize=figsize)
 ax3.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
-ax3.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax3.set_ylabel(L"\zeta_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax3.set_xticks(vsinis_kms)
 ax3.set_yticks(vmacs_kms)
 ax3.xaxis.set_tick_params(labelsize=ticklabelsize)
@@ -167,7 +167,7 @@ ax3.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vma
 
 fig4, ax4 = plt.subplots(figsize=figsize)
 ax4.set_xlabel(L"v \sin i \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
-ax4.set_ylabel(L"\xi_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
+ax4.set_ylabel(L"\zeta_{\rm RT} \ {\rm [km\ s}^{-1} {\rm ]}", fontsize=24)
 ax4.set_xticks(vsinis_kms)
 ax4.set_yticks(vmacs_kms)
 ax4.xaxis.set_tick_params(labelsize=ticklabelsize)
@@ -199,7 +199,7 @@ for k in eachindex(vsinis)
     B = 0.0
     C = 0.0
     v0 = vsinis[k]
-    Nϕ = 12
+    Nϕ = 48
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
     # flatten, move to cpu
@@ -291,7 +291,7 @@ for k in eachindex(vsinis)
         # iax1.plot(λs_korg, flux_err_pct, c="tab:blue")
         iax1.plot(λs_korg, flux_err_cont_pct, c="tab:blue")
         iax1.set_frame_on(true)
-        iax1.set_ylim(-25, 25)
+        iax1.set_ylim(-15, 15)
         iax1.grid(false)
         # iax1.text(0.5, 0.05, L"\mathrm{RMSE} = %$rmse_flux_cont \ \mathrm{\%}", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
 
@@ -302,7 +302,7 @@ for k in eachindex(vsinis)
         # iax2.plot(λs_korg, temp_err_pct, c="tab:blue")
         iax2.plot(λs_korg, temp_err, c="tab:blue")
         iax2.set_frame_on(true)
-        iax2.set_ylim(-425, 425)
+        iax2.set_ylim(-150, 150)
         iax2.grid(false)
         iax2.text(0.5, 0.05, L"\mathrm{RMSE} \approx %$rmse_temp \ \mathrm{K}", transform=iax2.transAxes, fontsize=12, va="bottom", ha="center")
 
@@ -322,7 +322,7 @@ for k in eachindex(vsinis)
         iax4.plot(λs_korg, form_temp_integration, c="k", label=L"{\rm Integration}")
         iax4.plot(λs_korg, form_temp_convolution, c="tab:blue", label=L"{\rm Convolution}")
         iax4.set_frame_on(true)
-        iax4.set_ylim(4000, 6200)
+        iax4.set_ylim(4200, 6200)
         iax4.grid(false)
 
         # create legend

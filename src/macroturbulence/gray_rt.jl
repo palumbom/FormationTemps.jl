@@ -9,6 +9,11 @@ function gray_rt_macro_kernel(vs::AA{T,1}, ζ_rt::T) where T<:AF
 end
 
 function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T) where T<:AF
+    # short circuit
+    if iszero(ζ_rt)
+        return ys
+    end
+
     # offset the kernel by the velocity
     λ0 = mean(xs)
     vs = c_ms .* (xs .- λ0) ./ λ0
@@ -21,6 +26,11 @@ function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T) where T<:AF
 end 
 
 function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
+    # short circuit
+    if iszero(ζ_rt)
+        return ys
+    end
+
     # offset the kernel by the velocity
     λ0 = mean(xs)
     vs = c_ms .* (xs .- λ0) ./ λ0
@@ -60,6 +70,11 @@ function convolve_gray_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
     copyto!(cmem.ys_gpu, CuArray(ys))
+
+    # short circuit
+    if iszero(ζ_rt)
+        return cmem.ys_gpu
+    end
 
     # compute velocity offset 
     λ0 = mean(cmem.xs_gpu)
