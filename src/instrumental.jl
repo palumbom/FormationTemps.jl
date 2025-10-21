@@ -126,14 +126,14 @@ function rebin_spectrum(xs_old::AA{T,1}, ys_old::AA{T,1}, σs_old::AA{T,1}, xs_n
 end
 
 function convolve_instrument_gauss(xs::AA{T,1}, ys::AA{T,1}; new_res::T=1.17e5,
-                                   oversampling::T=2.0) where T<:AbstractFloat
+                                   oversampling::T=2.0) where T<:AF
     # get kernel
     σ(x) = x / new_res / (2.0 * sqrt(2 * log(2)))
     g(x, n) = (one(T)/(σ(x) * sqrt(2.0 * π))) * exp(-0.5 * ((x - n)/σ(x))^2)
 
     # offset the kernel by the velocity
     λ0 = mean(xs)
-    λc = (μ_v / c_ms) * λ0 + λ0
+    λc = λ0
 
     # sample and normalize the kernel
     kernel = g.(xs, λc)
@@ -148,5 +148,5 @@ function convolve_instrument_gauss(xs::AA{T,1}, ys::AA{T,1}; new_res::T=1.17e5,
     xs_out = exp.(lnλs)
 
     # return rebinned spectrum
-    return rebin_spectrum(xs, convolved, xs_out)
+    return xs_out, rebin_spectrum(xs, convolved, xs_out)
 end

@@ -1,9 +1,8 @@
 using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
-using HDF5, Printf
+using HDF5, Printf, JLD2
 using CUDA, BenchmarkTools
-using FFTW
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
 plt.ioff()
@@ -74,7 +73,7 @@ Ts = atm_gpu.Ts
 τ5000 = atm_gpu.τs
 
 # make the wavelength grid
-buffer = 0.5
+buffer = 1.5
 λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
@@ -105,25 +104,31 @@ cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
 flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
 
-cum_cfunc_flux_stationary = cumsum(cfunc_flux_stationary, dims=1)
-cum_cfunc_flux_stationary ./= maximum(cum_cfunc_flux_stationary, dims=1)
-
-form_temp_stationary = zeros(length(λs_korg))
-for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_flux_stationary, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_stationary[i] = itp(0.5)
-end
+cfunc_flux_cont_stationary = 2π .* FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+flux_cont_stationary = dropdims(sum(cfunc_flux_cont_stationary, dims=1), dims=1)
 
 # set rotational and macroturbulence 
 vsini = 2100.0
 ζ_rt = 1400.0
 
+# set limb darkening
+@load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
+# u1 = 0.4
+# u2 = 0.26
+
+# get the convolved flux
+flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_stationary, vsini, ζ_rt, u1, u2))
+flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_cont_stationary, vsini, ζ_rt, u1, u2))
+flux_convolution_norm = flux_convolution ./ flux_cont_convolution
+
 # create resolution grid 
-Δλ_grid = range(0.001, 0.1001, length=5)
-R_grid = [10_000.0, 25_000.0, 50_000.0, 75_000.0, 100_000.0]
+R_grid = [10_000.0, 25_000.0, 50_000.0, 75_000.0, 100_000.0, 125_000.0, 150_000.0, 200_000.0]
 
-for i in eachindex(Δλ_grid)
+# plt.close("all")
+plt.plot(λs_korg, flux_convolution_norm, c="k")
 
-
+for i in eachindex(R_grid)
+    new_wavs, new_flux = FT.convolve_instrument_gauss(λs_korg, flux_convolution_norm, new_res=R_grid[i], oversampling=20.0)
+    plt.plot(new_wavs, new_flux)
 end
+plt.show()
