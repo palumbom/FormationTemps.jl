@@ -47,6 +47,9 @@ include("macroturbulence/gray_rt.jl")
 include("macroturbulence/hirano.jl")
 include("macroturbulence/isotropic.jl")
 
+# instrumental profile
+include("instrumental.jl")
+
 # linelist + stellar model stuff
 include("linelist.jl")
 include("atmosphere.jl")
