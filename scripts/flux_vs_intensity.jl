@@ -136,7 +136,7 @@ colors = cmap(norm(μs))
 
 fig, ax1 = plt.subplots()
 for i in eachindex(μs)
-    plt.plot(λs_korg, intensities[:,i] ./ 10^exponent_int, c=colors[i,:], lw=1.75)
+    ax1.plot(λs_korg, intensities[:,i] ./ 10^exponent_int, c=colors[i,:], lw=1.75)
 end 
 # plt.plot(λs_korg, flux_disk_integrated, c="k")
 
@@ -150,6 +150,27 @@ ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
 # ax1.set_ylabel(L"I_\nu\," * offset * L"{\rm\, (erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} )}")
 ax1.set_ylabel(L"I_\nu^+(\mu)\ {\rm [10^{%$exponent_int}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}")
 fig.savefig(joinpath(plotdir, "intensity_vs_limb_angle.pdf"), bbox_inches="tight")
+plt.clf(); plt.close()
+
+fig, ax1 = plt.subplots()
+
+ax2 = ax1.twinx()
+
+for i in eachindex(μs)
+    ax1.plot(λs_korg, intensities[:,i] ./ 10^exponent_int, c=colors[i,:], lw=1.75)
+end 
+ax2.plot(λs_korg, flux_disk_integrated , c="k", label=L"{\rm Flux}")
+
+sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+cbar = plt.colorbar(sm, ax=ax1)
+cbar.set_label(L"\mu")
+
+ax1.set_xlim(first(wls) - 0.75, last(wls) + 0.75)
+ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
+
+# ax1.set_ylabel(L"I_\nu\," * offset * L"{\rm\, (erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} )}")
+ax1.set_ylabel(L"I_\nu^+(\mu)\ {\rm [10^{%$exponent_int}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1} \ sr ^{-1} ]}")
+fig.savefig(joinpath(plotdir, "intensity_vs_limb_angle_with_flux.pdf"), bbox_inches="tight")
 plt.clf(); plt.close()
 
 # plot the ratios of the intensities

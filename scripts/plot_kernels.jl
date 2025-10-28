@@ -21,6 +21,8 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
 # python interpolation for matplotlib stuff
 interp1d = pyimport("scipy.interpolate").interp1d
 
+ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
+
 # set colormaps
 img_cmap = "viridis"
 μ_cmap = "autumn"
@@ -58,7 +60,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -155,9 +157,31 @@ n = collect(-div(N,2):(N-1-div(N,2)))
 v_ctr = n .* Δv
 hirano_no_macro = k_ctr ./ sum(k_ctr)
 
+# hirano rotmacro
+σ = FFTW.fftfreq(N) ./ Δv
+Kσ = FT.hirano_rotmacro_ft_kernel(σ, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
+K_dft = Kσ ./ Δv
+k_circ = real(ifft(K_dft))
+k_ctr  = FFTW.fftshift(k_circ)
+n = collect(-div(N,2):(N-1-div(N,2))) 
+v_ctr = n .* Δv
+hirano_rot_macro = k_ctr ./ sum(k_ctr)
+
 # get the gray rt kernel and rotation kernel
 rt_macro_kernel = FT.gray_rt_macro_kernel(vs, ζ_rt)
 gray_rot_kernel = FT.gray_rot_kernel(vs, vsini, u1)
+
+# get isotropic gaussian
+σ_g(x) = x * (ζ_rt / FT.c_ms)
+g(x, n) = exp(-((x - n) / σ_g(x))^2.0)
+
+# offset the kernel by the velocity
+λ0 = mean(λs_korg)
+λc = λ0
+
+# sample the kernel
+gaussian = g.(λs_korg, λc)
+gaussian ./= sum(gaussian)
 
 # plot the RT case
 plt.close("all")
@@ -193,7 +217,7 @@ flux_hirano_nomacro = dropdims(sum(cfunc_flux_hirano_nomacro, dims=1), dims=1)
 flux_rotgray = dropdims(sum(cfunc_flux_rotgray, dims=1), dims=1)
 flux_macrogray = dropdims(sum(cfunc_flux_macrogray, dims=1), dims=1)
 
-# plot the RT case
+#= # plot the RT case
 fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
 ax1.plot(λs_korg, flux_macrogray, label="gray")
 ax1.plot(λs_korg, flux_hirano_norot, label="hirano")
@@ -210,8 +234,19 @@ ax2.scatter(λs_korg, 100 .* (flux_hirano_nomacro .- flux_rotgray) ./ flux_hiran
 ax1.legend()
 ax1.set_title("Rotation Only")
 plt.show()
-# # plt.plot(λs_korg, flux_stationary)
-# plt.plot(λs_korg, flux_rotmacro)
-# plt.plot(λs_korg, flux_rotgray)
-# plt.show()
+ =#
 
+# over plot the kernels
+fig, ax1 = plt.subplots()
+ax1.plot(vs .- 9600, gray_rot_kernel ./ maximum(gray_rot_kernel), c=ncolors[1], label=L"\mathrm{Rotation}")
+ax1.plot(vs .- 3200, rt_macro_kernel ./ maximum(rt_macro_kernel), c=ncolors[2], ls="--", label=L"\mathrm{Radial\textendash Tangential}")
+ax1.plot(vs .+ 3200, hirano_rot_macro ./ maximum(hirano_rot_macro), c=ncolors[3], ls="-.", label=L"\mathrm{Rotation\ \&\ RT}")
+ax1.plot(vs .+ 9600, gaussian ./ maximum(gaussian), c=ncolors[7], ls=":", label=L"\mathrm{Isotropic\ Gaussian}")
+#  ax1.legend(loc="upper left", fontsize=12)
+ax1.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left", mode="expand", borderaxespad=0, ncol=2)
+ax1.set_xlabel(L"\Delta v\ {\rm [m\ s}^{-1} {\rm ]}")
+ax1.set_ylabel(L"{\rm Normalized\ Kernel}")
+ax1.set_xlim(-13500, 13500)
+#  ax1.set_ylim(-0.1, 1.2)
+plt.savefig("figures/kernels.pdf", bbox_inches="tight")
+plt.clf(); plt.close()

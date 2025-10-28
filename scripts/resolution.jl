@@ -1,6 +1,7 @@
 using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
+using ProgressMeter
 using HDF5, Printf, JLD2
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
@@ -16,6 +17,8 @@ inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
+
+ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
 
 # python interpolation for matplotlib stuff
 interp1d = pyimport("scipy.interpolate").interp1d
@@ -73,8 +76,8 @@ Ts = atm_gpu.Ts
 τ5000 = atm_gpu.τs
 
 # make the wavelength grid
-buffer = 1.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
+buffer = 0.5
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # synthesis to get the alphas
@@ -108,27 +111,100 @@ cfunc_flux_cont_stationary = 2π .* FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_me
 flux_cont_stationary = dropdims(sum(cfunc_flux_cont_stationary, dims=1), dims=1)
 
 # set rotational and macroturbulence 
-vsini = 2100.0
-ζ_rt = 1400.0
+vsinis = range(2000.0, 1.2e4, step=2000)
+ζ_rt = 3000.0
+
+# set resolution grid
+R_grid = range(5e3, 250e3, step=5e3)
 
 # set limb darkening
 @load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
+@show u1
+@show u2
 # u1 = 0.4
 # u2 = 0.26
 
-# get the convolved flux
-flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_stationary, vsini, ζ_rt, u1, u2))
-flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_cont_stationary, vsini, ζ_rt, u1, u2))
-flux_convolution_norm = flux_convolution ./ flux_cont_convolution
+# loop over vsini
+@showprogress for k in eachindex(vsinis)
+    # get the convolved flux
+    flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_stationary, vsinis[k], ζ_rt, u1, u2))
+    flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_cont_stationary, vsinis[k], ζ_rt, u1, u2))
+    flux_convolution_norm = flux_convolution ./ flux_cont_convolution
 
-# create resolution grid 
-R_grid = [10_000.0, 25_000.0, 50_000.0, 75_000.0, 100_000.0, 125_000.0, 150_000.0, 200_000.0]
+    # get disk stuff 
+    ρstar = 1.0
+    istar = 90.0
+    A = 0.00711 * vsinis[k]
+    B = 0.0
+    C = 0.0
+    v0 = vsinis[k]
+    Nϕ = 48
+    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
 
-# plt.close("all")
-plt.plot(λs_korg, flux_convolution_norm, c="k")
+    # flatten, move to cpu
+    idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
+    μs_cpu = Array(μs)[idx]
+    dA_cpu = Array(dA)[idx]
+    z_rot_cpu = Array(z_rot)[idx]
 
-for i in eachindex(R_grid)
-    new_wavs, new_flux = FT.convolve_instrument_gauss(λs_korg, flux_convolution_norm, new_res=R_grid[i], oversampling=20.0)
-    plt.plot(new_wavs, new_flux)
+    # allocate output
+    flux_integration = zeros(length(λs_korg))
+    flux_cont_integration = zeros(length(λs_korg))
+
+    # do the disk integration
+    for i in eachindex(μs_cpu)
+        # set the rotational velocity
+        μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
+
+        # get the intensity contribution function
+        cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+        cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+
+        # get the local intensity
+        int_i = dropdims(sum(cfunc_int_i, dims=1), dims=1)
+        int_cont_i = dropdims(sum(cfunc_int_cont_i, dims=1), dims=1)
+        int_i_mac = FT.convolve_gray_rt_macro(λs_korg, int_i, ζ_rt)
+        int_cont_i_mac = FT.convolve_gray_rt_macro(λs_korg, int_cont_i, ζ_rt)
+
+        # add to the flux integral
+        flux_integration .+= int_i_mac .* dA_cpu[i]
+        flux_cont_integration .+= int_cont_i_mac .* dA_cpu[i]
+    end
+
+    # normalize
+    flux_integration_norm = flux_integration ./ flux_cont_integration
+
+    # plt.close("all")
+    # plt.plot(λs_korg, flux_integration_norm .- flux_convolution_norm, c="k")
+
+    oversampling = 50.0
+    rmses = zeros(length(R_grid))
+    maxes = zeros(length(R_grid))
+    for i in eachindex(R_grid)
+        # convolve
+        new_wavs_convolution, new_flux_convolution = FT.convolve_instrument_gauss(λs_korg, flux_convolution_norm, new_res=R_grid[i], oversampling=oversampling)
+        new_wavs_integration, new_flux_integration = FT.convolve_instrument_gauss(λs_korg, flux_integration_norm, new_res=R_grid[i], oversampling=oversampling)
+
+        # get rmse
+        rmses[i] = sqrt(sum((100 .* (new_flux_integration .- new_flux_convolution)).^2.0) / length(new_flux_integration))
+        maxes[i] = maximum(abs.(100 .* (new_flux_integration .- new_flux_convolution)))
+
+        # plt.plot(new_wavs_convolution, new_flux_convolution)
+        # plt.plot(new_wavs_integration, new_flux_integration .- new_flux_convolution)
+    end
+    # TODO fix
+    # plt.plot(R_grid, rmses, label=L"v \sin i =\ " * latexstring(vsinis[k]), c=ncolors[k])
+    plt.plot(R_grid, maxes, label=L"v \sin i =\ " * latexstring(vsinis[k]), c=ncolors[k])
 end
-plt.show()
+# plt.legend()
+# plt.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
+l4 = plt.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left",
+                mode="expand", borderaxespad=0, ncol=2)
+plt.xlabel(L"{\rm Spectral\ Resolving\ Power}")
+# plt.ylabel(L"{\rm Normalized\ Flux\ RMSE\ [\%]}")
+plt.ylabel(L"{\rm Maximum\ Flux\ Error\ [\%]}")
+plt.tight_layout()
+plt.gca().set_xscale("log")
+# plt.gca().set_yscale("symlog")
+plt.savefig("figures/resolution_scaling.pdf", bbox_inches="tight")
+plt.clf(); plt.close()
