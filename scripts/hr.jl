@@ -128,6 +128,12 @@ cfunc_flux_integration = zeros(length(λs_korg))
 # loop over stars
 max_errors = zeros(length(T_effs))
 for i in eachindex(T_effs)
+    # don't do giants (very loosely defined)
+    if loggs[i] < 3.75
+        max_errors[i] = NaN
+        continue
+    end
+ 
     # get the atmosphere
     marcs_atm = FT.get_marcs_atm(T_effs[i], loggs[i], A_X, n_layers=Natm)
     τ_500 = Korg.get_tau_refs(marcs_atm)
@@ -262,9 +268,15 @@ for i in eachindex(T_effs)
 end
 
 # scatter plot 
-sc = plt.scatter(df.Teff, df.logg, s=vsinis./1000, c=max_errors, vmin=1.0, vmax=5.0)
-plt.colorbar()
-plt.gca().xaxis.set_inverted(true)
-plt.gca().yaxis.set_inverted(true)
-plt.show()
+fig, ax1 = plt.subplots()
+sc = ax1.scatter(df.Teff, df.logg, s=vsinis./1000, c=max_errors)#, vmin=1.0, vmax=5.0)
+ax1.xaxis.set_inverted(true)
+ax1.yaxis.set_inverted(true)
+
+ax1.set_xlabel(L"T_{\rm eff}\ {\rm [K]}")
+ax1.set_ylabel(L"\log g")
+
+fig.colorbar(sc)
+fig.tight_layout()
+fig.savefig("figures/hr_error.pdf", bbox_inches="tight")
 plt.show()
