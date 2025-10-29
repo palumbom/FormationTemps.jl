@@ -1,3 +1,5 @@
+using PyPlot
+
 """
 Equation 18.14 from The Observation and Analysis of Stellar Photospheres
 (Gray 2008)
@@ -110,9 +112,7 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # copyto!(cmem.ys_gpu, cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ])
-    # return nothing
-    out = @view cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ]
+    out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
 end

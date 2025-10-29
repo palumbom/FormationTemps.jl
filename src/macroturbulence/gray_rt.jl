@@ -116,7 +116,7 @@ function convolve_gray_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # slice valid region
     # copyto!(cmem.ys_gpu, cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ])
     # return nothing
-    out = @view cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ]
+    out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
 end

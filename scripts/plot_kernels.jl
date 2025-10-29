@@ -207,6 +207,7 @@ plt.show()
 # now get contribution functions + flux
 cfunc_flux_hirano_norot = FT.convolve_hirano_rotmacro(xs, ys, 0.0, ζ_rt, u1, u2, intres=intres)
 cfunc_flux_hirano_nomacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, 0.0, u1, u2, intres=intres)
+cfunc_flux_hirano_rotmacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2, intres=intres)
 
 cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
 cfunc_flux_macrogray = FT.convolve_gray_rt_macro(xs, ys, ζ_rt)
@@ -236,7 +237,7 @@ ax1.set_title("Rotation Only")
 plt.show()
  =#
 
-# over plot the kernels
+# overplot the kernels
 fig, ax1 = plt.subplots()
 ax1.plot(vs .- 9600, gray_rot_kernel ./ maximum(gray_rot_kernel), c=ncolors[1], label=L"\mathrm{Rotation}")
 ax1.plot(vs .- 3200, rt_macro_kernel ./ maximum(rt_macro_kernel), c=ncolors[2], ls="--", label=L"\mathrm{Radial\textendash Tangential}")

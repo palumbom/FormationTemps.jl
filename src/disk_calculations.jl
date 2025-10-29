@@ -1,4 +1,4 @@
-function calc_stellar_grid(ρs::T1, i::T1, A::T1, B::T1, C::T1, v0::T1, Nϕ::Int) where T1<:AF
+function calc_stellar_grid(ρs::T1, i::T1, vsini::T1, Nϕ::Int) where T1<:AF
     # allocate on GPU
     μs = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
     dA = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
@@ -6,11 +6,11 @@ function calc_stellar_grid(ρs::T1, i::T1, A::T1, B::T1, C::T1, v0::T1, Nϕ::Int
     z_cbs = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
 
     # calculate in place and return
-    calc_stellar_grid!(ρs, i, A, B, C, v0, Nϕ, μs, dA, z_rot, z_cbs)
+    calc_stellar_grid!(ρs, i, vsini, Nϕ, μs, dA, z_rot, z_cbs)
     return μs, dA, z_rot, z_cbs
 end
 
-function calc_stellar_grid!(ρs::T1, inclination::T1, A::T1, B::T1, C::T1, v0::T1, Nϕ::Int,
+function calc_stellar_grid!(ρs::T1, inclination::T1, vsini::T1, Nϕ::Int,
                             μs::CuArray{T2,2}, dA::CuArray{T2,2},
                             z_rot::CuArray{T2,2}, z_cbs::CuArray{T2,2}) where {T1<:AF, T2<:AF}
     # get precision from GPU allocs
@@ -18,10 +18,7 @@ function calc_stellar_grid!(ρs::T1, inclination::T1, A::T1, B::T1, C::T1, v0::T
 
     # convert scalars from disk params to desired precision
     ρs = convert(precision, ρs)
-    A = convert(precision, A)
-    B = convert(precision, B)
-    C = convert(precision, C)
-    v0 = convert(precision, v0)
+    vsini = convert(precision, vsini)
 
     # get latitude grid
     ϕe = range(deg2rad(-90.0), deg2rad(90.0), length=Nϕ+1)
@@ -51,7 +48,7 @@ function calc_stellar_grid!(ρs::T1, inclination::T1, A::T1, B::T1, C::T1, v0::T
     # copy data to GPU
     @cusync begin
         # get observer vector and rotation matrix
-        O⃗ = CuArray{precision}([0.0, 0.0, 1e6]) # CuArray{precision}(gprops.O⃗)
+        O⃗ = CuArray{precision}([0.0, 0.0, 1e12]) # CuArray{precision}(gprops.O⃗)
         Nθ = CuArray{Int32}(Nθ)
         R_x = CuArray{precision}(R_x)
     end
@@ -61,12 +58,12 @@ function calc_stellar_grid!(ρs::T1, inclination::T1, A::T1, B::T1, C::T1, v0::T
     blocks1 = cld(Nϕ * Nθ_max, prod(threads1))
     @cusync @captured @cuda threads=threads1 blocks=blocks1 calc_stellar_grid!(μs, dA, z_rot, Nϕ,
                                                                                Nθ_max, Nθ, R_x, O⃗,
-                                                                               ρs, A, B, C, v0)
+                                                                               ρs, vsini)
 
     return nothing
 end
 
-function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, A, B, C, v0)
+function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, vsini)
     # get indices from GPU blocks + threads
     idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
     sdx = gridDim().x * blockDim().x
@@ -117,11 +114,9 @@ function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, A
         e /= def_norm
         f /= def_norm
 
-        # set magnitude by differential rotation
-        rp = 2π * ρs * CUDA.cos(ϕc) / rotation_period(ϕc, A, B, C)
-
-        # get in units of c
-        rp /= c_Rsun_day
+        # set magnitude of rotation
+        rp = vsini / c_ms
+        # TODO differential rotation
 
         # set magnitude of vector
         d *= rp

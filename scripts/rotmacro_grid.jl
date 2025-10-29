@@ -55,7 +55,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -83,7 +83,7 @@ FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, 
 # allocate memory for convolutions
 Nλ = length(λs_korg)
 Natm = size(αs, 1)
-Npad = 100
+Npad = 2400
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # allocate on device
@@ -188,6 +188,10 @@ flux_integration = zeros(length(λs_korg))
 flux_cont_integration = zeros(length(λs_korg))
 cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
 
+cfunc_int_i_gpu = CUDA.zeros(Float64, length(zs)-1, length(λs_korg))
+cfunc_int_cont_i_gpu = CUDA.zeros(Float64, length(zs)-1, length(λs_korg))
+λs_gpu = CuArray(λs_korg)
+
 # loop over vsini
 for k in eachindex(vsinis)
     @show k 
@@ -195,12 +199,9 @@ for k in eachindex(vsinis)
     # get disk stuff 
     ρstar = 1.0
     istar = 90.0
-    A = 0.00711 * vsinis[k]
-    B = 0.0
-    C = 0.0
     v0 = vsinis[k]
-    Nϕ = 48
-    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
+    Nϕ = 32
+    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
     idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
@@ -229,8 +230,10 @@ for k in eachindex(vsinis)
             cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
 
             # convolve the cfunc with RT macroturbulence
-            cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_i), vmacs[j]))
-            cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_cont_i), vmacs[j]))
+            copyto!(cfunc_int_i_gpu, cfunc_int_i)
+            copyto!(cfunc_int_cont_i_gpu, cfunc_int_cont_i)
+            cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_gpu, cfunc_int_i_gpu, vmacs[j]))
+            cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_gpu, cfunc_int_cont_i_gpu, vmacs[j]))
 
             # add to the flux integral
             flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
@@ -244,9 +247,9 @@ for k in eachindex(vsinis)
         cfunc_flux_integration .*= 1e-8
 
         # get the convolution
-        cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsinis[k], vmacs[j], u1, u2))
+        cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsinis[k], vmacs[j], u1, u2))
         flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-        cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_cont_stationary, vsinis[k], vmacs[j], u1, u2))
+        cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsinis[k], vmacs[j], u1, u2))
         flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
         
         # now get cumulative cfuncs 
