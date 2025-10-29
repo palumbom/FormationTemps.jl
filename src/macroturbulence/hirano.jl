@@ -114,26 +114,26 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
     CUDA.synchronize()
 
-    # write the padded kernel once (row 1)
+    # write padded kernel into row 1
     kernel_row = @view cmem.padded_kernel_gpu[1, :]
     shifted_kernel_row = @view cmem.shift_kernel_gpu[1, :]
 
     fill!(kernel_row, zero(T))
     @views copyto!(kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ], kernel_gpu)
 
+    # normalize the kernel
+    normval = CUDA.sum(kernel_row)
+    kernel_row ./= normval
+
     # center the kernel
     CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
 
-    # make a contiguous 1-D device vector
-    kr = copy(shifted_kernel_row)
-
-    # forward fourier transforms (R2C on device)
-    kernel_row_ft = CUDA.CUFFT.rfft(kr)
+    # forward fourier transforms
+    mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.shift_kernel_gpu)   # kernel FT in row 1
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
 
-    # convolution theorem
-    kft = reshape(kernel_row_ft, 1, :)
-    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
+    # convolution theorem (broadcast first-row kernel spectrum)
+    @views cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu[1:1, :]
 
     # inverse fourier transform
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)

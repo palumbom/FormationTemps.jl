@@ -117,7 +117,7 @@ end
 
 # set rotational and macroturbulence grids 
 vsinis = range(0.00, 10_000.0, step=2_000.0)
-vmacs = range(0.0, 5_000.0, step=1_000.0)
+vmacs = range(0.0, 10_000.0, step=2_000.0)
 vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
 

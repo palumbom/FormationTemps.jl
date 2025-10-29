@@ -137,10 +137,10 @@ cfunc_flux_hirano_gpu = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg
 
 println()
 
-@btime FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1)
-@btime Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
-@btime FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_stationary, ζ_rt)
-@btime Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, ζ_rt))
-@btime FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2)
+# @btime FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1)
+# @btime Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
+# @btime FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_stationary, ζ_rt)
+# @btime Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, ζ_rt))
+# @btime FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2)
 @btime Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
-println()
+# println()
