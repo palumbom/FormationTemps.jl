@@ -46,26 +46,24 @@ function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
     return ys_out
 end 
 
-function compute_padded_gray_rt_kernel_2D!(kernel, xs, λc, ζ_rt, Nλ, pad_left)
-    # get thread indices
-    i = (blockIdx().y-1) * blockDim().y + threadIdx().y
+function compute_padded_gray_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, Nλ, pad_left)
+    # get thread index
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
 
-    # loop over wavelength and atmosphere layer
-    if i <= size(kernel,1) && j <= Nλ
+    # evaluate the kernel
+    if j <= Nλ
         xj = c_ms * (xs[j] - λc) / λc
         av = CUDA.abs(xj)
         z = av / ζ_rt
 
         t1 = 2.0 * exp(-(xj/ζ_rt)^2) / (sqrt(π) * ζ_rt)
         t2 = -2.0 * av * erfc(z) / (ζ_rt^2)
-        val = t1 + t2
-        @inbounds kernel[i, j + pad_left] = val
+        @inbounds kernel_row[j + pad_left] = t1 + t2
     end
     return nothing
 end
 
-function convolve_gray_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1}, 
+function convolve_gray_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                     ys::AA{T,2}, ζ_rt::T) where {T<:AF}
     # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
@@ -76,46 +74,51 @@ function convolve_gray_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         return cmem.ys_gpu
     end
 
-    # compute velocity offset 
+    # compute velocity offset
     λ0 = mean(cmem.xs_gpu)
 
     # pad the signal
     ts = (32,32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
-                                           cmem.Nλ, cmem.pad_left, 
-                                           cmem.pad_right)
+                                           cmem.Nλ, cmem.pad_left, cmem.pad_right)
     CUDA.synchronize()
 
-    # compute the padded kernel
-    fill!(cmem.padded_kernel_gpu, zero(T))
-    ts = (32, 32)
-    bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
-    @cuda threads=ts blocks=bs compute_padded_gray_rt_kernel_2D!(cmem.padded_kernel_gpu,
-                                                                 cmem.xs_gpu, λ0, ζ_rt,
-                                                                 cmem.Nλ, cmem.pad_left)
+    # compute the padded kernel once
+    kernel_row = @view cmem.padded_kernel_gpu[1, :]
+    shifted_kernel_row = @view cmem.shift_kernel_gpu[1, :]
+
+    fill!(kernel_row, zero(T))
+    ts1 = (256,)
+    bs1 = (cld(cmem.Nλ, ts1[1]),)
+    @cuda threads=ts1 blocks=bs1 compute_padded_gray_rt_kernel_1D!(kernel_row,
+                                                                   cmem.xs_gpu, λ0,
+                                                                   ζ_rt, cmem.Nλ,
+                                                                   cmem.pad_left)
     CUDA.synchronize()
 
     # normalize the kernel
-    cmem.norm_buffer .= CUDA.sum(cmem.padded_kernel_gpu, dims=2)
-    cmem.padded_kernel_gpu ./= cmem.norm_buffer
+    normval = CUDA.sum(kernel_row)
+    kernel_row ./= normval
 
-    # shift the kernel so it is centered
-    CUDA.CUFFT.ifftshift!(cmem.shift_kernel_gpu, cmem.padded_kernel_gpu, 2)
+    # center the kernel
+    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
 
-    # forward fourier transforms
-    mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.shift_kernel_gpu)
+    # make a contiguous 1-D device vector
+    kr = copy(shifted_kernel_row)
+
+    # forward fourier transforms (R2C on device)
+    kernel_row_ft = CUDA.CUFFT.rfft(kr)
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
 
     # convolution theorem
-    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
+    kft = reshape(kernel_row_ft, 1, :)
+    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
 
     # inverse fourier transform
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # copyto!(cmem.ys_gpu, cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ])
-    # return nothing
     out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out

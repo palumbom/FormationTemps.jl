@@ -75,17 +75,6 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     return ys_out
 end
 
-# === GPU helper: copy a 1-D kernel into a padded 2-D kernel buffer ===
-function write_padded_kernel_rows!(k2d, k1d, Nλ, pad_left)
-    i = (blockIdx().y-1) * blockDim().y + threadIdx().y
-    j = (blockIdx().x-1) * blockDim().x + threadIdx().x
-    if i <= size(k2d,1) && j <= Nλ
-        @inbounds k2d[i, j + pad_left] = k1d[j]
-    end
-    return nothing
-end
-
-# === CPU helper: build the (centered, normalized) 1-D Hirano kernel from xs ===
 function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=100) where T<:AF
     N = length(xs)
     λ0 = mean(xs)
@@ -102,54 +91,54 @@ function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0
     return kernel
 end
 
-# === GPU convolution (2D) using cuFFT plans in `cmem` (same pattern as gray_rt) ===
 function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, vsini::T, ζ_rt::T,
                                       u1::T, u2::T; intres::Int=100) where {T<:AF}
-    # copy inputs to device
+    # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
     copyto!(cmem.ys_gpu, CuArray(ys))
 
-    # short circuit (no broadening)
+    # short circuit
     if iszero(vsini) && iszero(ζ_rt)
         return cmem.ys_gpu
     end
 
-    # build centered, normalized kernel on CPU (cheaper & reliable than doing the Bessel/integral on GPU)
+    # build centered, normalized kernel on host
     kernel_host = hirano_rotmacro_kernel_from_xs(xs, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
     kernel_gpu = CuArray(kernel_host)
 
-    # pad the signal [Natm × (Nλ + pad_left + pad_right)]
+    # pad the signal
     ts = (32,32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
-    @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu, cmem.Nλ, cmem.pad_left, cmem.pad_right)
+    @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
+                                           cmem.Nλ, cmem.pad_left, cmem.pad_right)
     CUDA.synchronize()
 
-    # write padded kernel rows (same kernel for every atmospheric layer row)
-    fill!(cmem.padded_kernel_gpu, zero(T))
-    ts = (32,32)
-    bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
-    @cuda threads=ts blocks=bs write_padded_kernel_rows!(cmem.padded_kernel_gpu, kernel_gpu, cmem.Nλ, cmem.pad_left)
-    CUDA.synchronize()
+    # write the padded kernel once (row 1)
+    kernel_row = @view cmem.padded_kernel_gpu[1, :]
+    shifted_kernel_row = @view cmem.shift_kernel_gpu[1, :]
 
-    # (re)normalize on device for numerical safety
-    cmem.norm_buffer .= CUDA.sum(cmem.padded_kernel_gpu, dims=2)
-    cmem.padded_kernel_gpu ./= cmem.norm_buffer
+    fill!(kernel_row, zero(T))
+    @views copyto!(kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ], kernel_gpu)
 
-    # center for FFT-based convolution
-    CUDA.CUFFT.ifftshift!(cmem.shift_kernel_gpu, cmem.padded_kernel_gpu, 2)
+    # center the kernel
+    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
 
-    # forward FFTs
-    mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.shift_kernel_gpu)
+    # make a contiguous 1-D device vector
+    kr = copy(shifted_kernel_row)
+
+    # forward fourier transforms (R2C on device)
+    kernel_row_ft = CUDA.CUFFT.rfft(kr)
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
 
     # convolution theorem
-    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
+    kft = reshape(kernel_row_ft, 1, :)
+    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
 
-    # inverse FFT
+    # inverse fourier transform
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
-    # slice valid region [Natm × Nλ]; return a view on device
+    # slice valid region
     out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
