@@ -55,7 +55,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0005)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -204,10 +204,10 @@ for k in eachindex(vsinis)
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
-    idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
-    μs_cpu = Array(μs)[idx]
-    dA_cpu = Array(dA)[idx]
-    z_rot_cpu = Array(z_rot)[idx]
+    # idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
+    μs_cpu = Array(μs)
+    dA_cpu = Array(dA)
+    z_rot_cpu = Array(z_rot)
 
     if vsinis[k] == 0.0
         z_rot_cpu .= 0.0
@@ -222,6 +222,8 @@ for k in eachindex(vsinis)
 
         # do the disk integration
         for i in eachindex(μs_cpu)
+            μs_cpu[i] <= 0.0 && continue
+
             # set the rotational velocity
             μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
 

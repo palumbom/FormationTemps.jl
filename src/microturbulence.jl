@@ -143,8 +143,7 @@ end
 #     kernel_ft = rfft(kernel_gpu, 2)
 #     signal_ft = rfft(signal_gpu, 2)
 #     conv_gpu = irfft(signal_ft .* kernel_ft, L, 2)
-#     # return Array(@view conv_gpu[:, pad_left + 1 : pad_left + Nλ])
-#     return @view conv_gpu[:, pad_left + 1 : pad_left + Nλ]
+#     return @view conv_gpu[:, pad_left: pad_left + Nλ - 1]
 # end
 
 function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1}, 
@@ -199,9 +198,7 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # copyto!(cmem.ys_gpu, cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ])
-    # return nothing
-    out = @view cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ]
+    out = @view cmem.conv_gpu[:, cmem.pad_left: cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
 end
@@ -263,5 +260,5 @@ end
 #     # slice valid region
 #     # copyto!(cmem.ys_gpu, cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ])
 #     # return nothing
-#     return @view cmem.conv_gpu[:, cmem.pad_left+1 : cmem.pad_left + cmem.Nλ]
+#     return @view cmem.conv_gpu[:, cmem.pad_left: cmem.pad_left + cmem.Nλ - 1]
 # end

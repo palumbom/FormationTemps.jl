@@ -81,7 +81,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0005)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # params for LD fit
