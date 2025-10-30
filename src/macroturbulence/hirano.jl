@@ -107,42 +107,52 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         return cmem.ys_gpu
     end
 
-    # build centered, normalized kernel on host
-    kernel_host = hirano_rotmacro_kernel_from_xs(xs, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
-    kernel_gpu = CuArray(kernel_host)
+    # velocity grid stats from discrete center
+    N = length(xs)
+    i0 = N ÷ 2 + 1
+    λ0 = xs[i0]
+    vs = c_ms .* (xs .- λ0) ./ λ0
+    Δv = (vs[end] - vs[1]) / (N - 1)
 
-    # pad the signal
+    # pad the signal (replicate) to length L
     ts = (32,32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
     CUDA.synchronize()
 
-    # write padded kernel into row 1
-    kernel_row = @view cmem.padded_kernel_gpu[1, :]
-    shifted_kernel_row = @view cmem.shift_kernel_gpu[1, :]
+    # R2C frequency grid for padded length L
+    L = cmem.L
+    nf = fld(L, 2) + 1
+    invLΔv = one(T) / (T(L) * Δv)
+    σ = Array{T}(undef, nf)
+    @inbounds for k in 0:nf-1
+        σ[k+1] = T(k) * invLΔv
+    end
 
-    fill!(kernel_row, zero(T))
-    @views copyto!(kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ], kernel_gpu)
+    # H(σ) on padded grid; normalize DC gain to 1 (matches CPU's sum(normalized kernel)=1)
+    Kσ = hirano_rotmacro_ft_kernel(σ, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
+    Kd_host = Kσ ./ Kσ[1]  # Δv cancels in K_dft/K_dft[1]
 
-    # normalize the kernel
-    normval = CUDA.sum(kernel_row)
-    kernel_row ./= normval
+    # phase to place zero-lag at padded center (remove integer roll)
+    center = L ÷ 2
+    r = center - (cmem.pad_left + i0)  # integer offset
+    twopi = T(2π)
+    θstep = -twopi * T(r) / T(L)
+    ks = T.(0:nf-1)
+    phase = Complex{T}.(cos.(θstep .* ks), sin.(θstep .* ks))
 
-    # center the kernel
-    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
+    # frequency response with phase correction on GPU
+    Kd = CuArray(Kd_host .* phase)
 
-    # forward fourier transforms
-    mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.shift_kernel_gpu)   # kernel FT in row 1
+    # forward fourier transform of padded signal (R2C)
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
 
-    # convolution theorem (broadcast first-row kernel spectrum)
-    @views cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu[1:1, :]
+    # convolution theorem (broadcast along rows)
+    @views cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* reshape(Kd, 1, :)
 
-    # inverse fourier transform
+    # inverse fourier transform and slice valid region
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
-
-    # slice valid region
     out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
