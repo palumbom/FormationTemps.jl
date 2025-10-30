@@ -113,11 +113,13 @@ u2 = 0.26
 ζ_rt = 1200.0
 
 # do rotmacro gpu
-# cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
-cfunc_flux_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
+cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+# cfunc_flux_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
+# cfunc_flux_convolution = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, ζ_rt))
 flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-# cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsini, ζ_rt, u1, u2))
-cfunc_flux_cont_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsini, u1))
+cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsini, ζ_rt, u1, u2))
+# cfunc_flux_cont_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsini, u1))
+# cfunc_flux_cont_convolution = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, ζ_rt))
 flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
 
 # normalize
@@ -125,11 +127,13 @@ flux_norm_convolution_gpu = flux_convolution ./ flux_cont_convolution
 plt.plot(flux_norm_convolution_gpu .- flux_stationary./flux_cont_stationary, label="GPU")
 
 # do rotmacro cpu
-# cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
-cfunc_flux_convolution = Array(FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1))
+cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+# cfunc_flux_convolution = Array(FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1))
+# cfunc_flux_convolution = Array(FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_stationary, ζ_rt))
 flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-# cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_cont_stationary, vsini, ζ_rt, u1, u2))
-cfunc_flux_cont_convolution = Array(FT.convolve_gray_rotation(λs_korg, cfunc_flux_cont_stationary, vsini, u1))
+cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_cont_stationary, vsini, ζ_rt, u1, u2))
+# cfunc_flux_cont_convolution = Array(FT.convolve_gray_rotation(λs_korg, cfunc_flux_cont_stationary, vsini, u1))
+# cfunc_flux_cont_convolution = Array(FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_cont_stationary, ζ_rt))
 flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
 
 # normalize
