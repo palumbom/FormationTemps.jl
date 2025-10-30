@@ -55,8 +55,8 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-buffer = 0.75
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0045)
+buffer = 0.5
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0025)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -84,7 +84,7 @@ FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, 
 # allocate memory for convolutions
 Nλ = length(λs_korg)
 Natm = size(αs, 1)
-Npad = 2400
+Npad = 1000
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # allocate on device
@@ -153,9 +153,8 @@ cfunc_int_cont_i_gpu = CUDA.zeros(Float64, length(zs)-1, length(λs_korg))
 λs_gpu = CuArray(λs_korg)
 
 # do the disk integration
-@showprogress for i in eachindex(μs_cpu)
-    μs_cpu[i] <= 0.0 && continue
-
+idx = findall(μs_cpu .> 0.0)
+@showprogress for i in idx
     # set the rotational velocity
     μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
 
@@ -184,8 +183,9 @@ flux_cont_integration .*= 1e-8
 # normalize
 flux_norm_integration = flux_integration ./ flux_cont_integration
 
-# plt.plot(λs_korg, flux_norm_convolution_gpu)
+# plt.plot(λs_korg, circshift(flux_norm_convolution_gpu, 1))
+# plt.plot(λs_korg, circshift(flux_norm_convolution_cpu, 1))
 # plt.plot(λs_korg, flux_norm_integration)
-plt.scatter(λs_korg, flux_norm_integration .- flux_norm_convolution_cpu, s=5)
-plt.scatter(λs_korg, flux_norm_integration .- flux_norm_convolution_gpu, s=5)
+plt.scatter(λs_korg, flux_norm_integration .- circshift(flux_norm_convolution_cpu, 1), s=5)
+plt.scatter(λs_korg, flux_norm_integration .- circshift(flux_norm_convolution_gpu, 0), s=5)
 plt.show()

@@ -55,7 +55,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0005)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.002)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -200,7 +200,7 @@ for k in eachindex(vsinis)
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
-    Nϕ = 32
+    Nϕ = 48
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu

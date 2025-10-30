@@ -1,8 +1,10 @@
+global const intres_glob = 500
+
 """
 Equation B12 from Hirano et al. (2011). NOTE: This is returns the Fourier
 Transform of the rotmacro convolution kernel, not the kernel itself!! 
 """
-function hirano_rotmacro_ft_kernel(σs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=100) where T<:AF
+function hirano_rotmacro_ft_kernel(σs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=intres_glob) where T<:AF
     # quadrature grid in t∈[0,1]
     t = reshape(collect(range(zero(T), one(T), length=intres)), :, 1)
     dt = t[2] - t[1]
@@ -26,7 +28,7 @@ end
 
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T, 
                                   ζ_rt::T, u1::T, u2::T; 
-                                  intres::Int=100) where T<:AF
+                                  intres::Int=intres_glob) where T<:AF
     # velocity grid
     N = length(xs)
     λ0 = mean(xs)
@@ -49,7 +51,7 @@ end
 
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T, 
                                   ζ_rt::T, u1::T, u2::T; 
-                                  intres::Int=100) where T<:AF
+                                  intres::Int=intres_glob) where T<:AF
     # velocity grid
     N = length(xs)
     λ0 = mean(xs)
@@ -75,7 +77,7 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     return ys_out
 end
 
-function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=100) where T<:AF
+function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=intres_glob) where T<:AF
     N = length(xs)
     λ0 = mean(xs)
     vs = c_ms .* (xs .- λ0) ./ λ0
@@ -93,7 +95,7 @@ end
 
 function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, vsini::T, ζ_rt::T,
-                                      u1::T, u2::T; intres::Int=100) where {T<:AF}
+                                      u1::T, u2::T; intres::Int=intres_glob) where {T<:AF}
     # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
     copyto!(cmem.ys_gpu, CuArray(ys))
