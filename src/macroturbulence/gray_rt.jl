@@ -1,5 +1,3 @@
-using FFTW
-
 """
 Equation 17.8 from Gray (2008), assuming A_R = A_T and ξ_R = ξ_T
 """

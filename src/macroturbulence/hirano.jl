@@ -31,7 +31,8 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
                                   intres::Int=intres_glob) where T<:AF
     # velocity grid
     N = length(xs)
-    λ0 = mean(xs)
+    i0 = N ÷ 2 + 1
+    λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
     Δv = (vs[end] - vs[1]) / (N - 1)
     dv = diff(vs)
@@ -40,13 +41,13 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
     σ = FFTW.fftfreq(N) ./ Δv
     Kσ = hirano_rotmacro_ft_kernel(σ, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
 
-    # inverse FT
+    # inverse FT → circular kernel with zero-lag at index 1 (GPU-style phase)
     K_dft = Kσ ./ Δv
-    k_circ = real(ifft(K_dft))              # circular kernel, zero-lag at index 1
-    kernel  = FFTW.fftshift(k_circ)          # center the kernel around v=0
-    kernel ./= sum(kernel)
+    k_circ = real(ifft(K_dft))
+    k_circ ./= sum(k_circ)
 
-    return imfilter(ys, reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
+    # convolution via FFT (matches GPU convention)
+    return real(ifft(fft(ys) .* fft(k_circ)))
 end
 
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T, 
@@ -54,7 +55,8 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
                                   intres::Int=intres_glob) where T<:AF
     # velocity grid
     N = length(xs)
-    λ0 = mean(xs)
+    i0 = N ÷ 2 + 1
+    λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
     Δv = (vs[end] - vs[1]) / (N - 1)
     dv = diff(vs)
@@ -63,16 +65,16 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     σ = FFTW.fftfreq(N) ./ Δv
     Kσ = hirano_rotmacro_ft_kernel(σ, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
 
-    # inverse FT
+    # inverse FT → circular kernel with zero-lag at index 1 (GPU-style phase)
     K_dft = Kσ ./ Δv
-    k_circ = real(ifft(K_dft))              # circular kernel, zero-lag at index 1
-    kernel  = FFTW.fftshift(k_circ)          # center the kernel around v=0
-    kernel ./= sum(kernel)
+    k_circ = real(ifft(K_dft))
+    k_circ ./= sum(k_circ)
+    ftk = fft(k_circ)
 
     # allocate array for output spectrum
     ys_out = zeros(size(ys))
     for t in axes(ys, 1)
-        ys_out[t, :] .= imfilter(ys[t, :], reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
+        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* ftk))
     end
     return ys_out
 end
