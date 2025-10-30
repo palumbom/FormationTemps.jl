@@ -117,7 +117,7 @@ end
 
 # set rotational and macroturbulence grids 
 vsinis = range(0.00, 10_000.0, step=2_000.0)
-vmacs = range(0.0, 10_000.0, step=2_000.0)
+vmacs = range(0.0, 5_000.0, step=1_000.0)
 vsinis_kms = vsinis ./ 1000
 vmacs_kms = vmacs ./ 1000
 
@@ -200,7 +200,7 @@ for k in eachindex(vsinis)
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
-    Nϕ = 48
+    Nϕ = 16
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
@@ -234,8 +234,10 @@ for k in eachindex(vsinis)
             # convolve the cfunc with RT macroturbulence
             copyto!(cfunc_int_i_gpu, cfunc_int_i)
             copyto!(cfunc_int_cont_i_gpu, cfunc_int_cont_i)
-            cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_gpu, cfunc_int_i_gpu, vmacs[j]))
-            cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_gpu, cfunc_int_cont_i_gpu, vmacs[j]))
+            # cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_gpu, cfunc_int_i_gpu, vmacs[j]))
+            cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_i, vmacs[j]))
+            # cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_gpu, cfunc_int_cont_i_gpu, vmacs[j]))
+            cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_cont_i, vmacs[j]))
 
             # add to the flux integral
             flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]

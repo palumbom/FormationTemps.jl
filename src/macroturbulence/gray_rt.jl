@@ -51,21 +51,6 @@ function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
     return ys_out
 end
 
-# roll kernel by integer r so zero-lag aligns with padded center
-function roll_1d!(dst, src, r, L)
-    j = (blockIdx().x-1) * blockDim().x + threadIdx().x
-    if j <= L
-        jj = j - r
-        if jj < 1
-            jj += L
-        elseif jj > L
-            jj -= L
-        end
-        @inbounds dst[j] = src[jj]
-    end
-    return nothing
-end
-
 function compute_padded_gray_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, Nλ, pad_left)
     # get thread index
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
