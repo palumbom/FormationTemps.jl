@@ -56,7 +56,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0025)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.00025)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -84,7 +84,7 @@ FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, 
 # allocate memory for convolutions
 Nλ = length(λs_korg)
 Natm = size(αs, 1)
-Npad = 1000
+Npad = 500
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # allocate on device
@@ -113,26 +113,34 @@ u2 = 0.26
 ζ_rt = 1200.0
 
 # do rotmacro gpu
-cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+# cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+cfunc_flux_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
 flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsini, ζ_rt, u1, u2))
+# cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsini, ζ_rt, u1, u2))
+cfunc_flux_cont_convolution = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsini, u1))
 flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
 
 # normalize
 flux_norm_convolution_gpu = flux_convolution ./ flux_cont_convolution
+plt.plot(flux_norm_convolution_gpu .- flux_stationary./flux_cont_stationary, label="GPU")
 
 # do rotmacro cpu
-cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+# cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+cfunc_flux_convolution = Array(FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1))
 flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_cont_stationary, vsini, ζ_rt, u1, u2))
+# cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_cont_stationary, vsini, ζ_rt, u1, u2))
+cfunc_flux_cont_convolution = Array(FT.convolve_gray_rotation(λs_korg, cfunc_flux_cont_stationary, vsini, u1))
 flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
 
 # normalize
 flux_norm_convolution_cpu = flux_convolution ./ flux_cont_convolution
+plt.plot(flux_norm_convolution_cpu .- flux_stationary./flux_cont_stationary, label="CPU")
 
 @show extrema(flux_norm_convolution_gpu .- flux_norm_convolution_cpu)
+plt.legend()
+plt.show()
 
-# get disk stuff 
+#= # get disk stuff 
 ρstar = 1.0
 istar = 90.0
 v0 = vsini
@@ -186,6 +194,6 @@ flux_norm_integration = flux_integration ./ flux_cont_integration
 # plt.plot(λs_korg, circshift(flux_norm_convolution_gpu, 1))
 # plt.plot(λs_korg, circshift(flux_norm_convolution_cpu, 1))
 # plt.plot(λs_korg, flux_norm_integration)
-plt.scatter(λs_korg, flux_norm_integration .- circshift(flux_norm_convolution_cpu, 1), s=5)
-plt.scatter(λs_korg, flux_norm_integration .- circshift(flux_norm_convolution_gpu, 0), s=5)
-plt.show()
+plt.scatter(λs_korg, flux_norm_integration .- circshift(flux_norm_convolution_cpu, -1), s=5)
+plt.scatter(λs_korg, flux_norm_integration .- circshift(flux_norm_convolution_gpu, -1), s=5)
+plt.show() =#
