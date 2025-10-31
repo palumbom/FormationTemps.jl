@@ -59,7 +59,7 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # set steps
-steps = range(0.0001, 0.005, step=0.0001)
+steps = range(0.0001, 0.0025, step=0.0001)
 
 # allocate memory
 αs_error = zeros(length(steps))
@@ -154,9 +154,9 @@ for i in eachindex(steps)
     rotmacro_error[i] = maximum(abs.((cfunc_flux_hirano_cpu .- cfunc_flux_hirano_gpu) ./ cfunc_flux_hirano_cpu))
 
     # do some flux 
-    flux_gray_rot_cpu = FT.convolve_gray_rotation(λs_korg, flux_stationary, vsini, u1)
-    flux_gray_rot_gpu = sum(cfunc_flux_gray_rot_gpu, dims=1)'
-    flux_error[i] = maximum(abs.((flux_gray_rot_gpu .- flux_gray_rot_cpu) ./ flux_gray_rot_cpu))
+    flux_gray_cpu = sum(cfunc_flux_hirano_cpu, dims=1)'
+    flux_gray_gpu = sum(cfunc_flux_hirano_gpu, dims=1)'
+    flux_error[i] = maximum(abs.((flux_gray_gpu .- flux_gray_cpu) ./ flux_gray_cpu))
 end
 
 plt.scatter(steps, αs_error, s=2, label="alpha")

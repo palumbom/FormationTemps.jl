@@ -38,7 +38,7 @@ zs = Korg.get_zs(atm_korg)
 temps = Korg.get_temps(atm_korg)
 
 # set the velocity broadening and flow
-val = 1.2e3
+val = 2400.0
 σ_v = CuArray{Float64}(fill(val, length(zs)))
 μ_v = CuArray{Float64}(fill(0.0, length(zs)))
 
@@ -83,7 +83,7 @@ bs = cld(length(λs_korg), ts)
 @cuda threads=ts blocks=bs FT.calc_tau!(μ_vals[μ_idx], zs_gpu, αs_gpu, τs_gpu)
 
 # get the contribution functions
-ts = (32,32)
+ts = (32,16)
 bs = (cld(length(λs_korg), ts[1]), cld(size(αs,1), ts[2]))
 @cuda threads=ts blocks=bs FT.calc_intensity_cfunc!(μ_vals[μ_idx], Ts_gpu, λs_gpu, τs_gpu, cfunc_int_gpu)
 CUDA.synchronize()
@@ -95,7 +95,7 @@ ts = 512
 bs = cld(length(λs_korg), ts)
 @cuda threads=ts blocks=bs FT.calc_tau!(1.0, zs_gpu, αs_gpu, τs_gpu)
 
-ts = (32,32)
+ts = (32,16)
 bs = (cld(length(λs_korg), ts[1]), cld(size(αs,1), ts[2]))
 @cuda threads=ts blocks=bs FT.calc_flux_cfunc!(Ts_gpu, λs_gpu, τs_gpu, cfunc_flux_gpu)
 CUDA.synchronize()
@@ -107,7 +107,7 @@ ts = 512
 bs = cld(length(λs_korg), ts)
 @cuda threads=ts blocks=bs FT.calc_tau!(1.0, zs_gpu, αs_cont_gpu, τs_gpu)
 
-ts = (32,32)
+ts = (32,16)
 bs = (cld(length(λs_korg), ts[1]), cld(size(αs,1), ts[2]))
 @cuda threads=ts blocks=bs FT.calc_flux_cfunc!(Ts_gpu, λs_gpu, τs_gpu, cfunc_flux_cont_gpu)
 CUDA.synchronize()
@@ -130,13 +130,13 @@ ax1.set_xlim(λ0 - 0.25, λ0 + 0.25)
 ax2.set_xlim(λ0 - 0.25, λ0 + 0.25)
 plt.show()
 
-grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
+#= grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
 ax1 = plt.subplot(grid[1])
 ax2 = plt.subplot(grid[2])
-ax1.plot(λs_korg, sol.flux, c="k",label="Korg")
-ax1.plot(λs_korg, flux_gpu, ls="--", label="mine")
-ax1.plot(λs_korg, sol.cntm, c="k",label="Korg cont")
-ax1.plot(λs_korg, flux_cont_gpu, ls="--", label="my cont")
+ax1.plot(λs_korg, sol.flux ./ sol.cntm, c="k",label="Korg")
+ax1.plot(λs_korg, flux_gpu ./ flux_cont_gpu, ls="--", label="mine")
+# ax1.plot(λs_korg, sol.cntm, c="k",label="Korg cont")
+# ax1.plot(λs_korg, flux_cont_gpu, ls="--", label="my cont")
 ax2.scatter(λs_korg, 100 .* (sol.flux .- flux_gpu) ./ sol.flux, c="k", s=5)
 ax2.set_xlabel("Wavelength (Å)")
 ax1.set_ylabel("Emergent Flux (idk units lol)")
@@ -146,3 +146,4 @@ ax1.legend()
 ax1.set_xlim(λ0 - 0.25, λ0 + 0.25)
 ax2.set_xlim(λ0 - 0.25, λ0 + 0.25)
 plt.show()
+ =#
