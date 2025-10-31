@@ -81,7 +81,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0005)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0025)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # params for LD fit
@@ -237,8 +237,8 @@ for i in eachindex(T_effs)
         cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
 
         # convolve the cfunc with RT macroturbulence
-        cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_i), vmacs[i]))
-        cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, CuArray(λs_korg), CuArray(cfunc_int_cont_i), vmacs[i]))
+        cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_i, vmacs[i]))
+        cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_cont_i, vmacs[i]))
 
         # add to the flux integral
         flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[k]
@@ -256,14 +256,15 @@ end
 
 # scatter plot 
 fig, ax1 = plt.subplots()
-sc = ax1.scatter(df.Teff, df.logg, s=vsinis./1000, c=max_errors)#, vmin=1.0, vmax=5.0)
+sc = ax1.scatter(df.Teff, df.logg, s=vsinis./1000, c=max_errors, vmin=1.0, vmax=10.0)
 ax1.xaxis.set_inverted(true)
 ax1.yaxis.set_inverted(true)
 
 ax1.set_xlabel(L"T_{\rm eff}\ {\rm [K]}")
 ax1.set_ylabel(L"\log g")
 
-fig.colorbar(sc)
+cb = fig.colorbar(sc)
+cb.set_label(L"{\rm Maximum\ Flux\ Error\ [\%]}")
 fig.tight_layout()
 fig.savefig("figures/hr_error.pdf", bbox_inches="tight")
 plt.show()

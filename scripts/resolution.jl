@@ -112,10 +112,10 @@ flux_cont_stationary = dropdims(sum(cfunc_flux_cont_stationary, dims=1), dims=1)
 
 # set rotational and macroturbulence 
 vsinis = range(2000.0, 1.2e4, step=2000)
-ζ_rt = 3000.0
+ζ_rt = 1200.0
 
 # set resolution grid
-R_grid = range(5e3, 250e3, step=5e3)
+R_grid = range(5e3, 250e3, step=2.5e3)
 
 # set limb darkening
 @load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
@@ -134,12 +134,9 @@ R_grid = range(5e3, 250e3, step=5e3)
     # get disk stuff 
     ρstar = 1.0
     istar = 90.0
-    A = 0.00711 * vsinis[k]
-    B = 0.0
-    C = 0.0
     v0 = vsinis[k]
     Nϕ = 48
-    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
+    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
     idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
@@ -194,12 +191,12 @@ R_grid = range(5e3, 250e3, step=5e3)
     end
     # TODO fix
     # plt.plot(R_grid, rmses, label=L"v \sin i =\ " * latexstring(vsinis[k]), c=ncolors[k])
-    plt.plot(R_grid, maxes, label=L"v \sin i =\ " * latexstring(vsinis[k]), c=ncolors[k])
+    plt.plot(R_grid, maxes, label=L"v \sin i =\ " * latexstring(vsinis[k]))#, c=ncolors[k])
 end
 # plt.legend()
 # plt.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
-l4 = plt.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left",
-                mode="expand", borderaxespad=0, ncol=2)
+# l4 = plt.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left",
+#                 mode="expand", borderaxespad=0, ncol=2)
 plt.xlabel(L"{\rm Spectral\ Resolving\ Power}")
 # plt.ylabel(L"{\rm Normalized\ Flux\ RMSE\ [\%]}")
 plt.ylabel(L"{\rm Maximum\ Flux\ Error\ [\%]}")

@@ -132,7 +132,8 @@ function convolve_instrument_gauss(xs::AA{T,1}, ys::AA{T,1}; new_res::T=1.17e5,
     g(x, n) = (one(T)/(σ(x) * sqrt(2.0 * π))) * exp(-0.5 * ((x - n)/σ(x))^2)
 
     # offset the kernel by the velocity
-    λ0 = mean(xs)
+    i0 = length(xs) ÷ 2 + 1
+    λ0 = xs[i0]
     λc = λ0
 
     # sample and normalize the kernel
