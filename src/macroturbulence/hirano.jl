@@ -94,7 +94,6 @@ function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0
     kernel ./= sum(kernel)
     return kernel
 end
-
 function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, vsini::T, ζ_rt::T,
                                       u1::T, u2::T; intres::Int=intres_glob) where {T<:AF}
@@ -107,53 +106,50 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         return cmem.ys_gpu
     end
 
-    # velocity grid stats from discrete center
-    N = length(xs)
-    i0 = N ÷ 2 + 1
-    λ0 = xs[i0]
-    vs = c_ms .* (xs .- λ0) ./ λ0
-    Δv = (vs[end] - vs[1]) / (N - 1)
+    # circular kernel centered at v=0 (FFT-shifted) with sum=1
+    kernel_N = hirano_rotmacro_kernel_from_xs(xs, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
 
-    # pad the signal (replicate) to length L
+    # pad the signal
     ts = (32,32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
     CUDA.synchronize()
 
-    # R2C frequency grid for padded length L
-    L = cmem.L
-    nf = fld(L, 2) + 1
-    invLΔv = one(T) / (T(L) * Δv)
-    σ = Array{T}(undef, nf)
-    @inbounds for k in 0:nf-1
-        σ[k+1] = T(k) * invLΔv
+    # place kernel into padded work buffer on device
+    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
+    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
+
+    fill!(kernel_row, zero(T))
+    kdev = CuArray(kernel_N)
+    @views kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ] .= kdev
+
+    # ensure zero-lag sits at padded center before FFT layout
+    i0 = length(xs) ÷ 2 + 1
+    center = length(kernel_row) ÷ 2
+    r = center - (cmem.pad_left + i0)
+    if r != 0
+        ts1 = (256,)
+        @cuda threads=ts1 blocks=(cld(length(kernel_row), ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, length(kernel_row))
+        CUDA.synchronize()
+        tmp = kernel_row
+        kernel_row = shifted_kernel_row
+        shifted_kernel_row = tmp
     end
 
-    # H(σ) on padded grid; normalize DC gain to 1 (matches CPU's sum(normalized kernel)=1)
-    Kσ = hirano_rotmacro_ft_kernel(σ, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
-    Kd_host = Kσ ./ Kσ[1]  # Δv cancels in K_dft/K_dft[1]
+    # center -> FFT indexing, then R2C FFT of padded kernel
+    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
+    kr = copy(shifted_kernel_row)                  # contiguous 1-D device vector
+    kernel_row_ft = CUDA.CUFFT.rfft(kr)            # shape nf
 
-    # phase to place zero-lag at padded center (remove integer roll)
-    center = L ÷ 2
-    r = center - (cmem.pad_left + i0)  # integer offset
-    twopi = T(2π)
-    θstep = -twopi * T(r) / T(L)
-    ks = T.(0:nf-1)
-    phase = Complex{T}.(cos.(θstep .* ks), sin.(θstep .* ks))
-
-    # frequency response with phase correction on GPU
-    Kd = CuArray(Kd_host .* phase)
-
-    # forward fourier transform of padded signal (R2C)
+    # convolution theorem 
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
-
-    # convolution theorem (broadcast along rows)
-    @views cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* reshape(Kd, 1, :)
-
-    # inverse fourier transform and slice valid region
+    kft = reshape(kernel_row_ft, 1, :)
+    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
+
+    # slice valid region
     out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
-    CUDA.synchronize()
     return out
 end
+

@@ -117,20 +117,20 @@ u1 = 0.4
 u2 = 0.26
 ζ_rt = 1200.0
 
-# compare microturbulence
-αs_cpu_new = FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot), Array(σ_v_mic))
-αs_gpu_new = FT.convolve_wavelength_axis_gpu(cmem, CuArray(λs_korg), CuArray(αs), μ_v_rot, σ_v_mic)
-println()
+# # compare microturbulence
+# @btime FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot), Array(σ_v_mic))
+# @btime Array(FT.convolve_wavelength_axis_gpu(cmem, CuArray(λs_korg), CuArray(αs), μ_v_rot, σ_v_mic))
+# println()
 
-# compare rot 
-@btime FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1)
-@btime Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
-println()
+# # compare rot 
+# @btime FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1)
+# @btime Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
+# println()
 
-# compare rt 
-@btime FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_stationary, ζ_rt)
-@btime Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, ζ_rt))
-println()
+# # compare rt 
+# @btime FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_stationary, ζ_rt)
+# @btime Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, ζ_rt))
+# println()
 
 # compare hirano
 @btime FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2)
