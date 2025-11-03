@@ -200,7 +200,7 @@ for k in eachindex(vsinis)
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
-    Nϕ = 16
+    Nϕ = 8
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
@@ -232,11 +232,9 @@ for k in eachindex(vsinis)
             cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
 
             # convolve the cfunc with RT macroturbulence
-            copyto!(cfunc_int_i_gpu, cfunc_int_i)
-            copyto!(cfunc_int_cont_i_gpu, cfunc_int_cont_i)
-            # cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_gpu, cfunc_int_i_gpu, vmacs[j]))
+            # copyto!(cfunc_int_i_gpu, cfunc_int_i)
+            # copyto!(cfunc_int_cont_i_gpu, cfunc_int_cont_i)
             cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_i, vmacs[j]))
-            # cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_gpu, cfunc_int_cont_i_gpu, vmacs[j]))
             cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_cont_i, vmacs[j]))
 
             # add to the flux integral
@@ -289,6 +287,7 @@ for k in eachindex(vsinis)
         rmse_flux = round(sqrt(sum((flux_integration .- flux_convolution).^2.0) / length(flux_integration)), digits=3)
         rmse_flux_cont = round(sqrt(sum((100 .* flux_integration_norm .- 100 .* flux_convolution_norm).^2.0) / length(flux_integration_norm)), digits=3)
         rmse_temp = round(sqrt(sum((form_temp_integration .- form_temp_convolution).^2.0) / length(form_temp_integration)), digits=1)
+        max_flux_error = round(maximum(abs.(100 .* (flux_integration_norm .- flux_convolution_norm))), digits=1)
 
         # inset axes 
         bbox = mtrans[:Bbox][:from_bounds](vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
@@ -300,7 +299,7 @@ for k in eachindex(vsinis)
         iax1.set_frame_on(true)
         iax1.set_ylim(-15, 15)
         iax1.grid(false)
-        # iax1.text(0.5, 0.05, L"\mathrm{RMSE} = %$rmse_flux_cont \ \mathrm{\%}", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
+        iax1.text(0.5, 0.05, L"\mathrm{Max\ Error} \approx %$max_flux_error\mathrm{\%\ Cont.}", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
 
         iax2 = inset.inset_axes(ax2, width=wstr, height=hstr, loc="center",
                                bbox_to_anchor=bbox, 

@@ -94,6 +94,7 @@ function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0
     kernel ./= sum(kernel)
     return kernel
 end
+
 function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, vsini::T, ζ_rt::T,
                                       u1::T, u2::T; intres::Int=intres_glob) where {T<:AF}
