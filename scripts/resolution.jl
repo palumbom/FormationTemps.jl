@@ -135,7 +135,7 @@ R_grid = range(5e3, 250e3, step=2.5e3)
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
-    Nϕ = 48
+    Nϕ = 128
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu

@@ -2,6 +2,7 @@ using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
 using HDF5, Printf
+using ProgressMeter
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
@@ -100,43 +101,40 @@ flux = dropdims(sum(cfunc_flux, dims=1), dims=1)
 # get disk stuff 
 ρstar = 1.0
 istar = 90.0
-A = 1.0
-B = 0.0
-C = 0.0
-v0 = 2000.0
+v0 = 0.0
 Nϕ = 2 .^(range(2, 8, step=1))
+Nϕ = [8, 16, 32, 48, 64, 96, 128, 156, 181, 212, 256, 512]
 
 mean_pct_error_flux = zeros(length(Nϕ))
 ntiles_real = zeros(length(Nϕ))
+
+# allocate for output
+flux_test = zeros(length(λs_korg))
 
 for j in eachindex(Nϕ)
     @show Nϕ[j]
 
     # do spherical trig
-    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ[j])
+    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ[j])
 
     # flatten, move to cpu
     idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
-    μs_cpu = Array(μs)[idx]
-    dA_cpu = Array(dA)[idx]
-    z_rot_cpu = Array(z_rot)[idx]
+    μs_cpu = view(Array(μs), idx)
+    dA_cpu = view(Array(dA), idx)
+    z_rot_cpu = view(Array(z_rot), idx)
 
+    @show sum(dA_cpu)
+    
     ntiles_real[j] = length(μs_cpu)
 
-    # allocate for output
-    cfuncs_int = zeros(length(zs)-1, length(λs_korg))
-    ints = zeros(length(λs_korg), length(μs))
-    flux_test = zeros(length(λs_korg))
+    flux_test .= 0.0
 
-    for i in eachindex(μs_cpu)
+    @showprogress for i in eachindex(μs_cpu)
         # μ_v .= z_rot_cpu[i] .* FT.c_ms
-
         cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-        ints[:, i] .= sum(cfunc_int_i, dims=1)'
-
-        cfuncs_int .+= cfunc_int_i .* dA_cpu[i]
-        flux_test .+= ints[:,i] .* dA_cpu[i]
+        flux_test .+= sum(cfunc_int_i, dims=1)' .* dA_cpu[i]
     end
+    println()
 
     # test the flux
     flux_test .*= 1e-8 .* π ./ sum(dA_cpu) 
