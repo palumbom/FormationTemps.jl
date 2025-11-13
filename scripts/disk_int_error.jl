@@ -98,7 +98,9 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 cfunc_flux = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
 flux = dropdims(sum(cfunc_flux, dims=1), dims=1)
 
-# get disk stuff 
+@btime FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
+
+#= # get disk stuff 
 ρstar = 1.0
 istar = 90.0
 v0 = 0.0
@@ -151,4 +153,4 @@ plt.xscale("symlog")
 plt.xlabel("Number of latitude tiles")
 plt.ylabel("Mean % Error")
 plt.savefig("figures/disk_int_error.pdf", bbox_inches="tight")
-plt.show()
+plt.show() =#

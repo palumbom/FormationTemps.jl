@@ -143,6 +143,5 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
     vmic = 0.0
     Korg.line_absorption!(αs, linelist, wls, Ts, nₑs, nds, partition_funcs, 
                           vmic, α_cntm; cutoff_threshold=3e-4)#, verbose=false)
-
     return nothing
 end

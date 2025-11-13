@@ -8,7 +8,8 @@ using PyPlot, PyCall; mpl = plt.matplotlib
 plt.ioff()
 
 # matplotlib backend
-mpl.use("Qt5Agg")
+# mpl.use("Qt5Agg")
+mpl.use("Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 colormaps = pyimport("colormaps")
@@ -38,6 +39,12 @@ vmac_fit(teff, logg) = 3.21 + 2.33e-3 * (teff - 5777) + 2e-6 * (teff - 5777)^2.0
 # from Bruntt et al. 2010
 vmac_fit(teff) = 2.26 + 2.90e-3 * (teff - 5777) + 5.86e-7 * (teff - 5777)^2.0
 vmic_fit(teff) = 1.01 + 4.56e-4 * (teff - 5777) + 2.75e-7 * (teff - 5777)^2.0
+
+# from Brewer (private communication)
+const line_coeffs = (6.86575985e-01, 1.58202083e-03, -1.71374049e-07)
+function isdwarf(teff, logg)
+	return evalpoly(teff, line_coeffs) < logg
+end
 
 # make plotdir
 plotdir = joinpath(pwd(), "figures")
@@ -126,7 +133,7 @@ cfunc_flux_integration = zeros(length(λs_korg))
 max_errors = zeros(length(T_effs))
 for i in eachindex(T_effs)
     # don't do giants (very loosely defined)
-    if loggs[i] < 3.75
+    if !isdwarf(T_effs[i], loggs[i])
         max_errors[i] = NaN
         continue
     end
@@ -210,7 +217,7 @@ for i in eachindex(T_effs)
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[i]
-    Nϕ = 5
+    Nϕ = 64
     μs_gpu, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
@@ -256,7 +263,7 @@ end
 
 # scatter plot 
 fig, ax1 = plt.subplots()
-sc = ax1.scatter(df.Teff, df.logg, s=vsinis./1000, c=max_errors, vmin=1.0, vmax=10.0)
+sc = ax1.scatter(df.Teff, df.logg, s=vsinis./1000, c=max_errors, vmin=0.0, vmax=4.0)
 ax1.xaxis.set_inverted(true)
 ax1.yaxis.set_inverted(true)
 
@@ -267,4 +274,6 @@ cb = fig.colorbar(sc)
 cb.set_label(L"{\rm Maximum\ Flux\ Error\ [\%]}")
 fig.tight_layout()
 fig.savefig("figures/hr_error.pdf", bbox_inches="tight")
-plt.show()
+# plt.show()
+plt.clf()
+plt.close()

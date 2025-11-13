@@ -75,7 +75,7 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             f2 = blackbody_gpu(T2, λ_cm) * exp(-τp2)
 
             # two-point Gauss weight = Δτ/2
-            @inbounds cfunc[k, j] = (f1 + f2) * (Δτ * 0.5)
+            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * Δτ
         end
     end
     return nothing
@@ -118,7 +118,7 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             # f2 = blackbody_gpu(T2, λ_cm) * SpecialFunctions.expint(2, τp2)
 
             # convert to per angstrom
-            @inbounds cfunc[k, j] = (f1 + f2) * (Δτ * 0.5) * 1e-8
+            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * Δτ * 1e-8
         end
     end
     return nothing
@@ -158,7 +158,7 @@ function calc_intensity_cfunc_cpu(μ::T, Ts::AA{T,1}, λs::AA{T,1}, τs::AA{T,2}
             f2 = Korg.blackbody(T2, λ_cm) * exp(-τp2)
 
             # two-point Gauss weight = Δτ/2
-            cfunc[k, j] = (f1 + f2) * (Δτ * 0.5)
+            cfunc[k, j] = 0.5 * (f1 + f2) * Δτ
         end
     end
     return cfunc
@@ -199,7 +199,7 @@ function calc_flux_cfunc_cpu(Ts::AA{T,1}, λs::AA{T,1}, τs::AA{T,2}) where {T<:
 
             # two-point Gauss weight = Δτ/2
             # convert to per angstrom 
-            cfunc[k, j] = (f1 + f2) * (Δτ * 0.5) * 1e-8
+            cfunc[k, j] = 0.5 * (f1 + f2) * Δτ * 1e-8
         end
     end
     return cfunc

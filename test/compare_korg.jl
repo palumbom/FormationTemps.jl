@@ -44,7 +44,7 @@ val = 2400.0
 
 # set disk positions
 μ_vals = 0.2:0.05:1.0
-μ_idx = 1
+μ_idx = 5
 
 # do canconical synthesis
 sol = synthesize(atm_korg, linelist, A_X, λs_korg; vmic=val/1e3, tau_scheme="bezier", mu_values=μ_vals, hydrogen_lines=false);

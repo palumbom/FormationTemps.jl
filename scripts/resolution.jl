@@ -77,7 +77,7 @@ Ts = atm_gpu.Ts
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # synthesis to get the alphas
@@ -111,11 +111,11 @@ cfunc_flux_cont_stationary = 2π .* FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_me
 flux_cont_stationary = dropdims(sum(cfunc_flux_cont_stationary, dims=1), dims=1)
 
 # set rotational and macroturbulence 
-vsinis = range(2000.0, 1.2e4, step=2000)
+vsinis = range(1000.0, 1.0e4, step=1000)
 ζ_rt = 1200.0
 
 # set resolution grid
-R_grid = range(5e3, 250e3, step=2.5e3)
+R_grid = range(5e3, 1e6, step=2.5e3)
 
 # set limb darkening
 @load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
@@ -123,6 +123,12 @@ R_grid = range(5e3, 250e3, step=2.5e3)
 @show u2
 # u1 = 0.4
 # u2 = 0.26
+
+# create color map
+cmap = plt.get_cmap("viridis")
+# norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
+norm = mpl.colors.Normalize(vmin=minimum(vsinis), vmax=maximum(vsinis))
+colors = cmap(norm(vsinis))
 
 # loop over vsini
 @showprogress for k in eachindex(vsinis)
@@ -135,7 +141,7 @@ R_grid = range(5e3, 250e3, step=2.5e3)
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
-    Nϕ = 128
+    Nϕ = 64
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
@@ -171,10 +177,8 @@ R_grid = range(5e3, 250e3, step=2.5e3)
     # normalize
     flux_integration_norm = flux_integration ./ flux_cont_integration
 
-    # plt.close("all")
-    # plt.plot(λs_korg, flux_integration_norm .- flux_convolution_norm, c="k")
-
-    oversampling = 50.0
+    # convolve and resample
+    oversampling = 5.0
     rmses = zeros(length(R_grid))
     maxes = zeros(length(R_grid))
     for i in eachindex(R_grid)
@@ -185,21 +189,15 @@ R_grid = range(5e3, 250e3, step=2.5e3)
         # get rmse
         rmses[i] = sqrt(sum((100 .* (new_flux_integration .- new_flux_convolution)).^2.0) / length(new_flux_integration))
         maxes[i] = maximum(abs.(100 .* (new_flux_integration .- new_flux_convolution)))
-
-        # plt.plot(new_wavs_convolution, new_flux_convolution)
-        # plt.plot(new_wavs_integration, new_flux_integration .- new_flux_convolution)
     end
-    # TODO fix
-    # plt.plot(R_grid, rmses, label=L"v \sin i =\ " * latexstring(vsinis[k]), c=ncolors[k])
-    plt.plot(R_grid, maxes, label=L"v \sin i =\ " * latexstring(vsinis[k]))#, c=ncolors[k])
+    plt.plot(R_grid, maxes, label=L"v \sin i =\ " * latexstring(vsinis[k]), c=colors[k,:])
 end
-# plt.legend()
-# plt.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
-# l4 = plt.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left",
-#                 mode="expand", borderaxespad=0, ncol=2)
+
+sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+cbar = plt.colorbar(sm, ax=plt.gca())
+cbar.set_label(L"v \sin i")
 plt.xlabel(L"{\rm Spectral\ Resolving\ Power}")
-# plt.ylabel(L"{\rm Normalized\ Flux\ RMSE\ [\%]}")
-plt.ylabel(L"{\rm Maximum\ Flux\ Error\ [\%]}")
+plt.ylabel(L"{\rm Maximum\ Flux\ Error\ [\%\ Continuum]}")
 plt.tight_layout()
 plt.gca().set_xscale("log")
 # plt.gca().set_yscale("symlog")
