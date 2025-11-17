@@ -30,14 +30,10 @@ zs = atm_gpu.zs
 Ts = atm_gpu.Ts
 τ5000 = atm_gpu.τs
 
-# # synthesis to get the alphas
-# αs = zeros(length(atm_gpu.zs), length(λs_korg))
-# αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-# FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), [], atm_gpu, A_X)
-
-sol = synthesize(marcs_atm, [], A_X, λs_korg; vmic=1.2, tau_scheme="bezier", 
-                 hydrogen_lines=false, use_MHD_for_hydrogen_lines=false)
-αs = deepcopy(sol.alpha)
+# synthesis to get the alphas
+αs = zeros(length(atm_gpu.zs), length(λs_korg))
+αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
+FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), [], atm_gpu, A_X)
 
 # allocate memory for convolutions
 Nλ = length(λs_korg)
@@ -73,19 +69,19 @@ cum_cfunc_intensity ./= maximum(cum_cfunc_intensity, dims=1)
 
 form_height = zeros(length(λs_korg))
 form_temp = zeros(length(λs_korg))
+form_tau = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
     xs = view(cum_cfunc_flux_stationary, :, i)
     # xs = view(cum_cfunc_intensity, :, i)
     itp = FT.linear_interp(xs, elav(zs))
     form_height[i] = itp(0.5)
 
-    xs = view(cum_cfunc_flux_stationary, :, i)
-    # xs = view(cum_cfunc_intensity, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
     form_temp[i] = itp(0.5)
-end
 
-# plt.plot(λs_korg, flux_stationary)
+    itp = FT.linear_interp(xs, elav(τ5000))
+    form_tau[i] = itp(0.5)
+end
 
 plt.plot(λs_korg, form_height)
 plt.show()

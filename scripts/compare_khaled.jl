@@ -59,7 +59,8 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-λs_korg = range(first(wls) - 0.5, last(wls) + 0.5, step=0.005)
+λs_korg = range(first(wls) - 0.5, last(wls) + 0.5, step=0.0075)
+# λs_korg = range(4000, 6500, step=0.05)
 
 # get some abundances
 A_X = Korg.asplund_2020_solar_abundances
@@ -194,11 +195,11 @@ for i in eachindex(λs_korg)
 end
 
 # compare 
-plt.plot(wave_k, temp_k)
-plt.plot(λs_korg, form_temp_intensity)
+# plt.plot(wave_k, temp_k)
+# plt.plot(λs_korg, form_temp_intensity)
 # plt.plot(λs_korg, form_temp_integration)
-# plt.plot(λs_korg, form_temp_convolution)
-plt.show()
+plt.plot(λs_korg, form_temp_convolution)
+# plt.show()
 
 # plt.plot(wave_k, flux_k)
 # plt.plot(λs_korg, flux_norm_conv)
