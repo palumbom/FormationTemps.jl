@@ -6,12 +6,14 @@ using ProgressMeter
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+plt.ioff()
 
 AF = AbstractFloat
 AA = AbstractArray
 
 # make the wavelength grid
 λs_korg = range(3000.0, 6000.0, step=0.1)
+# λs_korg = range(6301.0, 6303.0, step=0.1)
 
 # get some abundances
 A_X = Korg.asplund_2020_solar_abundances
@@ -42,7 +44,7 @@ sol = synthesize(marcs_atm, [], A_X, λs_korg; vmic=1.2, tau_scheme="bezier",
 # allocate memory for convolutions
 Nλ = length(λs_korg)
 Natm = size(αs, 1)
-Npad = 2400
+Npad = 240
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # allocate on device
@@ -52,34 +54,28 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 μ_v_rot = CUDA.zeros(Float64, length(zs))
 σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
-μ_v_mac = CUDA.zeros(Float64, length(zs)-1)
-σ_v_mac = CUDA.zeros(Float64, length(zs)-1)
+# get intensity stuff
+cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_cfunc_cumulative(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
+cfunc_intensity_cum ./= maximum(cfunc_intensity_cum, dims=1)
 
-cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+# get flux stuff
+cfunc_flux_stationary, cfunc_flux_cum, flux_stationary = FT.calc_flux_cfunc_cumulative(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_cum ./= maximum(cfunc_flux_cum, dims=1)
 
-cfunc_intensity = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
-intensity = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
+# plt.plot(λs_korg, sol.flux)
+# plt.plot(λs_korg, flux_stationary)
+# plt.show()
 
-# get the formation temperature for a stationary star
-cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
-
-cum_cfunc_flux_stationary = cumsum(cfunc_flux_stationary, dims=1)
-cum_cfunc_flux_stationary ./= maximum(cum_cfunc_flux_stationary, dims=1)
-
-cum_cfunc_intensity = cumsum(cfunc_intensity, dims=1)
-cum_cfunc_intensity ./= maximum(cum_cfunc_intensity, dims=1)
-
-
+# formation heights
 form_height = zeros(length(λs_korg))
 form_temp = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_flux_stationary, :, i)
+    xs = view(cfunc_flux_cum, :, i)
     # xs = view(cum_cfunc_intensity, :, i)
     itp = FT.linear_interp(xs, elav(zs))
     form_height[i] = itp(0.5)
 
-    xs = view(cum_cfunc_flux_stationary, :, i)
+    xs = view(cfunc_flux_cum, :, i)
     # xs = view(cum_cfunc_intensity, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
     form_temp[i] = itp(0.5)
@@ -87,5 +83,8 @@ end
 
 # plt.plot(λs_korg, flux_stationary)
 
-plt.plot(λs_korg, form_height)
+plt.plot(λs_korg, form_height, label="without dtau")
+plt.xlabel("Wavelength")
+plt.ylabel("Formation Height")
+plt.legend()
 plt.show()

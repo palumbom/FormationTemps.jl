@@ -5,6 +5,7 @@ using HDF5, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+plt.ioff()
 
 # matplotlib backend
 mpl.use("Qt5Agg")
@@ -56,7 +57,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 # make the wavelength grid
 buffer = 1.5
 λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
-cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
+cont_idx = findfirst(x -> x .>= wls[2] + 0.1, λs_korg)#findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
 A_X = Korg.asplund_2020_solar_abundances
@@ -95,21 +96,33 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 μ_v = CUDA.zeros(Float64, length(zs))
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs))
+cfuncs_cum = zeros(length(zs)-1, length(λs_korg), length(μs))
 intensities = zeros(length(λs_korg), length(μs))
 continuum = zeros(length(λs_korg), length(μs))
 
 for i in eachindex(μs)
-    cfuncs[:,:,i] .= FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
-    intensities[:,i] .= dropdims(sum(view(cfuncs,:,:,i), dims=1), dims=1)
+    # cfuncs[:,:,i] .= FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    # intensities[:,i] .= dropdims(sum(view(cfuncs,:,:,i), dims=1), dims=1)
 
-    cfunc_cont = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
-    continuum[:,i] .= dropdims(sum(cfunc_cont, dims=1), dims=1)
+    cfunc, cfunc_cum = FT.calc_intensity_cfunc_cumulative(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfuncs[:,:,i] .= cfunc
+    cfuncs_cum[:,:,i] .= cfunc_cum
+    intensities[:,i] .= sum(cfunc, dims=1)'
+
+    # cfunc_cont = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    # continuum[:,i] .= dropdims(sum(cfunc_cont, dims=1), dims=1)
 end
  
 # get disk integrated cfunc
-cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-flux_disk_integrated = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
+cfunc_flux, cfunc_flux_cum = FT.calc_flux_cfunc_cumulative(αs, atm_gpu, gpu_mem, cmem, σ_v)
+flux_disk_integrated = 2π .* sum(cfunc_flux_cum, dims=1)'
 
+plt.plot(λs_korg, flux_disk_integrated)
+plt.plot(λs_korg, 2π .* Array(sum(CuArray(cfunc_flux) .* diff(gpu_mem.τs, dims=1), dims=1))')
+plt.show()
+
+
+#= 
 # get limits and such
 max_val = maximum(abs.(cfuncs))
 exponent = floor(Int, log10(max_val))
@@ -324,8 +337,8 @@ for i in eachindex(μs)
     ax1.plot(xs, ys, c=colors[i,:], lw=1.75, label=L"\mu = %$mu_val")
 end 
 
-ax1.set_xticks([-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
-ax1.set_xlim(-1.25, 5.25)
+ax1.set_xticks([-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+ax1.set_xlim(-1.25, 7.25)
 
 fwd = interp1d(elav(zs ./ 1e7), elav(log10.(τ_500)), fill_value="extrapolate")
 inv = interp1d(elav(log10.(τ_500)), elav(zs ./ 1e7), fill_value="extrapolate")
@@ -364,7 +377,7 @@ for sp in ax1_b2.spines.values()
     sp.set_visible(false)
 end
 ax1_b2.spines["top"].set_visible(true)
-new_xticks = [9000, 6250, 5500, 5000, 4750, 4500]
+new_xticks = [9000, 6250, 5500, 5000, 4750, 4500, 4250]
 ax1_b2.set_xticks(inv(new_xticks))
 ax1_b2.set_xticklabels(latexstring.(new_xticks))
 ax1_b2.set_xlabel(L"{\rm Temperature\ [K]}", labelpad=10)
@@ -379,14 +392,14 @@ ax1.set_ylabel(L"C_{\nu}(t_\nu, \mu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^
 ax2.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
 ax1.legend()
 
-ax1.set_ylim(cb_lims)
-ax2.set_ylim(lims_cflux)
+# ax1.set_ylim(cb_lims)
+# ax2.set_ylim(lims_cflux)
 
 derp1 = diff(ax1.get_xticks())
 derp2 = diff(ax1.get_xticks())
 
-ax1.set_ylim(cb_lims[1], cb_lims[2] + derp2[end])
-ax2.set_ylim(lims_cflux[1], lims_cflux[2] + derp2[end])
+# ax1.set_ylim(cb_lims[1], cb_lims[2] + derp2[end])
+# ax2.set_ylim(lims_cflux[1], lims_cflux[2] + derp2[end])
 
 ax1.set_yticks(range(cb_lims[1], cb_lims[2] + derp2[end], length=5))
 ax2.set_yticks(range(lims_cflux[1], lims_cflux[2] + derp2[end], length=5))
@@ -475,4 +488,4 @@ ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
 ax1.set_ylabel(L"{\rm Error\ in\ } T_{1/2}\ {\rm [K]}")
 ax1.set_xlim(λs_korg[idx1], λs_korg[idx2])
 fig.savefig(joinpath(plotdir, "form_temp_error.pdf"))
-plt.clf(); plt.close()
+plt.clf(); plt.close() =#

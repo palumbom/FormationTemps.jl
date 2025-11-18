@@ -1,4 +1,4 @@
-function calc_intensity_cfunc(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
+function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                               cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
     # perturb the alphas
     αs_gpu = CuArray{Float64}(αs_init)
@@ -11,14 +11,13 @@ function calc_intensity_cfunc(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPU
     @cusync @cuda threads=ts blocks=bs calc_tau!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs)
 
     # compute the contribution function
-    # ts = (32, 32)
     ts = (32, 16)
     bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
     @cusync @cuda threads=ts blocks=bs calc_intensity_cfunc!(μ_tile, atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
-    return Array(mem.cfunc)
+    return nothing
 end
 
-function calc_flux_cfunc(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
+function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                          cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
     # move alphas to GPU
     μ_v = CUDA.zeros(T, length(σ_v))
@@ -32,35 +31,28 @@ function calc_flux_cfunc(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemor
     @cusync @cuda threads=ts blocks=bs calc_tau!(1.0, atm.zs_gpu, αs_gpu, mem.τs)
 
     # compute the contribution function
-    # ts = (32, 32)
     ts = (32, 16)
     bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
     @cusync @cuda threads=ts blocks=bs calc_flux_cfunc!(atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
-    return Array(mem.cfunc)
-end
-
-function cumulative_cfunc(τs::CDM, cfunc::CDM, cmem::ConvolutionMemory)
-    ts = 256
-    bs = cld(cmem.Nλ, ts)
-    ccum = similar(cfunc)
-    @cusync @cuda threads=ts blocks=bs mul_dτ_and_cumsum!(τs, cfunc, ccum)
-    return ccum
+    return nothing
 end
 
 function calc_intensity_cfunc_cumulative(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                                          cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
-    _ = calc_intensity_cfunc(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
-    cfunc = Array(mem.cfunc)
-    ccum = cumulative_cfunc(mem.τs, mem.cfunc, cmem)
-    return cfunc, Array(ccum)
+    calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
+    cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
+    ccum = cumsum(cfunc_dt, dims=1)
+    intensity = sum(cfunc_dt, dims=1)
+    return Array(mem.cfunc), Array(ccum), Array(intensity)'
 end
 
 function calc_flux_cfunc_cumulative(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                                     cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
-    _ = calc_flux_cfunc(αs_init, atm, mem, cmem, σ_v)
-    cfunc = Array(mem.cfunc)
-    ccum = cumulative_cfunc(mem.τs, mem.cfunc, cmem)
-    return cfunc, Array(ccum)
+    calc_flux_cfunc!(αs_init, atm, mem, cmem, σ_v)
+    cfunc_dt = mem.cfunc #.* diff(mem.τs, dims=1)
+    ccum = cumsum(cfunc_dt, dims=1)
+    flux = 2π .* sum(cfunc_dt, dims=1)
+    return Array(mem.cfunc), Array(ccum), Array(flux)'
 end
 
 function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM) where T<:AF
@@ -130,30 +122,10 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
             T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
 
-            f1 = blackbody_gpu(T1, λ_cm) * exp(-τp1)
-            f2 = blackbody_gpu(T2, λ_cm) * exp(-τp2)
+            f1 = blackbody_gpu(T1, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp1)
+            f2 = blackbody_gpu(T2, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp2)
 
-            @inbounds cfunc[k, j] = 0.5 * (f1 + f2)
-        end
-    end
-    return nothing
-end
-
-# NEW kernel: multiply by local Δτ and accumulate along k to get cumulative contribution
-function mul_dτ_and_cumsum!(τs::CDM, cfunc::CDM, ccum::CDM)
-    j = threadIdx().x + blockDim().x * (blockIdx().x - 1)
-    sj = gridDim().x * blockDim().x
-
-    for col in j:sj:size(τs, 2)
-        acc = zero(eltype(cfunc))
-        @inbounds for k in 1:size(τs,1)-1
-            Δτ = τs[k+1, col] - τs[k, col]
-            acc += cfunc[k, col] * Δτ
-            ccum[k, col] = acc
-        end
-        # if you want the last row filled, mirror last value
-        if size(τs,1) > 0
-            ccum[size(τs,1), col] = acc
+            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * 1e-8
         end
     end
     return nothing
