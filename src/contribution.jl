@@ -1,20 +1,30 @@
 function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                                    cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, 
                                    σ_v::CA{T,1}) where T<:AF
+    # get contribution function
     calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
+
+    # multiply by differential for cum. cont. & intensity
     cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
     ccum = cumsum(cfunc_dt, dims=1)
     ccum ./= maximum(ccum, dims=1)
+
+    # get intensity and return
     intensity = sum(cfunc_dt, dims=1)
     return Array(mem.cfunc), Array(ccum), Array(intensity)'
 end
 
 function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                            cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+    # get contribution function
     calc_flux_cfunc!(αs_init, atm, mem, cmem, σ_v)
+
+    # multiply by differential for cum. cont. & flux
     cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
     ccum = cumsum(cfunc_dt, dims=1)
     ccum ./= maximum(ccum, dims=1)
+
+    # get flux and return
     flux = 2π .* sum(cfunc_dt, dims=1)
     return Array(mem.cfunc), Array(ccum), Array(flux)'
 end
