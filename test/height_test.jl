@@ -60,10 +60,6 @@ cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(�
 # get flux stuff
 cfunc_flux_stationary, cfunc_flux_cum, flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
 
-# plt.plot(λs_korg, sol.flux)
-# plt.plot(λs_korg, flux_stationary)
-# plt.show()
-
 # formation heights
 form_height = zeros(length(λs_korg))
 form_temp = zeros(length(λs_korg))
@@ -79,8 +75,7 @@ for i in eachindex(λs_korg)
     form_temp[i] = itp(0.5)
 end
 
-# plt.plot(λs_korg, flux_stationary)
-
+# plot it
 plt.plot(λs_korg, form_height)
 plt.xlabel("Wavelength")
 plt.ylabel("Formation Height")
