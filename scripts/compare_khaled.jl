@@ -98,33 +98,31 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
-# cfunc for disk center intensity
-cfunc_int = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
-intensities = dropdims(sum(cfunc_int, dims=1), dims=1)
+# get intensity stuff
+cfunc_int, cfunc_int_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
+cfunc_int_cont, cfunc_int_cont_cum, intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
+int_norm = intensity ./ intensity_cont
 
-cfuncs_int_cont = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
-continuum_int = dropdims(sum(cfuncs_int_cont, dims=1), dims=1)
+# get flux stuff
+cfunc_flux, cfunc_flux_cum, flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+# cfunc_flux_cont, cfunc_flux_cont_cum, flux_cont = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
 
-int_norm = intensities ./ continuum_int
-
-# get cfunc for flux
-cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-flux = 1e-8 .* 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
-
-# get disk integrated continuum
-cfunc_flux_cont = FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
-continuum_flux = 1e-8 .* 2π .* dropdims(sum(cfunc_flux_cont, dims=1), dims=1)
-
-# convolve
+# params for convolution
 @load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
 vsini = 1630.0
 vmac = 3980.0
-cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux, vsini, vmac, u1, u2))
-flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
-cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont, vsini, vmac, u1, u2))
-flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
 
-flux_norm = flux ./ continuum_flux
+# convolve
+tbc = Array(gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1))
+cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, vmac, u1, u2))
+flux_convolution = 2π .* dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
+
+# cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont, vsini, vmac, u1, u2))
+# flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
+
+flux_convolution_test = FT.convolve_hirano_rotmacro(λs_korg, flux, vsini, vmac, u1, u2)
+
+#= flux_norm = flux ./ flux_cont
 flux_norm_conv = flux_convolution ./ flux_cont_convolution
 
 # get disk stuff 
@@ -198,7 +196,7 @@ plt.plot(wave_k, temp_k)
 plt.plot(λs_korg, form_temp_intensity)
 # plt.plot(λs_korg, form_temp_integration)
 # plt.plot(λs_korg, form_temp_convolution)
-plt.show()
+plt.show() =#
 
 # plt.plot(wave_k, flux_k)
 # plt.plot(λs_korg, flux_norm_conv)

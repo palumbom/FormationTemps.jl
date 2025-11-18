@@ -29,6 +29,7 @@ include("config.jl")
 include("utils.jl")
 include("constants.jl")
 include("functions.jl")
+include("expint.jl")
 
 # structures
 include("structures/ConvolutionMemory.jl")

@@ -124,7 +124,9 @@ cfunc_flux_rotating = zeros(length(zs)-1, length(λs_korg))
     # tabulate
     ints[:, i] .= intensity
     flux_rotating .+= intensity .* dA_cpu[i]
-    cfunc_flux_rotating .+= Array(gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1) .* dA_cpu[i]) 
+
+    # cfunc_flux_rotating .+= Array(gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1) .* dA_cpu[i]) 
+    cfunc_flux_rotating .+= cfunc_intensity_cum .* dA_cpu[i]
 end
 
 # convert
@@ -132,7 +134,7 @@ flux_rotating .*= 1e-8
 cfunc_flux_rotating .*= 1e-8
 
 # now get cumulative cfuncs 
-cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)
+# cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)
 cum_cfunc_flux_rotating ./= maximum(cum_cfunc_flux_rotating, dims=1)
 
 # loop over wavelength

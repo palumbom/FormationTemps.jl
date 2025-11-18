@@ -1,3 +1,6 @@
+E_2(τ) = Korg.RadiativeTransfer.exponential_integral_2(τ)
+# E_2(τ) = exponential_integral_2_gpu(τ)
+
 function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                                    cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, 
                                    σ_v::CA{T,1}) where T<:AF
@@ -11,7 +14,7 @@ function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem
 
     # get intensity and return
     intensity = sum(cfunc_dt, dims=1)
-    return Array(mem.cfunc), Array(ccum), Array(intensity)'
+    return Array(mem.cfunc), Array(ccum), dropdims(Array(intensity), dims=1)
 end
 
 function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
@@ -26,7 +29,7 @@ function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPU
 
     # get flux and return
     flux = 2π .* sum(cfunc_dt, dims=1)
-    return Array(mem.cfunc), Array(ccum), Array(flux)'
+    return Array(mem.cfunc), Array(ccum), dropdims(Array(flux), dims=1)
 end
 
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
@@ -146,8 +149,8 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
 
             # evaluate integrand f = B(T,λ) * E_2(τ)  
-            f1 = blackbody_gpu(T1, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp1)
-            f2 = blackbody_gpu(T2, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp2)
+            f1 = blackbody_gpu(T1, λ_cm) * E_2(τp1)
+            f2 = blackbody_gpu(T2, λ_cm) * E_2(τp2)
 
             # store contribution
             @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * 1e-8
