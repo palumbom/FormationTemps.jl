@@ -104,15 +104,11 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # get the formation temperature for a stationary star
-cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
-
-cum_cfunc_flux_stationary = cumsum(cfunc_flux_stationary, dims=1)
-cum_cfunc_flux_stationary ./= maximum(cum_cfunc_flux_stationary, dims=1)
+cfunc_flux_stationary, cfunc_flux_cum, flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
 
 form_temp_stationary = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_flux_stationary, :, i)
+    xs = view(cfunc_flux_cum, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
     form_temp_stationary[i] = itp(0.5)
 end

@@ -94,47 +94,44 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get the nominal answer
-cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
+cfunc_flux_stationary, cfunc_flux_cum_stationary, flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
 
 # get disk stuff 
 ρstar = 1.0
 istar = 90.0
-A = 14.48
-B = 0.0
-C = 0.0
-v0 = 2000.0
+v0 = 0.0
 Nϕ = 128
-μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, A, B, C, v0, Nϕ)
+μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
 # flatten, move to cpu
-idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
+idx = findall(x -> x .> 0.0, Array(μs))
 μs_cpu = Array(μs)[idx]
 dA_cpu = Array(dA)[idx]
 z_rot_cpu = Array(z_rot)[idx]
 
 # allocate for output
-ints = zeros(length(λs_korg), length(μs))
+ints = zeros(length(λs_korg), length(μs_cpu))
 flux_rotating = zeros(length(λs_korg))
 cfunc_flux_rotating = zeros(length(zs)-1, length(λs_korg))
 
-for i in eachindex(μs_cpu)
+@showprogress for i in eachindex(μs_cpu)
+    # set rotational velocity
     μ_v .= z_rot_cpu[i] .* FT.c_ms
 
-    cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-    ints[:, i] .= sum(cfunc_int_i, dims=1)'
-
-    flux_rotating .+= ints[:,i] .* dA_cpu[i]
-    cfunc_flux_rotating .+= cfunc_int_i .* dA_cpu[i]
+    # get the cfunc and stuff
+    cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+    
+    # tabulate
+    ints[:, i] .= intensity
+    flux_rotating .+= intensity .* dA_cpu[i]
+    cfunc_flux_rotating .+= Array(gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1) .* dA_cpu[i]) 
 end
 
-# get the flux and cfucn
+# convert
 flux_rotating .*= 1e-8
 cfunc_flux_rotating .*= 1e-8
 
 # now get cumulative cfuncs 
-cum_cfunc_flux_stationary = cumsum(cfunc_flux_stationary, dims=1)
-cum_cfunc_flux_stationary ./= maximum(cum_cfunc_flux_stationary, dims=1)
 cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)
 cum_cfunc_flux_rotating ./= maximum(cum_cfunc_flux_rotating, dims=1)
 
@@ -142,7 +139,7 @@ cum_cfunc_flux_rotating ./= maximum(cum_cfunc_flux_rotating, dims=1)
 form_temp_stationary = zeros(length(λs_korg))
 form_temp_rotating = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_flux_stationary, :, i)
+    xs = view(cfunc_flux_cum_stationary, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
     form_temp_stationary[i] = itp(0.5)
 

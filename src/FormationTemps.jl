@@ -52,7 +52,6 @@ include("macroturbulence/isotropic.jl")
 include("instrumental.jl")
 
 # linelist + stellar model stuff
-include("linelist.jl")
 include("atmosphere.jl")
 
 # radiative transport
