@@ -1,3 +1,23 @@
+function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
+                                   cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
+    calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
+    cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
+    ccum = cumsum(cfunc_dt, dims=1)
+    ccum ./= maximum(ccum, dims=1)
+    intensity = sum(cfunc_dt, dims=1)
+    return Array(mem.cfunc), Array(ccum), Array(intensity)'
+end
+
+function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
+                           cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+    calc_flux_cfunc!(αs_init, atm, mem, cmem, σ_v)
+    cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
+    ccum = cumsum(cfunc_dt, dims=1)
+    ccum ./= maximum(ccum, dims=1)
+    flux = 2π .* sum(cfunc_dt, dims=1)
+    return Array(mem.cfunc), Array(ccum), Array(flux)'
+end
+
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                               cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
     # perturb the alphas
@@ -35,24 +55,6 @@ function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemo
     bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
     @cusync @cuda threads=ts blocks=bs calc_flux_cfunc!(atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
     return nothing
-end
-
-function calc_intensity_cfunc_cumulative(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                                         cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
-    calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
-    cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
-    ccum = cumsum(cfunc_dt, dims=1)
-    intensity = sum(cfunc_dt, dims=1)
-    return Array(mem.cfunc), Array(ccum), Array(intensity)'
-end
-
-function calc_flux_cfunc_cumulative(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                                    cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
-    calc_flux_cfunc!(αs_init, atm, mem, cmem, σ_v)
-    cfunc_dt = mem.cfunc #.* diff(mem.τs, dims=1)
-    ccum = cumsum(cfunc_dt, dims=1)
-    flux = 2π .* sum(cfunc_dt, dims=1)
-    return Array(mem.cfunc), Array(ccum), Array(flux)'
 end
 
 function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM) where T<:AF

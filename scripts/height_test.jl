@@ -55,12 +55,10 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get intensity stuff
-cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_cfunc_cumulative(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
-cfunc_intensity_cum ./= maximum(cfunc_intensity_cum, dims=1)
+cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
 
 # get flux stuff
-cfunc_flux_stationary, cfunc_flux_cum, flux_stationary = FT.calc_flux_cfunc_cumulative(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-cfunc_flux_cum ./= maximum(cfunc_flux_cum, dims=1)
+cfunc_flux_stationary, cfunc_flux_cum, flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
 
 # plt.plot(λs_korg, sol.flux)
 # plt.plot(λs_korg, flux_stationary)
@@ -83,7 +81,7 @@ end
 
 # plt.plot(λs_korg, flux_stationary)
 
-plt.plot(λs_korg, form_height, label="without dtau")
+plt.plot(λs_korg, form_height)
 plt.xlabel("Wavelength")
 plt.ylabel("Formation Height")
 plt.legend()
