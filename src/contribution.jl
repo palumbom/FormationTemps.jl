@@ -1,5 +1,6 @@
 function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                                   cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
+                                   cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, 
+                                   σ_v::CA{T,1}) where T<:AF
     calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
     cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
     ccum = cumsum(cfunc_dt, dims=1)
@@ -19,7 +20,8 @@ function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPU
 end
 
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                              cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
+                              cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, 
+                              σ_v::CA{T,1}) where T<:AF
     # perturb the alphas
     αs_gpu = CuArray{Float64}(αs_init)
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, αs_gpu, μ_v, σ_v)
@@ -58,7 +60,7 @@ function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemo
 end
 
 function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM) where T<:AF
- # thread indices
+    # thread indices
     idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
     sdx = gridDim().x * blockDim().x
     idy = threadIdx().y + blockDim().y * (blockIdx().y - 1)
@@ -67,10 +69,12 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
     # Gauss-Legendre two-point abscissa constant
     one_over_sqrt3 = 1.0 / sqrt(3.0)
 
+    # loop over lambda
     for j in idx:sdx:length(λs)
         # convert to cm
         λ_cm = λs[j] * 1e-8
 
+        # loop over atmosphere
         for k in idy:sdy:length(Ts)-1
             # endpoints in τ-space
             τ0 = τs[k, j]
@@ -88,11 +92,11 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
             T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
 
-            # evaluate integrand f = B(T,λ) * exp(-τ)  (no Δτ factor)
+            # evaluate integrand f = B(T,λ) * exp(-τ) 
             f1 = blackbody_gpu(T1, λ_cm) * exp(-τp1)
             f2 = blackbody_gpu(T2, λ_cm) * exp(-τp2)
 
-            # store contribution *per unit τ* using 2-pt Gauss average
+            # store contribution
             @inbounds cfunc[k, j] = 0.5 * (f1 + f2)
         end
     end
@@ -100,33 +104,42 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
 end
 
 function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
+    # thread indices
     idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
     sdx = gridDim().x * blockDim().x
     idy = threadIdx().y + blockDim().y * (blockIdx().y - 1)
     sdy = gridDim().y * blockDim().y
 
+    # Gauss-Legendre two-point abscissa constant
     one_over_sqrt3 = 1.0 / sqrt(3.0)
 
+    # loop over lambda
     for j in idx:sdx:length(λs)
         λ_cm = λs[j] * 1e-8
 
+        # loop over atmosphere
         for k in idy:sdy:length(Ts)-1
+            # endpoints in τ-space
             τ0 = τs[k, j]
             τ1 = τs[k+1, j]
             Δτ = τ1 - τ0
             τ_mid = 0.5 * (τ0 + τ1)
 
+            # Gauss nodes
             τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
+            # linear T interp wrt τ
             dT = Ts[k+1] - Ts[k]
             inv_dτ = 1.0 / Δτ
             T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
             T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
 
+            # evaluate integrand f = B(T,λ) * E_2(τ)  
             f1 = blackbody_gpu(T1, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp1)
             f2 = blackbody_gpu(T2, λ_cm) * Korg.RadiativeTransfer.exponential_integral_2(τp2)
 
+            # store contribution
             @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * 1e-8
         end
     end
@@ -134,6 +147,7 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
 end
 
 #= 
+# TODO CPU methods
 function calc_intensity_cfunc_cpu(μ::T, Ts::AA{T,1}, λs::AA{T,1}, τs::AA{T,2}) where {T<:AF}
     # get dims, preallocate
     Natm, Nλ = size(τs)
