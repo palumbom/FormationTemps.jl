@@ -35,6 +35,7 @@ include("expint.jl")
 include("structures/ConvolutionMemory.jl")
 include("structures/AtmosphereGPU.jl")
 include("structures/GPUMemory.jl")
+include("structures/ContFunc.jl")
 
 # numerical stuff
 include("interpolations.jl")

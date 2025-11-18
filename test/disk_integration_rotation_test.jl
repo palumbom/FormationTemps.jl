@@ -94,7 +94,9 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get the nominal answer
-cfunc_flux_stationary, cfunc_flux_cum_stationary, flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_cum_stationary = Array(FT.get_cum_cfunc(cfunc_flux_stationary))
+flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
 
 # get disk stuff 
 ρstar = 1.0
@@ -119,22 +121,22 @@ cfunc_flux_rotating = zeros(length(zs)-1, length(λs_korg))
     μ_v .= z_rot_cpu[i] .* FT.c_ms
 
     # get the cfunc and stuff
-    cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+    cfunc_intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
     
     # tabulate
-    ints[:, i] .= intensity
-    flux_rotating .+= intensity .* dA_cpu[i]
+    ints[:,i] .= Array(FT.get_intensity(cfunc_intensity))
 
-    # cfunc_flux_rotating .+= Array(gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1) .* dA_cpu[i]) 
-    cfunc_flux_rotating .+= cfunc_intensity_cum .* dA_cpu[i]
+    # add to disk integration
+    flux_rotating .+= ints[:, i] .* dA_cpu[i]
+    cfunc_flux_rotating .+= Array(cfunc_intensity.cfunc_dt .* dA_cpu[i])
 end
 
-# convert
+# convert units
 flux_rotating .*= 1e-8
 cfunc_flux_rotating .*= 1e-8
 
 # now get cumulative cfuncs 
-# cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)
+cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)
 cum_cfunc_flux_rotating ./= maximum(cum_cfunc_flux_rotating, dims=1)
 
 # loop over wavelength
@@ -151,6 +153,9 @@ for i in eachindex(λs_korg)
 end
 
 # overplot the flux
+@show extrema((flux_rotating - flux_stationary) ./ flux_stationary)
+@show extrema((form_temp_rotating - form_temp_stationary) ./ form_temp_stationary)
+
 fig, ax1 = plt.subplots()
 ax1.plot(λs_korg, flux_stationary, c="k", ls="--", label="Stationary")
 ax1.plot(λs_korg, flux_rotating, c="tab:blue", label="Solid Body Rotation")

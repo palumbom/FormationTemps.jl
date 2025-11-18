@@ -55,22 +55,26 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get intensity stuff
-cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
+cfunc_int = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
+cfunc_int_cum = Array(FT.get_cum_cfunc(cfunc_int))
+intensity = Array(FT.get_intensity(cfunc_int))
 
 # get flux stuff
-cfunc_flux_stationary, cfunc_flux_cum, flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux))
+flux = Array(FT.get_flux(cfunc_flux))
 
 # formation heights
 form_height = zeros(length(λs_korg))
 form_temp = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
     xs = view(cfunc_flux_cum, :, i)
-    # xs = view(cum_cfunc_intensity, :, i)
+    # xs = view(cfunc_int_cum, :, i)
     itp = FT.linear_interp(xs, elav(zs))
     form_height[i] = itp(0.5)
 
     xs = view(cfunc_flux_cum, :, i)
-    # xs = view(cum_cfunc_intensity, :, i)
+    # xs = view(cfunc_int_cum, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
     form_temp[i] = itp(0.5)
 end

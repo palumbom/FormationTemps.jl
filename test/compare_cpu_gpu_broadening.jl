@@ -6,6 +6,7 @@ using CUDA, BenchmarkTools
 using FFTW
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+using ProgressMeter
 plt.ioff()
 
 # matplotlib backend
@@ -69,7 +70,7 @@ rotmacro_error  = zeros(length(steps))
 flux_error = zeros(length(steps))
 
 # loop 
-for i in eachindex(steps)
+@showprogress for i in eachindex(steps)
     # get wavelength grid
     buffer = 0.5
     λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=steps[i])
@@ -116,8 +117,13 @@ for i in eachindex(steps)
     cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
     # get the formation temperature for a stationary star
-    cfunc_flux_stationary, cfunc_flux_cum, flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-    cfunc_flux_cont_stationary, cfunc_flux_cont_cum, flux_cont_stationary = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_stationary))
+    flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
+
+    cfunc_flux_cont_stationary = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    cfunc_flux_cont_cum = Array(FT.get_cum_cfunc(cfunc_flux_cont_stationary))
+    flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_stationary))
 
     flux_norm = flux_stationary ./ flux_cont_stationary
 
@@ -134,20 +140,21 @@ for i in eachindex(steps)
     ζ_rt = 1200.0
 
     # compare rotation
-    cfunc_flux_gray_rot_cpu = FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1)
-    cfunc_flux_gray_rot_gpu = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
+    tbc = Array(cfunc_flux_stationary.cfunc_dt)
+    cfunc_flux_gray_rot_cpu = FT.convolve_gray_rotation(λs_korg, tbc, vsini, u1)
+    cfunc_flux_gray_rot_gpu = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, tbc, vsini, u1))
 
     rot_error[i] = maximum(abs.((cfunc_flux_gray_rot_cpu .- cfunc_flux_gray_rot_gpu) ./ cfunc_flux_gray_rot_cpu))
 
     # compare RT
-    cfunc_flux_gray_rt_cpu = FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_stationary, ζ_rt)
-    cfunc_flux_gray_rt_gpu = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, ζ_rt))
+    cfunc_flux_gray_rt_cpu = FT.convolve_gray_rt_macro(λs_korg, tbc, ζ_rt)
+    cfunc_flux_gray_rt_gpu = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
 
     rt_error[i] = maximum(abs.((cfunc_flux_gray_rt_cpu .- cfunc_flux_gray_rt_gpu) ./ cfunc_flux_gray_rt_cpu))
 
     # compare hirano
-    cfunc_flux_hirano_cpu = FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2)
-    cfunc_flux_hirano_gpu = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+    cfunc_flux_hirano_cpu = FT.convolve_hirano_rotmacro(λs_korg, tbc, vsini, ζ_rt, u1, u2)
+    cfunc_flux_hirano_gpu = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, ζ_rt, u1, u2))
 
     rotmacro_error[i] = maximum(abs.((cfunc_flux_hirano_cpu .- cfunc_flux_hirano_gpu) ./ cfunc_flux_hirano_cpu))
 

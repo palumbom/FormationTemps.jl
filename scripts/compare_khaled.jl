@@ -92,37 +92,42 @@ Natm = size(αs, 1)
 Npad = 400
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
+# broadening
 μ_v = CUDA.zeros(Float64, length(zs))
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 850.0
 μ_v_rot = CUDA.zeros(Float64, length(zs))
 
+# memory for convolution
 cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
-
-# get intensity stuff
-cfunc_int, cfunc_int_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
-cfunc_int_cont, cfunc_int_cont_cum, intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
-int_norm = intensity ./ intensity_cont
-
-# get flux stuff
-cfunc_flux, cfunc_flux_cum, flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-# cfunc_flux_cont, cfunc_flux_cont_cum, flux_cont = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
 
 # params for convolution
 @load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
 vsini = 1630.0
 vmac = 3980.0
 
+# get intensity stuff
+cfunc_int, cfunc_int_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
+cfunc_int_cont, cfunc_int_cont_cum, intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
+int_norm = intensity ./ intensity_cont
+
+# get flux
+cfunc_flux, cfunc_flux_cum, flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+
 # convolve
-tbc = Array(gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1))
+tbc = gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1)
 cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, vmac, u1, u2))
 flux_convolution = 2π .* dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
 
-# cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont, vsini, vmac, u1, u2))
-# flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
+# get continuum flux
+cfunc_flux_cont, cfunc_flux_cont_cum, flux_cont = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
 
-flux_convolution_test = FT.convolve_hirano_rotmacro(λs_korg, flux, vsini, vmac, u1, u2)
+# convolve
+tbc = gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1)
+cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, vmac, u1, u2))
+flux_cont_convolution = 2π .* dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
 
-#= flux_norm = flux ./ flux_cont
+# normalize
+flux_norm = flux ./ flux_cont
 flux_norm_conv = flux_convolution ./ flux_cont_convolution
 
 # get disk stuff 
@@ -144,16 +149,35 @@ cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
 @showprogress for i in eachindex(μs_cpu)
     μs_cpu[i] <= 0.0 && continue
 
+
+    # get the cfunc and stuff
+    cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+    
+    # tabulate
+    ints[:, i] .= intensity
+    flux_rotating .+= intensity .* dA_cpu[i]
+
+    # cfunc_flux_rotating .+= Array(gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1) .* dA_cpu[i]) 
+    cfunc_flux_rotating .+= cfunc_intensity_cum .* dA_cpu[i]
+
+
     # set the rotational velocity
     μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
 
     # get the intensity contribution function
-    cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v)
-    cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v)
+    cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v)
 
     # convolve the cfunc with RT macroturbulence
-    cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_i, vmac))
-    cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_cont_i, vmac))
+    tbc = gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1)
+    cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac))
+
+    # get the intensity contribution function
+    cfunc_intensity_cont, cfunc_intensity_cont_cum, intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v)
+
+    # convolve the cfunc with RT macroturbulence
+    tbc = gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1)
+    cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac))
+
 
     # add to the flux integral
     flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
@@ -196,7 +220,7 @@ plt.plot(wave_k, temp_k)
 plt.plot(λs_korg, form_temp_intensity)
 # plt.plot(λs_korg, form_temp_integration)
 # plt.plot(λs_korg, form_temp_convolution)
-plt.show() =#
+plt.show()
 
 # plt.plot(wave_k, flux_k)
 # plt.plot(λs_korg, flux_norm_conv)
