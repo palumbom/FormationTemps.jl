@@ -8,6 +8,7 @@ using PyPlot, PyCall; mpl = plt.matplotlib
 using ProgressMeter
 
 # matplotlib backend
+plt.ioff()
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 
@@ -106,23 +107,30 @@ vsini = 1630.0
 vmac = 3980.0
 
 # get intensity stuff
-cfunc_int, cfunc_int_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
-cfunc_int_cont, cfunc_int_cont_cum, intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
-int_norm = intensity ./ intensity_cont
+cfunc_int = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
+cfunc_int_cum = Array(FT.get_cum_cfunc(cfunc_int))
+intensity = Array(FT.get_intensity(cfunc_int))
+
+cfunc_int_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
+cfunc_int_cont_cum = Array(FT.get_cum_cfunc(cfunc_int_cont))
+intensity_cont = Array(FT.get_intensity(cfunc_int_cont))
 
 # get flux
-cfunc_flux, cfunc_flux_cum, flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux))
+flux = Array(FT.get_flux(cfunc_flux))
+
+cfunc_flux_cont = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux_cont_cum = Array(FT.get_cum_cfunc(cfunc_flux_cont))
+flux_cont = Array(FT.get_flux(cfunc_flux_cont))
 
 # convolve
-tbc = gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1)
+tbc = cfunc_flux.cfunc_dt
 cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, vmac, u1, u2))
 flux_convolution = 2π .* dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
 
-# get continuum flux
-cfunc_flux_cont, cfunc_flux_cont_cum, flux_cont = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
-
 # convolve
-tbc = gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1)
+tbc = cfunc_flux_cont.cfunc_dt
 cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, vmac, u1, u2))
 flux_cont_convolution = 2π .* dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
 
@@ -149,35 +157,20 @@ cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
 @showprogress for i in eachindex(μs_cpu)
     μs_cpu[i] <= 0.0 && continue
 
-
-    # get the cfunc and stuff
-    cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-    
-    # tabulate
-    ints[:, i] .= intensity
-    flux_rotating .+= intensity .* dA_cpu[i]
-
-    # cfunc_flux_rotating .+= Array(gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1) .* dA_cpu[i]) 
-    cfunc_flux_rotating .+= cfunc_intensity_cum .* dA_cpu[i]
-
-
     # set the rotational velocity
     μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
 
     # get the intensity contribution function
-    cfunc_intensity, cfunc_intensity_cum, intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v)
+    cfunc_intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
 
     # convolve the cfunc with RT macroturbulence
-    tbc = gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1)
+    tbc = cfunc_intensity.cfunc_dt
     cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac))
 
-    # get the intensity contribution function
-    cfunc_intensity_cont, cfunc_intensity_cont_cum, intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v)
-
     # convolve the cfunc with RT macroturbulence
-    tbc = gpu_mem.cfunc .* diff(gpu_mem.τs, dims=1)
+    tbc = cfunc_intensity_cont.cfunc_dt
     cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac))
-
 
     # add to the flux integral
     flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
@@ -185,41 +178,48 @@ cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
     cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
 end
 
+# normalize
 flux_norm_int = flux_integration ./ flux_cont_integration
 
 # now get cumulative cfuncs 
-cum_cfunc_flux = cumsum(cfunc_flux, dims=1)
-cum_cfunc_flux ./= maximum(cum_cfunc_flux, dims=1)
-cum_cfunc_intensity = cumsum(cfunc_int, dims=1)
-cum_cfunc_intensity ./= maximum(cum_cfunc_intensity, dims=1)
+cum_cfunc_intensity = Array(FT.get_cum_cfunc(cfunc_int))
+cum_cfunc_flux = Array(FT.get_cum_cfunc(cfunc_flux))
+
 cum_cfunc_conv = cumsum(cfunc_flux_convolution, dims=1)
 cum_cfunc_conv ./= maximum(cum_cfunc_conv, dims=1)
 cum_cfunc_int = cumsum(cfunc_flux_integration, dims=1)
 cum_cfunc_int ./= maximum(cum_cfunc_int, dims=1)
 
 # loop over wavelength
-form_temp_integration = zeros(length(λs_korg))
 form_temp_intensity = zeros(length(λs_korg))
+form_temp_flux = zeros(length(λs_korg))
+form_temp_integration = zeros(length(λs_korg))
 form_temp_convolution = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_int, :, i)
+    xs = view(cum_cfunc_intensity, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_integration[i] = itp(0.5)
+    form_temp_intensity[i] = itp(0.5)
+
+    xs = view(cum_cfunc_flux, :, i)
+    itp = FT.linear_interp(xs, elav(Ts))
+    form_temp_flux[i] = itp(0.5)
 
     xs = view(cum_cfunc_conv, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
     form_temp_convolution[i] = itp(0.5)
 
-    xs = view(cum_cfunc_intensity, :, i)
+    xs = view(cum_cfunc_int, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_intensity[i] = itp(0.5)
+    form_temp_integration[i] = itp(0.5)
 end
 
 # compare 
-plt.plot(wave_k, temp_k)
-plt.plot(λs_korg, form_temp_intensity)
-# plt.plot(λs_korg, form_temp_integration)
-# plt.plot(λs_korg, form_temp_convolution)
+plt.plot(wave_k, temp_k, label="Khaled")
+plt.plot(λs_korg, form_temp_intensity, label="Intensity")
+plt.plot(λs_korg, form_temp_flux, label="Stationary Flux")
+plt.plot(λs_korg, form_temp_integration, label="Int. Flux.")
+plt.plot(λs_korg, form_temp_convolution, label="Conv. Flux")
+plt.legend()
 plt.show()
 
 # plt.plot(wave_k, flux_k)

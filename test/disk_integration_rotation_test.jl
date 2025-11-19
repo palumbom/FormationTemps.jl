@@ -102,7 +102,7 @@ flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
 ρstar = 1.0
 istar = 90.0
 v0 = 0.0
-Nϕ = 128
+Nϕ = 64
 μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
 # flatten, move to cpu
@@ -130,10 +130,6 @@ cfunc_flux_rotating = zeros(length(zs)-1, length(λs_korg))
     flux_rotating .+= ints[:, i] .* dA_cpu[i]
     cfunc_flux_rotating .+= Array(cfunc_intensity.cfunc_dt .* dA_cpu[i])
 end
-
-# convert units
-flux_rotating .*= 1e-8
-cfunc_flux_rotating .*= 1e-8
 
 # now get cumulative cfuncs 
 cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)

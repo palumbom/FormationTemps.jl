@@ -11,8 +11,30 @@ plt.ioff()
 AF = AbstractFloat
 AA = AbstractArray
 
+# get the linelist
+linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
+linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
+specs = [string(l.species) for l in linelist]
+
+# cut on species
+linelist = linelist[specs .== "Fe I"]
+
+# get the Fe I 6301 & 6302 lines (just cuz)
+wls = [l.wl for l in linelist] 
+idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
+idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
+linelist = vcat([linelist[idx1], linelist[idx2]])
+
+# re-get values
+wls = [l.wl * 1e8 for l in linelist]
+log_gf =  [l.log_gf for l in linelist]
+species =  [l.species for l in linelist]
+E_lower =  [l.E_lower for l in linelist]
+gamma_rad =  [l.gamma_rad for l in linelist]
+gamma_stark =  [l.gamma_stark for l in linelist]
+
 # make the wavelength grid
-λs_korg = range(3000.0, 6000.0, step=0.1)
+λs_korg = range(2000.0, 6400.0, step=0.05)
 # λs_korg = range(6301.0, 6303.0, step=0.1)
 
 # get some abundances
@@ -32,14 +54,15 @@ zs = atm_gpu.zs
 Ts = atm_gpu.Ts
 τ5000 = atm_gpu.τs
 
-# # synthesis to get the alphas
-# αs = zeros(length(atm_gpu.zs), length(λs_korg))
-# αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
+# synthesis to get the alphas
+αs = zeros(length(atm_gpu.zs), length(λs_korg))
+αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
 # FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), [], atm_gpu, A_X)
+FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
-sol = synthesize(marcs_atm, [], A_X, λs_korg; vmic=1.2, tau_scheme="bezier", 
-                 hydrogen_lines=false, use_MHD_for_hydrogen_lines=false)
-αs = deepcopy(sol.alpha)
+# sol = synthesize(marcs_atm, [], A_X, λs_korg; vmic=1.2, tau_scheme="bezier", 
+#                  hydrogen_lines=false, use_MHD_for_hydrogen_lines=false)
+# αs = deepcopy(sol.alpha)
 
 # allocate memory for convolutions
 Nλ = length(λs_korg)

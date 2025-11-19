@@ -100,7 +100,7 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             f2 = blackbody_gpu(T2, λ_cm) * exp(-τp2)
 
             # store contribution
-            @inbounds cfunc[k, j] = 0.5 * (f1 + f2)
+            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * 1e-8
         end
     end
     return nothing
