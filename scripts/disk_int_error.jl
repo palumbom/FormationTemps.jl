@@ -55,7 +55,7 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=0.01)
+λs_korg = range(first(wls) - 1.0, last(wls) + 1.0, step=0.01)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -95,23 +95,22 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get the nominal answer
-cfunc_flux = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-flux = dropdims(sum(cfunc_flux, dims=1), dims=1)
+cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux = Array(cfunc_flux_struct.cfunc_dt)
+flux = Array(FT.get_flux(cfunc_flux_struct))
 
-@btime FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
-
-#= # get disk stuff 
+# get disk stuff 
 ρstar = 1.0
 istar = 90.0
 v0 = 0.0
 Nϕ = 2 .^(range(2, 8, step=1))
-Nϕ = [8, 16, 32, 48, 64, 96, 128, 156, 181, 212, 256, 512]
-
-mean_pct_error_flux = zeros(length(Nϕ))
-ntiles_real = zeros(length(Nϕ))
+Nϕ = [8, 16, 32, 64, 128, 256, 512]
 
 # allocate for output
-flux_test = zeros(length(λs_korg))
+flux_test = CUDA.zeros(Float64, length(λs_korg))
+mean_pct_error_flux = zeros(length(Nϕ))
+max_pct_error_flux = zeros(length(Nϕ))
+ntiles_real = zeros(length(Nϕ))
 
 for j in eachindex(Nϕ)
     @show Nϕ[j]
@@ -124,33 +123,28 @@ for j in eachindex(Nϕ)
     μs_cpu = view(Array(μs), idx)
     dA_cpu = view(Array(dA), idx)
     z_rot_cpu = view(Array(z_rot), idx)
-
-    @show sum(dA_cpu)
-    
     ntiles_real[j] = length(μs_cpu)
 
-    flux_test .= 0.0
+    @show sum(dA_cpu)
 
+    # re-zero
+    flux_test .= 0.0
     @showprogress for i in eachindex(μs_cpu)
-        # μ_v .= z_rot_cpu[i] .* FT.c_ms
-        cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-        flux_test .+= sum(cfunc_int_i, dims=1)' .* dA_cpu[i]
+        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+        flux_test .+= FT.get_intensity(cfunc_intensity_struct) .* dA_cpu[i]
     end
     println()
 
     # test the flux
-    flux_test .*= 1e-8 .* π ./ sum(dA_cpu) 
-    mean_pct_error_flux[j] = mean(100 .* (flux .- flux_test) ./ flux)
-
-    # # integrate the cfuncs 
-    # cfunc_flux_test = π .* 1e-8 .* cfuncs_int ./ sum(dA_cpu) 
-    # @show extrema(cfunc_flux_test ./ cfunc_flux)
-    # println()
+    mean_pct_error_flux[j] = abs(mean(100 .* (flux .- Array(flux_test)) ./ flux))
+    max_pct_error_flux[j] = maximum(abs.(100 .* (flux .- Array(flux_test)) ./ flux))
 end
 
-plt.scatter(Nϕ, mean_pct_error_flux, s=20)
-plt.xscale("symlog")
+plt.scatter(Nϕ, mean_pct_error_flux, s=20, label="Mean Abs. Error")
+plt.scatter(Nϕ, max_pct_error_flux, s=20, label="Max Abs. Error")
+# plt.xscale("symlog")
 plt.xlabel("Number of latitude tiles")
 plt.ylabel("Mean % Error")
+plt.legend()
 plt.savefig("figures/disk_int_error.pdf", bbox_inches="tight")
-plt.show() =#
+plt.show()

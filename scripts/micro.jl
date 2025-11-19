@@ -63,7 +63,7 @@ cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 A_X = Korg.asplund_2020_solar_abundances
 
 # get the atmosphere
-marcs_atm = get_marcs_atm(5777.0, 4.44, A_X, n_layers=168 * 3)
+marcs_atm = FT.get_marcs_atm(5777.0, 4.44, A_X)
 τ_500 = Korg.get_tau_refs(marcs_atm)
 zs = Korg.get_zs(marcs_atm)
 Ts = Korg.get_temps(marcs_atm)
@@ -78,7 +78,8 @@ Ts = atm_gpu.Ts
 
 # synthesis to get the alphas
 αs = zeros(length(atm_gpu.zs), length(λs_korg))
-FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
+FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
 # allocate on device
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
@@ -104,17 +105,18 @@ fluxes = zeros(length(λs_korg), length(vmics))
 
 for i in eachindex(vmics)
     σ_v .= vmics[i]
-    cfuncs[:,:,i] .= FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs, μ_v, σ_v)
-    intensities[:,i] .= dropdims(sum(view(cfuncs,:,:,i), dims=1), dims=1)
 
-    cfuncs_flux[:,:,i] = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-    fluxes[:,i] = 2π .* dropdims(sum(view(cfuncs_flux,:,:,i), dims=1), dims=1) 
+    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs, μ_v, σ_v)
+    cfuncs[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_struct))
+    intensities[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
+
+    cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+    cfuncs_flux[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_flux_struct))
+    fluxes[:,i] = Array(FT.get_flux(cfunc_flux_struct))
 end
 
-cum_cfuncs_norm = cumsum(cfuncs, dims=1) 
-cum_cfuncs_norm ./= maximum(cum_cfuncs_norm, dims=1)
-cum_cfuncs_flux_norm = cumsum(cfuncs_flux, dims=1) 
-cum_cfuncs_flux_norm ./= maximum(cum_cfuncs_flux_norm, dims=1)
+cum_cfuncs_norm = cfuncs
+cum_cfuncs_flux_norm = cfuncs_flux
 
 form_temps_int = zeros(length(λs_korg), length(vmics))
 form_temps_flux = zeros(length(λs_korg), length(vmics))

@@ -1,4 +1,4 @@
-function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=240) where T<:AF
+function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=56) where T<:AF
     # get the model atmosphere
     marcs_atm = Korg.interpolate_marcs(Teff, logg, A_X)
     τ_500 = Korg.get_tau_refs(marcs_atm)
