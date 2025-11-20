@@ -166,7 +166,7 @@ v_ctr = n .* Δv
 hirano_rot_macro = circshift(k_ctr ./ sum(k_ctr), shift)
 
 # get the gray rt kernel and rotation kernel
-rt_macro_kernel = FT.gray_rt_macro_kernel(vs, ζ_rt)
+iso_rt_macro_kernel = FT.gray_iso_rt_macro_kernel(vs, ζ_rt)
 gray_rot_kernel = FT.gray_rot_kernel(vs, vsini, u1)
 
 # get isotropic gaussian
@@ -184,9 +184,9 @@ gaussian ./= sum(gaussian)
 # plot the RT case
 plt.close("all")
 fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, rt_macro_kernel, label="gray")
+ax1.plot(λs_korg, iso_rt_macro_kernel, label="gray")
 ax1.plot(λs_korg, hirano_no_rot, label="hirano")
-ax2.scatter(λs_korg, hirano_no_rot .- rt_macro_kernel, c="tab:blue", s=2)
+ax2.scatter(λs_korg, hirano_no_rot .- iso_rt_macro_kernel, c="tab:blue", s=2)
 ax1.set_xlim(6301.8, 6302.2)
 ax1.legend()
 ax1.set_title("Macro Only")
@@ -208,7 +208,7 @@ cfunc_flux_hirano_nomacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, 0.0, u1, 
 cfunc_flux_hirano_rotmacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2, intres=intres)
 
 cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
-cfunc_flux_macrogray = FT.convolve_gray_rt_macro(xs, ys, ζ_rt)
+cfunc_flux_macrogray = FT.convolve_iso_rt_macro(xs, ys, ζ_rt)
 
 flux_hirano_norot = dropdims(sum(cfunc_flux_hirano_norot, dims=1), dims=1)
 flux_hirano_nomacro = dropdims(sum(cfunc_flux_hirano_nomacro, dims=1), dims=1)

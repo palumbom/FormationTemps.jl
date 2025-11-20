@@ -46,9 +46,10 @@ include("microturbulence.jl")
 # macroturbulence
 include("macroturbulence/roll.jl")
 include("macroturbulence/gray_rot.jl")
-include("macroturbulence/gray_rt.jl")
+include("macroturbulence/rad_tan.jl")
+include("macroturbulence/iso_rad_tan.jl")
 include("macroturbulence/hirano.jl")
-include("macroturbulence/isotropic.jl")
+include("macroturbulence/iso_gaussian.jl")
 
 # instrumental profile
 include("instrumental.jl")

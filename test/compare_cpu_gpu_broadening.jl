@@ -60,12 +60,14 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # set steps
-steps = range(0.0001, 0.01, step=0.0001)
+# steps = range(0.0001, 0.01, step=0.0001)
+steps = range(0.0001, 0.005, step=0.0001)
 
 # allocate memory
 αs_error = zeros(length(steps))
 rot_error = zeros(length(steps))
 rt_error = zeros(length(steps))
+rt_aniso_error = zeros(length(steps))
 rotmacro_error  = zeros(length(steps))
 flux_error = zeros(length(steps))
 
@@ -147,10 +149,16 @@ flux_error = zeros(length(steps))
     rot_error[i] = maximum(abs.((cfunc_flux_gray_rot_cpu .- cfunc_flux_gray_rot_gpu) ./ cfunc_flux_gray_rot_cpu))
 
     # compare RT
-    cfunc_flux_gray_rt_cpu = FT.convolve_gray_rt_macro(λs_korg, tbc, ζ_rt)
-    cfunc_flux_gray_rt_gpu = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
+    cfunc_flux_gray_rt_cpu = FT.convolve_iso_rt_macro(λs_korg, tbc, ζ_rt)
+    cfunc_flux_gray_rt_gpu = Array(FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
 
     rt_error[i] = maximum(abs.((cfunc_flux_gray_rt_cpu .- cfunc_flux_gray_rt_gpu) ./ cfunc_flux_gray_rt_cpu))
+
+    # compare RT aniso
+    cfunc_flux_gray_rt_cpu = FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, 0.7)
+    cfunc_flux_gray_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, 0.7))
+
+    rt_aniso_error[i] = maximum(abs.((cfunc_flux_gray_rt_cpu .- cfunc_flux_gray_rt_gpu) ./ cfunc_flux_gray_rt_cpu))
 
     # compare hirano
     cfunc_flux_hirano_cpu = FT.convolve_hirano_rotmacro(λs_korg, tbc, vsini, ζ_rt, u1, u2)
@@ -167,6 +175,7 @@ end
 plt.scatter(steps, αs_error, s=2, label="alpha")
 plt.scatter(steps, rot_error, s=2, label="rot")
 plt.scatter(steps, rt_error, s=2, label="rt")
+plt.scatter(steps, rt_aniso_error, s=2, label="rt aniso")
 plt.scatter(steps, rotmacro_error, s=2, label="hirano")
 plt.scatter(steps, flux_error, s=2, label="flux")
 plt.legend()
