@@ -1,5 +1,5 @@
 """
-Equation 17.8 from Gray (2008), assuming A_R = A_T and ξ_R = ξ_T
+Equation 17.8 from Gray (2008), assuming A_R = A_T and ζ_R = ζ_T
 """
 function gray_iso_rt_macro_kernel(vs::AA{T,1}, ζ_rt::T) where T<:AF
     t1 = 2.0 .* exp.(-1.0 .* (vs ./ ζ_rt).^2.0) ./ (sqrt(π) .* ζ_rt)

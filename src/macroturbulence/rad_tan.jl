@@ -1,11 +1,11 @@
 """
-Equation 17.6 from Gray (2008), assuming A_R = A_T and ξ_R = ξ_T
+Equation 17.6 from Gray (2008), assuming A_R = A_T and ζ _R = ζ _T
 """
 function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     # constants
     A_R = 0.5
     A_T = A_R
-    sqrt_π = sqrt(π)
+    sqrt_π = sqrt(T(π))
 
     # get trig
     ϵ = T(1e-6)
@@ -20,45 +20,74 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     return kernel ./ sum(kernel)
 end
 
-function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
+function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T;
+                           pad_left::Int=0, pad_right::Int=0) where T<:AF
     # short circuit
     if iszero(ζ_rt)
         return ys
     end
 
     # offset the kernel by the velocity (discrete center)
-    i0 = length(xs) ÷ 2 + 1
+    Nλ = length(xs)
+    Ltot = Nλ + pad_left + pad_right
+    i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
 
-    # get the normalized kernel (GPU-style phase)
+    # get the normalized kernel
     kernel = rt_macro_kernel(vs, ζ_rt, μ)
-    kshift = ifftshift(kernel)
 
-    # return convolution via FFT (matches GPU convention)
-    return real(ifft(fft(ys) .* fft(kshift)))
+    # pad kernel to Ltot, align zero-lag to padded center, then map to FFT indexing
+    kpad = zeros(T, Ltot)
+    @views kpad[pad_left+1:pad_left+Nλ] .= kernel
+    center = Ltot ÷ 2
+    r = center - (pad_left + i0)
+    if r != 0
+        kpad = circshift(kpad, r)
+    end
+    kshift = ifftshift(kpad)
+    ftk = fft(kshift)
+
+    # pad signal the same way, convolve in Fourier space, slice valid region
+    ypad = zeros(T, Ltot)
+    @views ypad[pad_left+1:pad_left+Nλ] .= ys
+    conv = real(ifft(fft(ypad) .* ftk))
+    return @view conv[pad_left+1:pad_left+Nλ]
 end
 
-function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T, μ::T) where T<:AF
+function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T, μ::T;
+                           pad_left::Int=0, pad_right::Int=0) where T<:AF
     # short circuit
     if iszero(ζ_rt)
         return ys
     end
 
     # offset the kernel by the velocity (discrete center)
-    i0 = length(xs) ÷ 2 + 1
+    Nλ = length(xs)
+    Ltot = Nλ + pad_left + pad_right
+    i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
 
     # get the normalized kernel (GPU-style phase)
     kernel = rt_macro_kernel(vs, ζ_rt, μ)
-    kshift = ifftshift(kernel)
-    ftk = fft(kshift)
+    kpad = zeros(T, Ltot)
+    @views kpad[pad_left+1:pad_left+Nλ] .= kernel
+    center = Ltot ÷ 2
+    r = center - (pad_left + i0)
+    if r != 0
+        kpad = circshift(kpad, r)
+    end
+    ftk = fft(ifftshift(kpad))
 
     # allocate array for output spectrum
     ys_out = zeros(size(ys))
+    ypad = zeros(T, Ltot)
     for t in axes(ys, 1)
-        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* ftk))
+        fill!(ypad, zero(T))
+        @views ypad[pad_left+1:pad_left+Nλ] .= ys[t, :]
+        conv = real(ifft(fft(ypad) .* ftk))
+        @views ys_out[t, :] .= conv[pad_left+1:pad_left+Nλ]
     end
     return ys_out
 end
@@ -78,8 +107,9 @@ function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, μ, Nλ, pad_l
         s2 = one(T) - μ * μ
         sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
 
-        invR = 0.5 / (sqrt(π) * ζ_rt * cosθ)
-        invT = 0.5 / (sqrt(π) * ζ_rt * sinθ)
+        sqrt_π = sqrt(T(π))
+        invR = T(0.5) / (sqrt_π * ζ_rt * cosθ)
+        invT = T(0.5) / (sqrt_π * ζ_rt * sinθ)
 
         t1 = exp(-(xj / (ζ_rt * cosθ))^2) * invR
         t2 = exp(-(xj / (ζ_rt * sinθ))^2) * invT
