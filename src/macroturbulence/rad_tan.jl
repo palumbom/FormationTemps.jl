@@ -1,11 +1,11 @@
 """
-Equation 17.6 from Gray (2008), assuming A_R = A_T and ζ _R = ζ _T
+Equation 17.6 from Gray (2008), assuming A_R = A_T and ξ_R = ξ_T
 """
 function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     # constants
     A_R = 0.5
     A_T = A_R
-    sqrt_π = sqrt(T(π))
+    sqrt_π = sqrt(π)
 
     # get trig
     ϵ = T(1e-6)
@@ -21,7 +21,7 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
 end
 
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T;
-                           pad_left::Int=0, pad_right::Int=0) where T<:AF
+                           pad_left::Int=100, pad_right::Int=100) where T<:AF
     # short circuit
     if iszero(ζ_rt)
         return ys
@@ -40,7 +40,7 @@ function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T;
     # pad kernel to Ltot, align zero-lag to padded center, then map to FFT indexing
     kpad = zeros(T, Ltot)
     @views kpad[pad_left+1:pad_left+Nλ] .= kernel
-    center = Ltot ÷ 2
+    center = Ltot ÷ 2 + 1
     r = center - (pad_left + i0)
     if r != 0
         kpad = circshift(kpad, r)
@@ -73,7 +73,7 @@ function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T, μ::T;
     kernel = rt_macro_kernel(vs, ζ_rt, μ)
     kpad = zeros(T, Ltot)
     @views kpad[pad_left+1:pad_left+Nλ] .= kernel
-    center = Ltot ÷ 2
+    center = Ltot ÷ 2 + 1
     r = center - (pad_left + i0)
     if r != 0
         kpad = circshift(kpad, r)
@@ -107,9 +107,8 @@ function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, μ, Nλ, pad_l
         s2 = one(T) - μ * μ
         sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
 
-        sqrt_π = sqrt(T(π))
-        invR = T(0.5) / (sqrt_π * ζ_rt * cosθ)
-        invT = T(0.5) / (sqrt_π * ζ_rt * sinθ)
+        invR = 0.5 / (sqrt(π) * ζ_rt * cosθ)
+        invT = 0.5 / (sqrt(π) * ζ_rt * sinθ)
 
         t1 = exp(-(xj / (ζ_rt * cosθ))^2) * invR
         t2 = exp(-(xj / (ζ_rt * sinθ))^2) * invT
@@ -159,7 +158,7 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
 
     # ensure zero-lag sits at padded center before FFT layout
     Ltot = length(kernel_row)
-    center = Ltot ÷ 2
+    center = Ltot ÷ 2 + 1
     r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
@@ -185,6 +184,9 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
 
     # inverse fourier transform
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
+
+    # if your cuFFT backward plan is unnormalized, apply 1/Ltot scaling once here
+    cmem.conv_gpu .*= inv(T(Ltot))  # remove this line if your plan already scales
 
     # slice valid region
     out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
