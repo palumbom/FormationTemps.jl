@@ -21,7 +21,7 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
 end
 
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T;
-                           pad_left::Int=100, pad_right::Int=100) where T<:AF
+                           pad_left::Int=0, pad_right::Int=0) where T<:AF
     # short circuit
     if iszero(ζ_rt)
         return ys
