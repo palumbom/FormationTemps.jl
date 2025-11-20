@@ -65,6 +65,9 @@ vsinis = df.Vsini .* 1000.0
 vmacs = df.Vmac .* 1000.0
 mohs = df[!, "[M/H]"]
 
+plt.hist(vmacs, bins="auto")
+plt.show()
+
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
