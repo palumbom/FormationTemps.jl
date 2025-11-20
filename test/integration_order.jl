@@ -147,14 +147,14 @@ cfunc_integration = CUDA.zeros(Float64, length(atm_gpu.zs) - 1, length(λs_korg)
     flux_test .+= FT.get_intensity(cfunc_intensity_struct) .* dA_cpu[i]
     cfunc_test .+= tbc .* dA_cpu[i]
 
-    cfunc_int_i_mac = FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac)
+    cfunc_int_i_mac = FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac)
     cfunc_integration .+= cfunc_int_i_mac .* dA_cpu[i]
     flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
 end
 
 # convolve flux_test
-flux_test_mac = FT.convolve_gray_rt_macro(λs_korg, Array(flux_test), vmac)
-cfunc_test_mac =  FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_test, vmac)
+flux_test_mac = FT.convolve_iso_rt_macro(λs_korg, Array(flux_test), vmac)
+cfunc_test_mac =  FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, cfunc_test, vmac)
 flux_new_test_mac = Array(sum(cfunc_test_mac, dims=1))'
 
 plt.plot(Array(flux_test_mac))

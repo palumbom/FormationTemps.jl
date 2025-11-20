@@ -136,9 +136,15 @@ println("Rot")
 println()
 
 # compare rt 
-println("RT Macro")
-@btime FT.convolve_gray_rt_macro(λs_korg, tbc, ζ_rt)
-@btime Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
+println("Iso RT Macro")
+@btime FT.convolve_iso_rt_macro(λs_korg, tbc, ζ_rt)
+@btime Array(FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
+println()
+
+# compare rt 
+println("Aniso RT Macro")
+@btime FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, 0.9)
+@btime Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, 0.9))
 println()
 
 # compare hirano

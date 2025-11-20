@@ -90,8 +90,8 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # kernel rows as 1-D views to avoid dim ambiguity
     kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
     shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
-
     fill!(kernel_row, zero(T))
+    
     ts1 = (256,)
     bs1 = (cld(cmem.Nλ, ts1[1]),)
     @cuda threads=ts1 blocks=bs1 compute_padded_gray_kernel_1D!(kernel_row,

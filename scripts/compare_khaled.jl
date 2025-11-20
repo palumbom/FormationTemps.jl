@@ -166,11 +166,11 @@ cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
 
     # convolve the cfunc with RT macroturbulence
     tbc = cfunc_intensity.cfunc_dt
-    cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac))
+    cfunc_int_i_mac = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac, μs_cpu[i]))
 
     # convolve the cfunc with RT macroturbulence
     tbc = cfunc_intensity_cont.cfunc_dt
-    cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac))
+    cfunc_int_cont_i_mac = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmac, μs_cpu[i]))
 
     # add to the flux integral
     flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]

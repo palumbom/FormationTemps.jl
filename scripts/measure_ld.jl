@@ -55,7 +55,7 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-buffer = 2.0
+buffer = 4.0
 λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
@@ -102,16 +102,22 @@ flux_stationary = Array(FT.get_flux(cfunc_flux_struct))
 cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
 continuum_flux_stationary = Array(FT.get_flux(cfunc_flux_cont_struct))
 
+vmac = 3400.0
+
 # allocate for intensities 
 μs = range(1.0, 0.3, length=100)
 ints = zeros(length(λs_korg), length(μs))
 ints_cont = zeros(length(λs_korg), length(μs))
 for i in eachindex(μs)
     cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
-    ints[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
+    ints_temp = dropdims(Array(FT.get_intensity(cfunc_intensity_struct))', dims=1)
+    # ints[:,i] .= FT.convolve_rt_macro(λs_korg, ints_temp, vmac, μs[i])
+    ints[:,i] .= ints_temp
 
     cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
-    ints_cont[:,i] .= Array(FT.get_intensity(cfunc_intensity_cont))
+    ints_cont_temp = dropdims(Array(FT.get_intensity(cfunc_intensity_cont))', dims=1)
+    # ints_cont[:,i] .= FT.convolve_rt_macro(λs_korg, ints_cont_temp, vmac, μs[i])
+    ints_cont[:,i] .= ints_cont_temp
 end
 
 # normalize 
@@ -146,6 +152,9 @@ fit = curve_fit(quad_limb_darkening, xdata, ydata, p0)
 coeffs = coef(fit)
 u1 = coeffs[1]
 u2 = coeffs[2]
+@show u1
+@show u2
+
 outfile = joinpath(FT.datdir, "ld_coeffs.jld2")
 jldsave(outfile; u1, u2)
 

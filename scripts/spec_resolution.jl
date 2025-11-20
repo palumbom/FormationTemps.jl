@@ -144,7 +144,7 @@ colors = cmap(norm(vsinis ./ 1e3))
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
-    Nϕ = 32
+    Nϕ = 64
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
@@ -162,35 +162,27 @@ colors = cmap(norm(vsinis ./ 1e3))
         # set the rotational velocity
         μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
 
-        # get the intensity contribution function
+        # get intensity stuff
         cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
-        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic) 
 
-        # add to the flux integral
-        flux_integration .+= (FT.get_intensity(cfunc_intensity_struct)' .* dA_cpu[i])[1,:]
-        flux_cont_integration .+= (FT.get_intensity(cfunc_intensity_cont)' .* dA_cpu[i])[1,:]
+        tbc = cfunc_intensity_struct.cfunc_dt
+        cfunc_int_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μs_cpu[i])
+        flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
 
-        # # get the intensity contribution function
-        # cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
-        # cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+        # now do continuum intensity
+        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
 
-        # # get the local intensity
-        # int_i = dropdims(sum(cfunc_int_i, dims=1), dims=1)
-        # int_cont_i = dropdims(sum(cfunc_int_cont_i, dims=1), dims=1)
-        # int_i_mac = FT.convolve_gray_rt_macro(λs_korg, int_i, ζ_rt)
-        # int_cont_i_mac = FT.convolve_gray_rt_macro(λs_korg, int_cont_i, ζ_rt)
-
-        # # add to the flux integral
-        # flux_integration .+= int_i_mac .* dA_cpu[i]
-        # flux_cont_integration .+= int_cont_i_mac .* dA_cpu[i]
+        tbc_cont = cfunc_intensity_cont.cfunc_dt
+        cfunc_int_cont_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, ζ_rt, μs_cpu[i])
+        flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
     end
 
     # convolve with radial tangential
-    flux_integration_macro = FT.convolve_gray_rt_macro(λs_korg, Array(flux_integration), ζ_rt)
-    flux_cont_integration_macro = FT.convolve_gray_rt_macro(λs_korg, Array(flux_cont_integration), ζ_rt)
+    flux_integration .*= 2π
+    flux_cont_integration .*= 2π
 
     # normalize
-    flux_integration_norm = flux_integration_macro ./ flux_cont_integration_macro
+    flux_integration_norm = Array(flux_integration ./ flux_cont_integration)
 
     # convolve and resample
     oversampling = 5.0
@@ -210,9 +202,9 @@ end
 
 sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 cbar = plt.colorbar(sm, ax=plt.gca())
-cbar.set_label(L"v \sin i\ {\rm km\ s}^{-1}")
+cbar.set_label(L"v \sin i\ {\rm [km\ s}^{-1} {\rm ]}")
 plt.xlabel(L"{\rm Spectral\ Resolving\ Power}")
-plt.ylabel(L"{\rm Maximum\ Flux\ Error\ [\%\ Continuum]}")
+plt.ylabel(L"{\rm Max\ Flux\ Error\ [\%\ Continuum]}")
 plt.tight_layout()
 plt.gca().set_xscale("log")
 # plt.gca().set_yscale("symlog")

@@ -20,74 +20,45 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     return kernel ./ sum(kernel)
 end
 
-function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T;
-                           pad_left::Int=0, pad_right::Int=0) where T<:AF
+function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     # short circuit
     if iszero(ζ_rt)
         return ys
     end
 
     # offset the kernel by the velocity (discrete center)
-    Nλ = length(xs)
-    Ltot = Nλ + pad_left + pad_right
-    i0 = Nλ ÷ 2 + 1
-    λ0 = xs[i0]
-    vs = c_ms .* (xs .- λ0) ./ λ0
-
-    # get the normalized kernel
-    kernel = rt_macro_kernel(vs, ζ_rt, μ)
-
-    # pad kernel to Ltot, align zero-lag to padded center, then map to FFT indexing
-    kpad = zeros(T, Ltot)
-    @views kpad[pad_left+1:pad_left+Nλ] .= kernel
-    center = Ltot ÷ 2 + 1
-    r = center - (pad_left + i0)
-    if r != 0
-        kpad = circshift(kpad, r)
-    end
-    kshift = ifftshift(kpad)
-    ftk = fft(kshift)
-
-    # pad signal the same way, convolve in Fourier space, slice valid region
-    ypad = zeros(T, Ltot)
-    @views ypad[pad_left+1:pad_left+Nλ] .= ys
-    conv = real(ifft(fft(ypad) .* ftk))
-    return @view conv[pad_left+1:pad_left+Nλ]
-end
-
-function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T, μ::T;
-                           pad_left::Int=0, pad_right::Int=0) where T<:AF
-    # short circuit
-    if iszero(ζ_rt)
-        return ys
-    end
-
-    # offset the kernel by the velocity (discrete center)
-    Nλ = length(xs)
-    Ltot = Nλ + pad_left + pad_right
-    i0 = Nλ ÷ 2 + 1
+    i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
 
     # get the normalized kernel (GPU-style phase)
     kernel = rt_macro_kernel(vs, ζ_rt, μ)
-    kpad = zeros(T, Ltot)
-    @views kpad[pad_left+1:pad_left+Nλ] .= kernel
-    center = Ltot ÷ 2 + 1
-    r = center - (pad_left + i0)
-    if r != 0
-        kpad = circshift(kpad, r)
+    kshift = ifftshift(kernel)
+
+    # return convolution via FFT (matches GPU convention)
+    return real(ifft(fft(ys) .* fft(kshift)))
+end
+
+function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T, μ::T) where T<:AF
+    # short circuit
+    if iszero(ζ_rt)
+        return ys
     end
-    ftk = fft(ifftshift(kpad))
+
+    # offset the kernel by the velocity (discrete center)
+    i0 = length(xs) ÷ 2 + 1
+    λ0 = xs[i0]
+    vs = c_ms .* (xs .- λ0) ./ λ0
+
+    # get the normalized kernel (GPU-style phase)
+    kernel = rt_macro_kernel(vs, ζ_rt, μ)
+    kshift = ifftshift(kernel)
+    ftk = fft(kshift)
 
     # allocate array for output spectrum
     ys_out = zeros(size(ys))
-    ypad = zeros(T, Ltot)
     for t in axes(ys, 1)
-        fill!(ypad, zero(T))
-        @views ypad[pad_left+1:pad_left+Nλ] .= ys[t, :]
-        conv = real(ifft(fft(ypad) .* ftk))
-        @views ys_out[t, :] .= conv[pad_left+1:pad_left+Nλ]
+        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* ftk))
     end
     return ys_out
 end
@@ -158,7 +129,7 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
 
     # ensure zero-lag sits at padded center before FFT layout
     Ltot = length(kernel_row)
-    center = Ltot ÷ 2 + 1
+    center = Ltot ÷ 2
     r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
@@ -184,9 +155,6 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
 
     # inverse fourier transform
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
-
-    # if your cuFFT backward plan is unnormalized, apply 1/Ltot scaling once here
-    cmem.conv_gpu .*= inv(T(Ltot))  # remove this line if your plan already scales
 
     # slice valid region
     out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]

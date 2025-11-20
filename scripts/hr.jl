@@ -227,7 +227,7 @@ for i in eachindex(T_effs)
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[i]
-    Nϕ = 128
+    Nϕ = 32
     μs_gpu, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
@@ -252,20 +252,22 @@ for i in eachindex(T_effs)
 
         # get intensity stuff
         cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
-        cfunc_flux_integration .+= cfunc_intensity_struct.cfunc_dt .* dA_cpu[k]
+        
+        tbc = cfunc_intensity_struct.cfunc_dt
+        cfunc_int_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmacs[i], μs_cpu[k])
+        flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[k]
 
         # now do continuum intensity
         cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
-        cfunc_flux_cont_integration .+= cfunc_intensity_cont.cfunc_dt .* dA_cpu[k]
+        
+        tbc_cont = cfunc_intensity_cont.cfunc_dt
+        cfunc_int_cont_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, vmacs[i], μs_cpu[k])
+        flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[k]
     end
 
-    # convolve with rotmacro
-    cfunc_flux_integration_macro = FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_integration, vmacs[i])
-    cfunc_flux_cont_integration_macro = FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_integration, vmacs[i])
-
     # get the flux 
-    flux_integration .= sum(cfunc_flux_integration_macro, dims=1)'
-    flux_cont_integration .= sum(cfunc_flux_cont_integration_macro, dims=1)'
+    flux_integration .*= 2π
+    flux_cont_integration .*=2π
 
     # now get cumulative cfuncs 
     flux_integration_norm .= flux_integration ./ flux_cont_integration

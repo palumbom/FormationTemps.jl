@@ -84,19 +84,21 @@ function synth_given_linelist(linelist; δλ=0.005)
     # get disk integrated cfunc
     μ_v = CUDA.zeros(Float64, length(zs))
     σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-    cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-    flux = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
+
+    cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+    flux = Array(FT.get_flux(cfunc_flux_struct)')
 
     # get formation temperature
-    cum_cfunc_flux_norm = cumsum(cfunc_flux, dims=1) 
-    cum_cfunc_flux_norm ./= maximum(cum_cfunc_flux_norm, dims=1)
+    cum_cfunc_flux_norm = Array(FT.get_cum_cfunc(cfunc_flux_struct))
     form_temps_flux = zeros(length(λs_korg))
     for i in eachindex(λs_korg)
         local xs = view(cum_cfunc_flux_norm, :, i)
         local itp = FT.linear_interp(xs, elav(Ts))
         form_temps_flux[i] = itp(0.5)
     end
-    return λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux, Ts
+    # TODO which one?
+    return λs_korg, Array(cfunc_flux_struct.cfunc), flux, cum_cfunc_flux_norm, form_temps_flux, Ts
+    # return λs_korg, Array(cfunc_flux_struct.cfunc_dt), flux, cum_cfunc_flux_norm, form_temps_flux, Ts
 end
 
 # get the linelist

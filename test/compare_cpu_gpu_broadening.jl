@@ -103,7 +103,7 @@ flux_error = zeros(length(steps))
     # allocate memory for convolutions
     Nλ = length(λs_korg)
     Natm = size(αs, 1)
-    Npad = 2400
+    Npad = 240
     cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
     # allocate on device
@@ -141,35 +141,34 @@ flux_error = zeros(length(steps))
     u2 = 0.26
     ζ_rt = 1200.0
 
-    # compare rotation
+    # cfunc to be convolved
     tbc = Array(cfunc_flux_stationary.cfunc_dt)
+
+    # compare rotation
     cfunc_flux_gray_rot_cpu = FT.convolve_gray_rotation(λs_korg, tbc, vsini, u1)
     cfunc_flux_gray_rot_gpu = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, tbc, vsini, u1))
-
     rot_error[i] = maximum(abs.((cfunc_flux_gray_rot_cpu .- cfunc_flux_gray_rot_gpu) ./ cfunc_flux_gray_rot_cpu))
 
     # compare RT
     cfunc_flux_gray_rt_cpu = FT.convolve_iso_rt_macro(λs_korg, tbc, ζ_rt)
     cfunc_flux_gray_rt_gpu = Array(FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
-
     rt_error[i] = maximum(abs.((cfunc_flux_gray_rt_cpu .- cfunc_flux_gray_rt_gpu) ./ cfunc_flux_gray_rt_cpu))
 
     # compare RT aniso
-    cfunc_flux_gray_rt_cpu = FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, 0.7)
-    cfunc_flux_gray_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, 0.7))
-
-    rt_aniso_error[i] = maximum(abs.((cfunc_flux_gray_rt_cpu .- cfunc_flux_gray_rt_gpu) ./ cfunc_flux_gray_rt_cpu))
+    μ_val = 0.9
+    cfunc_flux_aniso_rt_cpu = FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, μ_val)
+    cfunc_flux_aniso_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μ_val))
+    rt_aniso_error[i] = maximum(abs.((cfunc_flux_aniso_rt_cpu .- cfunc_flux_aniso_rt_gpu) ./ cfunc_flux_aniso_rt_cpu))
 
     # compare hirano
     cfunc_flux_hirano_cpu = FT.convolve_hirano_rotmacro(λs_korg, tbc, vsini, ζ_rt, u1, u2)
     cfunc_flux_hirano_gpu = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, ζ_rt, u1, u2))
-
     rotmacro_error[i] = maximum(abs.((cfunc_flux_hirano_cpu .- cfunc_flux_hirano_gpu) ./ cfunc_flux_hirano_cpu))
 
     # do some flux 
-    flux_gray_cpu = sum(cfunc_flux_hirano_cpu, dims=1)'
-    flux_gray_gpu = sum(cfunc_flux_hirano_gpu, dims=1)'
-    flux_error[i] = maximum(abs.((flux_gray_gpu .- flux_gray_cpu) ./ flux_gray_cpu))
+    flux_cpu = sum(cfunc_flux_aniso_rt_cpu, dims=1)'
+    flux_gpu = sum(cfunc_flux_aniso_rt_gpu, dims=1)'
+    flux_error[i] = maximum(abs.((flux_cpu .- flux_gpu) ./ flux_cpu))
 end
 
 plt.scatter(steps, αs_error, s=2, label="alpha")

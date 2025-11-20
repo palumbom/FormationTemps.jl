@@ -56,7 +56,7 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
 buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.002)
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -125,8 +125,6 @@ vmacs_kms = vmacs ./ 1000
 
 # set limb darkening
 @load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
-# u1 = 0.4
-# u2 = 0.26
 
 # get a colormap 
 cmap = plt.get_cmap("viridis")#colormaps.batlowk
@@ -135,6 +133,7 @@ sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
 # set up figures
 figsize=(24,15)
+# figsize=(15,15)
 ticklabelsize = 24
 plt.clf(); plt.close("all")
 fig1, ax1 = plt.subplots(figsize=figsize)
@@ -179,6 +178,7 @@ ax4.set_ylim(first(vmacs_kms) - step(vmacs_kms)/1.15, last(vmacs_kms) + step(vma
 
 # parameters for inset axes
 wstr = "100%"
+# wstr = "175%"
 hstr = "175%"
 
 mtrans = pyimport("matplotlib.transforms")
@@ -229,34 +229,24 @@ for k in eachindex(vsinis)
 
             # get intensity stuff
             cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
-            cfunc_flux_integration .+= cfunc_intensity_struct.cfunc_dt .* dA_cpu[i]
 
-            # tbc = cfunc_intensity_struct.cfunc_dt
-            # cfunc_int_i_mac = FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmacs[j])
-            # flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
-            # cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
+            tbc = cfunc_intensity_struct.cfunc_dt
+            cfunc_int_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmacs[j], μs_cpu[i])
+            flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
+            cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
 
             # now do continuum intensity
             cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
-            cfunc_flux_cont_integration .+= cfunc_intensity_cont.cfunc_dt .* dA_cpu[i]
 
-            # tbc_cont = cfunc_intensity_cont.cfunc_dt
-            # cfunc_int_cont_i_mac = FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, vmacs[j])
-            # flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
+            tbc_cont = cfunc_intensity_cont.cfunc_dt
+            cfunc_int_cont_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, vmacs[j], μs_cpu[i])
+            flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
+            cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
         end
 
-        # convolve with RT
-        if vmacs[j] > 0.0
-            cfunc_flux_integration_macro = FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_integration, vmacs[j])
-            cfunc_flux_cont_integration_macro = FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_integration, vmacs[j])
-        else 
-            cfunc_flux_integration_macro = cfunc_flux_integration
-            cfunc_flux_cont_integration_macro = cfunc_flux_cont_integration
-        end
-
-        # get the flux 
-        flux_integration .= sum(cfunc_flux_integration_macro, dims=1)'
-        flux_cont_integration .= sum(cfunc_flux_cont_integration_macro, dims=1)'
+        # 2pi 
+        flux_integration .*= 2π
+        flux_cont_integration .*= 2π
 
         # get the convolution
         cfunc_flux_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsinis[k], vmacs[j], u1, u2))
@@ -264,10 +254,8 @@ for k in eachindex(vsinis)
         cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsinis[k], vmacs[j], u1, u2))
         flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
         
-        # now get cumulative cfuncs 
-        # cum_cfunc_flux_integration = Array(cumsum(cfunc_flux_integration, dims=1))
-        # cum_cfunc_flux_integration ./= maximum(cum_cfunc_flux_integration, dims=1)        
-        cum_cfunc_flux_integration = Array(cumsum(cfunc_flux_integration_macro, dims=1))
+        # now get cumulative cfuncs   
+        cum_cfunc_flux_integration = Array(cumsum(cfunc_flux_integration, dims=1))
         cum_cfunc_flux_integration ./= maximum(cum_cfunc_flux_integration, dims=1)
         cum_cfunc_flux_convolution = Array(cumsum(cfunc_flux_convolution, dims=1))
         cum_cfunc_flux_convolution ./= maximum(cum_cfunc_flux_convolution, dims=1)

@@ -44,7 +44,6 @@ include("interpolations.jl")
 include("microturbulence.jl")
 
 # macroturbulence
-include("macroturbulence/roll.jl")
 include("macroturbulence/gray_rot.jl")
 include("macroturbulence/rad_tan.jl")
 include("macroturbulence/iso_rad_tan.jl")
