@@ -5,6 +5,7 @@ using HDF5, NPZ, JLD2, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+plt.ioff()
 
 # matplotlib backend
 mpl.use("Qt5Agg")
@@ -87,7 +88,7 @@ ts = (32,16)
 bs = (cld(length(λs_korg), ts[1]), cld(size(αs,1), ts[2]))
 @cuda threads=ts blocks=bs FT.calc_intensity_cfunc!(μ_vals[μ_idx], Ts_gpu, λs_gpu, τs_gpu, cfunc_int_gpu)
 CUDA.synchronize()
-intensity_gpu = vec(Array(CUDA.sum(cfunc_int_gpu, dims=1)))
+intensity_gpu = Array(sum(cfunc_int_gpu .* diff(τs_gpu, dims=1), dims=1))'
 
 # get the flux
 τs_gpu .= 0.0
@@ -99,7 +100,7 @@ ts = (32,16)
 bs = (cld(length(λs_korg), ts[1]), cld(size(αs,1), ts[2]))
 @cuda threads=ts blocks=bs FT.calc_flux_cfunc!(Ts_gpu, λs_gpu, τs_gpu, cfunc_flux_gpu)
 CUDA.synchronize()
-flux_gpu = 2π .* vec(Array(CUDA.sum(cfunc_flux_gpu, dims=1)))
+flux_gpu = 2π .* Array(CUDA.sum(cfunc_flux_gpu .* diff(τs_gpu, dims=1), dims=1))'
 
 # get continuum flux
 τs_gpu .= 0.0
@@ -111,9 +112,9 @@ ts = (32,16)
 bs = (cld(length(λs_korg), ts[1]), cld(size(αs,1), ts[2]))
 @cuda threads=ts blocks=bs FT.calc_flux_cfunc!(Ts_gpu, λs_gpu, τs_gpu, cfunc_flux_cont_gpu)
 CUDA.synchronize()
-flux_cont_gpu = 2π .* vec(Array(CUDA.sum(cfunc_flux_cont_gpu, dims=1)))
+flux_cont_gpu = 2π .* Array(CUDA.sum(cfunc_flux_cont_gpu .* diff(τs_gpu, dims=1), dims=1))'
 
-# plot the results
+#= # plot the results
 grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
 ax1 = plt.subplot(grid[1])
 ax2 = plt.subplot(grid[2])
@@ -128,9 +129,9 @@ ax1.set_title("mu = " * string(sol.mu_grid[μ_idx][1]))
 ax1.legend()
 ax1.set_xlim(λ0 - 0.25, λ0 + 0.25)
 ax2.set_xlim(λ0 - 0.25, λ0 + 0.25)
-plt.show()
+plt.show() =#
 
-#= grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
+grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
 ax1 = plt.subplot(grid[1])
 ax2 = plt.subplot(grid[2])
 ax1.plot(λs_korg, sol.flux ./ sol.cntm, c="k",label="Korg")
@@ -146,4 +147,3 @@ ax1.legend()
 ax1.set_xlim(λ0 - 0.25, λ0 + 0.25)
 ax2.set_xlim(λ0 - 0.25, λ0 + 0.25)
 plt.show()
- =#

@@ -60,6 +60,10 @@ function calc_stellar_grid!(ρs::T1, inclination::T1, vsini::T1, Nϕ::Int,
                                                                                Nθ_max, Nθ, R_x, O⃗,
                                                                                ρs, vsini)
 
+    # safety for vsini = 1
+    if iszero(vsini)
+        z_rot .= 0.0
+    end
     return nothing
 end
 

@@ -32,7 +32,6 @@ gamma_stark =  [l.gamma_stark for l in linelist]
 # make the wavelength grid
 # λs_korg = range(3500, 7000.0, step=0.01)
 λs_korg = range(first(wls) - 0.5, last(wls) + 0.5, step=0.01)
-println(length(λs_korg))
 
 # get some abundances
 A_X = Korg.asplund_2020_solar_abundances
@@ -75,26 +74,26 @@ intensities = zeros(length(λs_korg), length(μs))
 continuum_int = zeros(length(λs_korg), length(μs))
 
 for i in eachindex(μs)
-    cfuncs_int[:,:,i] .= FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
-    intensities[:,i] .= dropdims(sum(view(cfuncs_int,:,:,i), dims=1), dims=1)
+    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    intensities[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
+    cfuncs_int[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_struct))
 
-    cfuncs_int_cont[:,:,i] .= FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
-    continuum_int[:,i] .= dropdims(sum(view(cfuncs_int_cont,:,:,i), dims=1), dims=1)
+    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    continuum_int[:,i] .= Array(FT.get_intensity(cfunc_intensity_cont))
+    cfuncs_int_cont[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_cont))
 end
  
 # get cfunc for flux
-cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-flux = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
+cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+flux = Array(FT.get_flux(cfunc_flux_struct))
 
 # get disk integrated continuum
-cfunc_flux_cont = FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
-continuum_flux = 2π .* dropdims(sum(cfunc_flux_cont, dims=1), dims=1)
+cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
+continuum_flux = Array(FT.get_flux(cfunc_flux_cont_struct))
 
 # now get cumulative contribution functions
-cum_cfuncs_int_norm = cumsum(cfuncs_int, dims=1) 
-cum_cfuncs_int_norm ./= maximum(cum_cfuncs_int_norm, dims=1)
-cum_cfunc_flux_norm = cumsum(cfunc_flux, dims=1) 
-cum_cfunc_flux_norm ./= maximum(cum_cfunc_flux_norm, dims=1)
+cum_cfuncs_int_norm = cfuncs_int
+cum_cfunc_flux_norm = Array(FT.get_cum_cfunc(cfunc_flux_struct))
 
 # now compute the formation temperature
 form_temps_intensity = zeros(length(λs_korg), length(μs))
@@ -128,7 +127,7 @@ jldsave(joinpath(FT.datdir, "solar_temps.jld2");
         continuum_flux, cfunc_flux_cont,
         form_temps_intensity, form_temps_flux)
 
-
+#= 
 # sanity check against Korg
 korg_res = Korg.synthesize(marcs_atm, linelist, A_X, λs_korg, 
                            vmic=0.0,  tau_scheme="bezier", 
@@ -136,7 +135,7 @@ korg_res = Korg.synthesize(marcs_atm, linelist, A_X, λs_korg,
 korg_flux = korg_res.flux
 korg_cntm = korg_res.cntm
 korg_mu = korg_res.mu_grid
-korg_int = collect(korg_res.intensity')
+korg_int = collect(korg_res.intensity') .* 1e-8
 
 
 fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(12.2, 4.8))
@@ -147,3 +146,4 @@ ax2.plot(λs_korg, flux ./ continuum_flux, label="me")
 ax2.plot(λs_korg, korg_flux ./ korg_cntm, label="Korg")
 ax2.legend()
 plt.show()
+=#

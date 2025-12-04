@@ -5,6 +5,7 @@ using HDF5, Printf, JLD2
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+using ProgressMeter
 plt.ioff()
 
 # matplotlib backend
@@ -64,6 +65,9 @@ vsinis = df.Vsini .* 1000.0
 vmacs = df.Vmac .* 1000.0
 mohs = df[!, "[M/H]"]
 
+plt.hist(vmacs, bins="auto")
+plt.show()
+
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
@@ -87,12 +91,12 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0025)
+buffer = 1.0
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # params for LD fit
-μs = range(1.0, 0.2, length=10)
+μs = range(1.0, 0.3, length=10)
 ints = zeros(length(λs_korg), length(μs))
 ints_cont = zeros(length(λs_korg), length(μs))
 
@@ -125,12 +129,20 @@ function quad_limb_darkening(μ::AA{T,1}, p::AA{T,1}) where T<:AF
     return quad_limb_darkening.(μ, p[1], p[2])
 end
 
-flux_integration = zeros(length(λs_korg))
-flux_cont_integration = zeros(length(λs_korg))
-cfunc_flux_integration = zeros(length(λs_korg))
+flux_integration = CUDA.zeros(Float64, length(λs_korg))
+flux_cont_integration = CUDA.zeros(Float64, length(λs_korg))
+cfunc_flux_integration = CUDA.zeros(Float64, Natm - 1, length(λs_korg))
+cfunc_flux_cont_integration = CUDA.zeros(Float64, Natm - 1, length(λs_korg))
+flux_convolution_norm = zeros(length(λs_korg))
+flux_integration_norm = CUDA.zeros(Float64, length(λs_korg))
+# flux_integration_norm = zeros(length(λs_korg))
+
+αs = zeros(Natm, length(λs_korg))
+αs_cont = zeros(Natm, length(λs_korg))
 
 # loop over stars
 max_errors = zeros(length(T_effs))
+# @showprogress for i in eachindex(T_effs)
 for i in eachindex(T_effs)
     # don't do giants (very loosely defined)
     if !isdwarf(T_effs[i], loggs[i])
@@ -159,24 +171,25 @@ for i in eachindex(T_effs)
     gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
     # synthesis to get the alphas
-    αs = zeros(length(atm_gpu.zs), length(λs_korg))
-    αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-    FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+    αs .= 0.0
+    αs_cont .= 0.0
+    FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X, ne_warn_thresh=Inf)
 
     # get vmicro 
     vmic = vmic_fit(T_effs[i]) * 1000.0
     @show vmic
+    @show vsinis[i]
+    @show vmacs[i]
     σ_v_mic .= vmic
 
     # get limb darkening
     for k in eachindex(μs)
-        # get the intensity contribution function
-        cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs[k], μ_v_rot, σ_v_mic)
-        cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs[k], μ_v_rot, σ_v_mic)
+        μ_v_rot .= 0.0
+        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[k], μ_v_rot, σ_v_mic)
+        ints[:,k] .= Array(FT.get_intensity(cfunc_intensity_struct))
 
-        # intensities
-        sum!(view(ints,:,k), cfunc_int_i')
-        sum!(view(ints_cont,:,k), cfunc_int_cont_i')
+        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[k], μ_v_rot, σ_v_mic)
+        ints_cont[:,k] .= Array(FT.get_intensity(cfunc_intensity_cont))
     end
     ints ./= ints_cont[1,1]
 
@@ -189,7 +202,6 @@ for i in eachindex(T_effs)
     xdata = μs
     ydata = ints[idx_int, :]
     p0 = [0.5, 0.25]
-
     fit = curve_fit(quad_limb_darkening, xdata, ydata, p0)
 
     # write em 
@@ -201,23 +213,24 @@ for i in eachindex(T_effs)
     @show u2 
     println()
 
-    # get the formation temperature for a stationary star
-    cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-    flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
+    # get cfunc for flux
+    cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    flux_stationary = Array(FT.get_flux(cfunc_flux_struct)')
 
-    cfunc_flux_cont_stationary = 2π .* FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
-    flux_cont_stationary = dropdims(sum(cfunc_flux_cont_stationary, dims=1), dims=1)
+    # get disk integrated continuum
+    cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_struct)')
     
     # convolution
-    flux_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_stationary, vsinis[i], vmacs[i], u1, u2))
-    flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_cont_stationary, vsinis[i], vmacs[i], u1, u2))
-    flux_convolution_norm = flux_convolution ./ flux_cont_convolution
+    flux_convolution = FT.convolve_hirano_rotmacro(λs_korg, flux_stationary, vsinis[i], vmacs[i], u1, u2)
+    flux_cont_convolution = FT.convolve_hirano_rotmacro(λs_korg, flux_cont_stationary, vsinis[i], vmacs[i], u1, u2)
+    flux_convolution_norm .= (flux_convolution ./ flux_cont_convolution)'
 
     # get disk stuff 
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[i]
-    Nϕ = 64
+    Nϕ = 128
     μs_gpu, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
@@ -234,31 +247,37 @@ for i in eachindex(T_effs)
     flux_integration .= 0.0
     flux_cont_integration .= 0.0
     cfunc_flux_integration .= 0.0
+    cfunc_flux_cont_integration .= 0.0
 
     for k in eachindex(μs_cpu)
         # set the rotational velocity
         μ_v_rot .= z_rot_cpu[k] .* FT.c_ms
 
-        # get the intensity contribution function
-        cfunc_int_i = FT.calc_intensity_cfunc(αs, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
-        cfunc_int_cont_i = FT.calc_intensity_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
-
-        # convolve the cfunc with RT macroturbulence
-        cfunc_int_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_i, vmacs[i]))
-        cfunc_int_cont_i_mac = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_int_cont_i, vmacs[i]))
-
-        # add to the flux integral
+        # get intensity stuff
+        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
+        
+        tbc = cfunc_intensity_struct.cfunc_dt
+        cfunc_int_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmacs[i], μs_cpu[k])
         flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[k]
+
+        # now do continuum intensity
+        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
+        
+        tbc_cont = cfunc_intensity_cont.cfunc_dt
+        cfunc_int_cont_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, vmacs[i], μs_cpu[k])
         flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[k]
     end
-    
+
+    # get the flux 
+    flux_integration .*= 2π
+    flux_cont_integration .*=2π
+
     # now get cumulative cfuncs 
-    flux_integration_norm = flux_integration ./ flux_cont_integration
-    # plt.plot(λs_korg, flux_integration_norm .- flux_convolution_norm)
+    flux_integration_norm .= flux_integration ./ flux_cont_integration
 
     # fill max error
     # @show maximum(abs.(flux_integration_norm .- flux_convolution_norm))
-    max_errors[i] = maximum(abs.(100 .* (flux_integration_norm .- flux_convolution_norm)))
+    max_errors[i] = maximum(abs.(100 .* (Array(flux_integration_norm) .- flux_convolution_norm)))
 end
 
 # scatter plot 

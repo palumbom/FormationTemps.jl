@@ -29,11 +29,13 @@ include("config.jl")
 include("utils.jl")
 include("constants.jl")
 include("functions.jl")
+include("expint.jl")
 
 # structures
 include("structures/ConvolutionMemory.jl")
 include("structures/AtmosphereGPU.jl")
 include("structures/GPUMemory.jl")
+include("structures/ContFunc.jl")
 
 # numerical stuff
 include("interpolations.jl")
@@ -42,17 +44,17 @@ include("interpolations.jl")
 include("microturbulence.jl")
 
 # macroturbulence
-include("macroturbulence/roll.jl")
 include("macroturbulence/gray_rot.jl")
-include("macroturbulence/gray_rt.jl")
+include("macroturbulence/rad_tan.jl")
+include("macroturbulence/rad_tan_two.jl")
+include("macroturbulence/iso_rad_tan.jl")
 include("macroturbulence/hirano.jl")
-include("macroturbulence/isotropic.jl")
+include("macroturbulence/iso_gaussian.jl")
 
 # instrumental profile
 include("instrumental.jl")
 
 # linelist + stellar model stuff
-include("linelist.jl")
 include("atmosphere.jl")
 
 # radiative transport

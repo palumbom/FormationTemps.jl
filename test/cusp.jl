@@ -2,22 +2,26 @@ using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
 using HDF5, Printf
-using ProgressMeter
 using CUDA, BenchmarkTools
+using FFTW
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+plt.ioff()
 
 # matplotlib backend
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
+inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
+                               \\usepackage{mathrsfs}")
 
 # python interpolation for matplotlib stuff
 interp1d = pyimport("scipy.interpolate").interp1d
+
+ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
 
 # set colormaps
 img_cmap = "viridis"
@@ -55,7 +59,8 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-λs_korg = range(first(wls) - 1.0, last(wls) + 1.0, step=0.01)
+buffer = 1.5
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
 # get some abundances
@@ -78,73 +83,62 @@ Ts = atm_gpu.Ts
 # synthesis to get the alphas
 αs = zeros(length(atm_gpu.zs), length(λs_korg))
 αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-# FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
 # allocate memory for convolutions
 Nλ = length(λs_korg)
 Natm = size(αs, 1)
-Npad = 100
+Npad = 5000
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # allocate on device
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
 # velocities
-μ_v = CUDA.zeros(Float64, length(zs))
-σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+μ_v_rot = CUDA.zeros(Float64, length(zs))
+σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
-# get the nominal answer
-cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
-cfunc_flux = Array(cfunc_flux_struct.cfunc_dt)
-flux = Array(FT.get_flux(cfunc_flux_struct))
+μ_v_mac = CUDA.zeros(Float64, length(zs)-1)
+σ_v_mac = CUDA.zeros(Float64, length(zs)-1)
 
-# get disk stuff 
-ρstar = 1.0
-istar = 90.0
-v0 = 0.0
-Nϕ = 2 .^(range(2, 8, step=1))
-Nϕ = [8, 16, 32, 64, 128, 256, 512]
+cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
-# allocate for output
-flux_test = CUDA.zeros(Float64, length(λs_korg))
-mean_pct_error_flux = zeros(length(Nϕ))
-max_pct_error_flux = zeros(length(Nϕ))
-ntiles_real = zeros(length(Nϕ))
+cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+tbc = cfunc_flux_stationary.cfunc_dt
+flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
 
-for j in eachindex(Nϕ)
-    @show Nϕ[j]
+# set rotational and macroturbulence 
+vsini = 2100.0
+ζ_rt = 3400.0
 
-    # do spherical trig
-    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ[j])
+# set limb darkening
+u1 = 0.4
+u2 = 0.0
 
-    # flatten, move to cpu
-    idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
-    μs_cpu = view(Array(μs), idx)
-    dA_cpu = view(Array(dA), idx)
-    z_rot_cpu = view(Array(z_rot), idx)
-    ntiles_real[j] = length(μs_cpu)
+# set some mus 
+μs = 1.0
 
-    @show sum(dA_cpu)
+# compare RT aniso
+cfunc_flux_gray_rt_cpu = FT.convolve_rt_macro(λs_korg, Array(tbc), ζ_rt, μs)
+# cfunc_flux_gray_rt_cpu = FT.convolve_iso_rt_macro(λs_korg, Array(tbc), ζ_rt)
+# cfunc_flux_gray_rt_cpu = FT.convolve_gray_rotation(λs_korg, Array(tbc), vsini, u1)
+cfunc_flux_gray_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μs))
+# cfunc_flux_gray_rt_gpu = Array(FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
+# cfunc_flux_gray_rt_gpu = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, tbc, vsini, u1))
 
-    # re-zero
-    flux_test .= 0.0
-    @showprogress for i in eachindex(μs_cpu)
-        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-        flux_test .+= FT.get_intensity(cfunc_intensity_struct) .* dA_cpu[i]
-    end
-    println()
+# get flux
+flux1 = 2π .* dropdims(sum(cfunc_flux_gray_rt_cpu, dims=1), dims=1)
+flux2 = 2π .* dropdims(Array(sum(cfunc_flux_gray_rt_gpu, dims=1)), dims=1)
 
-    # test the flux
-    mean_pct_error_flux[j] = abs(mean(100 .* (flux .- Array(flux_test)) ./ flux))
-    max_pct_error_flux[j] = maximum(abs.(100 .* (flux .- Array(flux_test)) ./ flux))
-end
+# get errors
+rt_aniso_errosr = (cfunc_flux_gray_rt_cpu .- cfunc_flux_gray_rt_gpu) ./ cfunc_flux_gray_rt_cpu
+flux_err = 100 .* ((flux1 .- flux2) ./ flux1)
 
-plt.scatter(Nϕ, mean_pct_error_flux, s=20, label="Mean Abs. Error")
-plt.scatter(Nϕ, max_pct_error_flux, s=20, label="Max Abs. Error")
-# plt.xscale("symlog")
-plt.xlabel("Number of latitude tiles")
-plt.ylabel("Mean % Error")
-plt.legend()
-plt.savefig("figures/disk_int_error.pdf", bbox_inches="tight")
+plt.plot(λs_korg, flux_err)
 plt.show()
+
+# # plot
+# plt.plot(λs_korg, flux_stationary)
+# plt.plot(λs_korg, flux1)
+# plt.plot(λs_korg, flux2)
+# plt.show()

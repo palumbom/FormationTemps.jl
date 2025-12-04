@@ -7,7 +7,6 @@ function linear_interp(xs::AA{T,1}, ys::AA{T,1}; bc::T=NaN) where T<:Float64
         elseif x >= last(xs)
             return last(ys)
         else
-            # TODO: pass "hint" to searchsorted first
             i = searchsortedfirst(xs, x) - 1
             i0 = clamp(i, firstindex(ys), lastindex(ys))
             i1 = clamp(i+1, firstindex(ys), lastindex(ys))
@@ -24,7 +23,6 @@ function linear_interp_gpu(xs::AA{T,1}, ys::AA{T,1}) where T<:AF
         elseif x >= CUDA.last(xs)
             return CUDA.last(ys)
         else
-            # TODO: pass "hint" to searchsorted first
             i = CUDA.searchsortedfirst(xs, x) - 1
             i0 = CUDA.clamp(i, CUDA.firstindex(ys), CUDA.lastindex(ys))
             i1 = CUDA.clamp(i+1, CUDA.firstindex(ys), CUDA.lastindex(ys))

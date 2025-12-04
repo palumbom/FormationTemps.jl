@@ -104,10 +104,13 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # get the formation temperature for a stationary star
-cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
-cfunc_flux_cont_stationary = 2π .* FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
-flux_cont_stationary = dropdims(sum(cfunc_flux_cont_stationary, dims=1), dims=1)
+cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_stationary))
+flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
+
+cfunc_flux_cont_stationary = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_cont_cum = Array(FT.get_cum_cfunc(cfunc_flux_cont_stationary))
+flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_stationary))
 
 flux_norm = flux_stationary ./ flux_cont_stationary
 
@@ -117,22 +120,35 @@ u1 = 0.4
 u2 = 0.26
 ζ_rt = 1200.0
 
-# # compare microturbulence
-# @btime FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot), Array(σ_v_mic))
-# @btime Array(FT.convolve_wavelength_axis_gpu(cmem, CuArray(λs_korg), CuArray(αs), μ_v_rot, σ_v_mic))
-# println()
+# get thing to be convolved
+tbc = Array(cfunc_flux_stationary.cfunc_dt)
 
-# # compare rot 
-# @btime FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1)
-# @btime Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
-# println()
+# compare microturbulence
+println("Micro")
+@btime FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot), Array(σ_v_mic))
+@btime Array(FT.convolve_wavelength_axis_gpu(cmem, CuArray(λs_korg), CuArray(αs), μ_v_rot, σ_v_mic))
+println()
 
-# # compare rt 
-# @btime FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_stationary, ζ_rt)
-# @btime Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, ζ_rt))
-# println()
+# compare rot 
+println("Rot")
+@btime FT.convolve_gray_rotation(λs_korg, tbc, vsini, u1)
+@btime Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, tbc, vsini, u1))
+println()
+
+# compare rt 
+println("Iso RT Macro")
+@btime FT.convolve_iso_rt_macro(λs_korg, tbc, ζ_rt)
+@btime Array(FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
+println()
+
+# compare rt 
+println("Aniso RT Macro")
+@btime FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, 0.9)
+@btime Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, 0.9))
+println()
 
 # compare hirano
-@btime FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2)
-@btime Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+println("Hirano RotMacro")
+@btime FT.convolve_hirano_rotmacro(λs_korg, tbc, vsini, ζ_rt, u1, u2)
+@btime Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, ζ_rt, u1, u2))
 println()

@@ -6,6 +6,7 @@ using CUDA, BenchmarkTools
 using FFTW
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+using ProgressMeter
 plt.ioff()
 
 # matplotlib backend
@@ -59,17 +60,19 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # set steps
-steps = range(0.0001, 0.0025, step=0.0001)
+# steps = range(0.0001, 0.01, step=0.0001)
+steps = range(0.0001, 0.005, step=0.0001)
 
 # allocate memory
 αs_error = zeros(length(steps))
 rot_error = zeros(length(steps))
 rt_error = zeros(length(steps))
+rt_aniso_error = zeros(length(steps))
 rotmacro_error  = zeros(length(steps))
 flux_error = zeros(length(steps))
 
 # loop 
-for i in eachindex(steps)
+@showprogress for i in eachindex(steps)
     # get wavelength grid
     buffer = 0.5
     λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=steps[i])
@@ -100,7 +103,7 @@ for i in eachindex(steps)
     # allocate memory for convolutions
     Nλ = length(λs_korg)
     Natm = size(αs, 1)
-    Npad = 2400
+    Npad = 240
     cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
     # allocate on device
@@ -116,10 +119,13 @@ for i in eachindex(steps)
     cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
     # get the formation temperature for a stationary star
-    cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-    flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
-    cfunc_flux_cont_stationary = 2π .* FT.calc_flux_cfunc(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
-    flux_cont_stationary = dropdims(sum(cfunc_flux_cont_stationary, dims=1), dims=1)
+    cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_stationary))
+    flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
+
+    cfunc_flux_cont_stationary = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    cfunc_flux_cont_cum = Array(FT.get_cum_cfunc(cfunc_flux_cont_stationary))
+    flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_stationary))
 
     flux_norm = flux_stationary ./ flux_cont_stationary
 
@@ -135,34 +141,43 @@ for i in eachindex(steps)
     u2 = 0.26
     ζ_rt = 1200.0
 
-    # compare rotation
-    cfunc_flux_gray_rot_cpu = FT.convolve_gray_rotation(λs_korg, cfunc_flux_stationary, vsini, u1)
-    cfunc_flux_gray_rot_gpu = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, u1))
+    # cfunc to be convolved
+    tbc = Array(cfunc_flux_stationary.cfunc_dt)
 
+    # compare rotation
+    cfunc_flux_gray_rot_cpu = FT.convolve_gray_rotation(λs_korg, tbc, vsini, u1)
+    cfunc_flux_gray_rot_gpu = Array(FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, tbc, vsini, u1))
     rot_error[i] = maximum(abs.((cfunc_flux_gray_rot_cpu .- cfunc_flux_gray_rot_gpu) ./ cfunc_flux_gray_rot_cpu))
 
     # compare RT
-    cfunc_flux_gray_rt_cpu = FT.convolve_gray_rt_macro(λs_korg, cfunc_flux_stationary, ζ_rt)
-    cfunc_flux_gray_rt_gpu = Array(FT.convolve_gray_rt_macro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, ζ_rt))
-
+    cfunc_flux_gray_rt_cpu = FT.convolve_iso_rt_macro(λs_korg, tbc, ζ_rt)
+    cfunc_flux_gray_rt_gpu = Array(FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt))
     rt_error[i] = maximum(abs.((cfunc_flux_gray_rt_cpu .- cfunc_flux_gray_rt_gpu) ./ cfunc_flux_gray_rt_cpu))
 
-    # compare hirano
-    cfunc_flux_hirano_cpu = FT.convolve_hirano_rotmacro(λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2)
-    cfunc_flux_hirano_gpu = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_stationary, vsini, ζ_rt, u1, u2))
+    # compare RT aniso
+    μ_val = 0.9
+    cfunc_flux_aniso_rt_cpu = FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, μ_val)
+    cfunc_flux_aniso_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μ_val))
+    rt_aniso_error[i] = maximum(abs.((cfunc_flux_aniso_rt_cpu .- cfunc_flux_aniso_rt_gpu) ./ cfunc_flux_aniso_rt_cpu))
 
+    # compare hirano
+    cfunc_flux_hirano_cpu = FT.convolve_hirano_rotmacro(λs_korg, tbc, vsini, ζ_rt, u1, u2)
+    cfunc_flux_hirano_gpu = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, ζ_rt, u1, u2))
     rotmacro_error[i] = maximum(abs.((cfunc_flux_hirano_cpu .- cfunc_flux_hirano_gpu) ./ cfunc_flux_hirano_cpu))
 
     # do some flux 
-    flux_gray_cpu = sum(cfunc_flux_hirano_cpu, dims=1)'
-    flux_gray_gpu = sum(cfunc_flux_hirano_gpu, dims=1)'
-    flux_error[i] = maximum(abs.((flux_gray_gpu .- flux_gray_cpu) ./ flux_gray_cpu))
+    flux_cpu = sum(cfunc_flux_aniso_rt_cpu, dims=1)'
+    flux_gpu = sum(cfunc_flux_aniso_rt_gpu, dims=1)'
+    flux_error[i] = maximum(abs.((flux_cpu .- flux_gpu) ./ flux_cpu))
 end
 
 plt.scatter(steps, αs_error, s=2, label="alpha")
 plt.scatter(steps, rot_error, s=2, label="rot")
 plt.scatter(steps, rt_error, s=2, label="rt")
+plt.scatter(steps, rt_aniso_error, s=2, label="rt aniso")
 plt.scatter(steps, rotmacro_error, s=2, label="hirano")
 plt.scatter(steps, flux_error, s=2, label="flux")
+plt.ylabel("Percent Error")
+plt.xlabel("Wavelength Spacing (Å)")
 plt.legend()
 plt.show()

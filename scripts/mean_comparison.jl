@@ -1,10 +1,13 @@
 using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
+using DSP: conv
+using Random
 using HDF5, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
+plt.ioff()
 
 # matplotlib backend
 mpl.use("Qt5Agg")
@@ -39,6 +42,85 @@ framedir = joinpath(plotdir, "cont_frames")
 !isdir(plotdir) && mkdir(plotdir)
 !isdir(framedir) && mkdir(framedir)
 
+# minima of absorption lines in f(λ). irregular λ ok.
+# returns (indices, subpixel λ via 3-pt quadratic)
+function find_line_minima(λ::AbstractVector, f::AbstractVector;
+                          σ=2.0, depth=0.01, win=25, minsep=5)
+    N = length(f)
+    @assert length(λ) == N && N ≥ 5
+
+    g = collect(f)
+    if σ > 0
+        half = max(2, Int(ceil(3σ)))
+        x = -half:half
+        k = exp.(-(x.^2)./(2σ^2)); k ./= sum(k)
+        gp = vcat(fill(g[1], half), g, fill(g[end], half))
+        conv_full = conv(gp, k)
+        g = collect(@view conv_full[2half+1:2half+N])  # same length
+    end
+
+    d1 = similar(g); d2 = similar(g)
+    for i in 2:N-1
+        dλm = λ[i]-λ[i-1]
+        dλp = λ[i+1]-λ[i]
+        s1 = (g[i]-g[i-1])/dλm
+        s2 = (g[i+1]-g[i])/dλp
+        d1[i] = (s1*dλp + s2*dλm)/(dλm+dλp)  # weighted slope
+        a = (s2 - s1)/((dλm+dλp)/2)
+        d2[i] = 2a
+    end
+    d1[1] = (g[2]-g[1])/(λ[2]-λ[1])
+    d1[end] = (g[end]-g[end-1])/(λ[end]-λ[end-1])
+    d2[1] = d2[2]; d2[end] = d2[end-1]
+
+    cand = Int[]
+    for i in 2:N-1
+        if d1[i-1] < 0 && d1[i+1] > 0 && d2[i] > 0
+            push!(cand, i)
+        end
+    end
+
+    keep = Int[]
+    for i in cand
+        lo = max(1, i-win); hi = min(N, i+win)
+        localmax = maximum(@view g[lo:hi])
+        if localmax - g[i] ≥ depth*localmax
+            push!(keep, i)
+        end
+    end
+
+    sort!(keep, by=i->g[i])         # deeper first
+    chosen = Int[]; taken = falses(N)
+    for i in keep
+        lo = max(1, i-minsep); hi = min(N, i+minsep)
+        if !any(taken[lo:hi])
+            push!(chosen, i); taken[i] = true
+        end
+    end
+    sort!(chosen)
+
+    λhat = similar(λ, length(chosen))
+    for (j,i) in pairs(chosen)
+        if 2 ≤ i ≤ N-1
+            x1,x2,x3 = λ[i-1], λ[i], λ[i+1]
+            y1,y2,y3 = g[i-1], g[i], g[i+1]
+            denom = (x1-x2)*(x1-x3)*(x2-x3)
+            if denom == 0
+                λhat[j] = λ[i]
+            else
+                a = (x3*(y2-y1) + x2*(y1-y3) + x1*(y3-y2))/denom
+                b = (x3^2*(y1-y2) + x2^2*(y3-y1) + x1^2*(y2-y3))/denom
+                λhat[j] = a != 0 ? -b/(2a) : λ[i]
+            end
+        else
+            λhat[j] = λ[i]
+        end
+    end
+
+    return chosen, λhat
+end
+
+
 function synth_given_linelist(linelist; δλ=0.005)
     # re-get values
     wls = [l.wl * 1e8 for l in linelist]
@@ -49,13 +131,13 @@ function synth_given_linelist(linelist; δλ=0.005)
     gamma_stark =  [l.gamma_stark for l in linelist]
 
     # make the wavelength grid
-    λs_korg = range(first(wls) - 5.0, last(wls) + 5.0, step=δλ)
+    λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=δλ)
 
     # get some abundances
     A_X = Korg.asplund_2020_solar_abundances
 
     # get the atmosphere
-    marcs_atm = FT.get_marcs_atm(5777.0, 4.44, A_X, n_layers=168 * 3)
+    marcs_atm = FT.get_marcs_atm(5777.0, 4.44, A_X, n_layers=56*3)
     τ_500 = Korg.get_tau_refs(marcs_atm)
     zs = Korg.get_zs(marcs_atm)
     Ts = Korg.get_temps(marcs_atm)
@@ -84,24 +166,24 @@ function synth_given_linelist(linelist; δλ=0.005)
     # get disk integrated cfunc
     μ_v = CUDA.zeros(Float64, length(zs))
     σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-    cfunc_flux = FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v)
-    flux = 2π .* dropdims(sum(cfunc_flux, dims=1), dims=1)
+
+    cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+    flux = Array(FT.get_flux(cfunc_flux_struct)')
 
     # get formation temperature
-    cum_cfunc_flux_norm = cumsum(cfunc_flux, dims=1) 
-    cum_cfunc_flux_norm ./= maximum(cum_cfunc_flux_norm, dims=1)
+    cum_cfunc_flux_norm = Array(FT.get_cum_cfunc(cfunc_flux_struct))
     form_temps_flux = zeros(length(λs_korg))
     for i in eachindex(λs_korg)
         local xs = view(cum_cfunc_flux_norm, :, i)
         local itp = FT.linear_interp(xs, elav(Ts))
         form_temps_flux[i] = itp(0.5)
     end
-    return λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux, Ts
+    return λs_korg, Array(cfunc_flux_struct.cfunc_dt), flux, cum_cfunc_flux_norm, form_temps_flux, Ts
 end
 
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
-linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist][16000:end]
+linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist][18000:end]
 wls = [l.wl * 1e8 for l in linelist]
 species = [l.species for l in linelist]
 
@@ -112,8 +194,20 @@ species = [l.species for l in linelist]
 ftemp = 4750.0
 atol = 0.5e1
 all_idx = findall(isapprox.(ftemp, form_temps_flux, atol=atol))
-# idx = all_idx[sort(rand(1:length(all_idx), 10))]
-idx = all_idx[1:min(10, length(all_idx))]
+
+# get line bottoms
+min_idx, λsub = find_line_minima(λs_korg, form_temps_flux; σ=2.0, depth=0.02, win=40, minsep=7)
+
+# match indices
+near_min_idx = []
+for i in eachindex(all_idx)
+    tmp_idx = FT.searchsortednearest(all_idx[i], min_idx)
+    push!(near_min_idx, min_idx[tmp_idx])
+end
+
+# take random 10 
+idx = randperm(length(near_min_idx))[1:10]
+idx = sort(near_min_idx[idx])
 
 # find the lines they are nearest
 λs_interest = view(λs_korg, idx)
@@ -121,7 +215,7 @@ idx_wls = [FT.searchsortednearest(wls, i) for i in λs_interest]
 wls_interest = wls[idx_wls]
 
 # redo the synthesis just with these lines on a finer grid
-δλ = 0.0005
+δλ = 0.001
 linelist = linelist[idx_wls]
 λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux, Ts = synth_given_linelist(linelist, δλ=δλ)
 wls = [l.wl * 1e8 for l in linelist]
@@ -143,8 +237,8 @@ temp_list = []
 cfunc_list = []
 cfunc_cum_list = [] 
 
-buffer = ceil(Int, 0.25 / mean(diff(λs_korg)))
-offset_scale = 0.65
+buffer = ceil(Int, 0.3 / mean(diff(λs_korg)))
+offset_scale = 0.725
 for i in eachindex(wls)
     # isolate the lines
     idx_λs = findfirst(x -> x .>= wls[i], λs_korg)
@@ -217,6 +311,9 @@ for j in eachindex(ftemps)
     ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
     fig.tight_layout()
     fig.savefig(joinpath(framedir, "line_lineup_$j.png"), bbox_inches="tight")
+    if j == 20
+        fig.savefig("figures/line_lineup.pdf", bbox_inches="tight")
+    end
     plt.clf(); plt.close()
 
     # now do each contribution slice
@@ -227,6 +324,8 @@ for j in eachindex(ftemps)
     exponent = floor(Int, log10(max_val))
     the_ymin = 0.0
     the_ymax = max_val / 10^exponent + 0.5 
+
+    this_ymax = [0.0]
 
     for i in eachindex(idx_wls)
         # get the index of the minimum
@@ -239,6 +338,10 @@ for j in eachindex(ftemps)
         # get views of cfuncs at indices of interest
         cfuncs_sim = cfunc_list[i][:, this_idx] # view(cfunc_flux, :, idx)
         cfuncs_cum_sim = cfunc_cum_list[i][:, this_idx] # view(cum_cfunc_flux_norm, :, idx)
+
+        if maximum(cfuncs_sim) / 10^exponent > this_ymax[1]
+            this_ymax[1] = maximum(cfuncs_sim) / 10^exponent
+        end
 
         # get the mean 
         # mean_to_plot = sum(cfuncs_sim .* elav(Ts)) ./ sum(cfuncs_sim)
@@ -253,7 +356,7 @@ for j in eachindex(ftemps)
     ax1.set_xlabel(L"{\rm Temperature\ [K]}")
     ax2.set_xlabel(L"{\rm Temperature\ [K]}")
 
-    ax1.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-2} \ Hz ^{-1}]}")
+    ax1.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ dt_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA\ ^{-1}]}")
     ax2.set_ylabel(L"{\rm Normalized\ Cumulative\ Flux\ Cont.\ Fn.}")
     ax2.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
 
@@ -261,5 +364,10 @@ for j in eachindex(ftemps)
 
     fig.subplots_adjust(wspace=0.25)
     fig.savefig(joinpath(framedir, "cont_comparison_$j.png"), bbox_inches="tight")
+    if j == 20
+        @show ftemps[j]
+        ax1.set_ylim(the_ymin, this_ymax[1] + 0.25)
+        fig.savefig("figures/cont_comparison.pdf", bbox_inches="tight")
+    end
     plt.clf(); plt.close()
 end

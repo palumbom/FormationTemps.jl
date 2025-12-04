@@ -104,15 +104,13 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # get the formation temperature for a stationary star
-cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
-
-cum_cfunc_flux_stationary = cumsum(cfunc_flux_stationary, dims=1)
-cum_cfunc_flux_stationary ./= maximum(cum_cfunc_flux_stationary, dims=1)
+cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_stationary))
+flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
 
 form_temp_stationary = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_flux_stationary, :, i)
+    xs = view(cfunc_flux_cum, :, i)
     itp = FT.linear_interp(xs, elav(Ts))
     form_temp_stationary[i] = itp(0.5)
 end
@@ -126,7 +124,7 @@ u1 = 0.4
 u2 = 0.0
 
 xs = λs_korg
-ys = cfunc_flux_stationary
+ys = Array(cfunc_flux_stationary.cfunc_dt)
 intres = 1024
 
 N = length(xs)
@@ -168,7 +166,7 @@ v_ctr = n .* Δv
 hirano_rot_macro = circshift(k_ctr ./ sum(k_ctr), shift)
 
 # get the gray rt kernel and rotation kernel
-rt_macro_kernel = FT.gray_rt_macro_kernel(vs, ζ_rt)
+iso_rt_macro_kernel = FT.gray_iso_rt_macro_kernel(vs, ζ_rt)
 gray_rot_kernel = FT.gray_rot_kernel(vs, vsini, u1)
 
 # get isotropic gaussian
@@ -186,9 +184,9 @@ gaussian ./= sum(gaussian)
 # plot the RT case
 plt.close("all")
 fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, rt_macro_kernel, label="gray")
+ax1.plot(λs_korg, iso_rt_macro_kernel, label="gray")
 ax1.plot(λs_korg, hirano_no_rot, label="hirano")
-ax2.scatter(λs_korg, hirano_no_rot .- rt_macro_kernel, c="tab:blue", s=2)
+ax2.scatter(λs_korg, hirano_no_rot .- iso_rt_macro_kernel, c="tab:blue", s=2)
 ax1.set_xlim(6301.8, 6302.2)
 ax1.legend()
 ax1.set_title("Macro Only")
@@ -210,7 +208,7 @@ cfunc_flux_hirano_nomacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, 0.0, u1, 
 cfunc_flux_hirano_rotmacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2, intres=intres)
 
 cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
-cfunc_flux_macrogray = FT.convolve_gray_rt_macro(xs, ys, ζ_rt)
+cfunc_flux_macrogray = FT.convolve_iso_rt_macro(xs, ys, ζ_rt)
 
 flux_hirano_norot = dropdims(sum(cfunc_flux_hirano_norot, dims=1), dims=1)
 flux_hirano_nomacro = dropdims(sum(cfunc_flux_hirano_nomacro, dims=1), dims=1)

@@ -104,11 +104,9 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # get the formation temperature for a stationary star
-cfunc_flux_stationary = 2π .* FT.calc_flux_cfunc(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-flux_stationary = dropdims(sum(cfunc_flux_stationary, dims=1), dims=1)
-
-cum_cfunc_flux_stationary = cumsum(cfunc_flux_stationary, dims=1)
-cum_cfunc_flux_stationary ./= maximum(cum_cfunc_flux_stationary, dims=1)
+cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+flux_stationary = Array(FT.get_flux(cfunc_flux_struct))
+cum_cfunc_flux_stationary = Array(FT.get_cum_cfunc(cfunc_flux_struct))
 
 form_temp_stationary = zeros(length(λs_korg))
 for i in eachindex(λs_korg)
@@ -123,10 +121,10 @@ vsini = 2100.0
 
 # set limb darkening
 u1 = 0.4
-u2 = 0.26
+u2 = 0.0
 
 xs = λs_korg
-ys = cfunc_flux_stationary
+ys = Array(cfunc_flux_struct.cfunc_dt)
 intres = range(50, 1000, step=50)
 intres = 10_000
 
@@ -168,7 +166,7 @@ v_ctr = n .* Δv
 hirano_rot_macro = k_ctr ./ sum(k_ctr)
 
 # get the gray rt kernel and rotation kernel
-rt_macro_kernel = FT.gray_rt_macro_kernel(vs, ζ_rt)
+rt_macro_kernel = FT.gray_iso_rt_macro_kernel(vs, ζ_rt)
 gray_rot_kernel = FT.gray_rot_kernel(vs, vsini, u1)
 
 # get isotropic gaussian
@@ -183,34 +181,13 @@ g(x, n) = exp(-((x - n) / σ_g(x))^2.0)
 gaussian = g.(λs_korg, λc)
 gaussian ./= sum(gaussian)
 
-# plot the RT case
-plt.close("all")
-#= fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, rt_macro_kernel, label="gray")
-ax1.plot(λs_korg, hirano_no_rot, label="hirano")
-ax2.scatter(λs_korg, hirano_no_rot .- rt_macro_kernel, c="tab:blue", s=2)
-ax1.set_xlim(6301.8, 6302.2)
-ax1.legend()
-ax1.set_title("Macro Only")
-plt.show()
-
-# plot the vsini case
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, gray_rot_kernel, label="gray")
-ax1.plot(λs_korg, hirano_no_macro, label="hirano")
-ax2.scatter(λs_korg, hirano_no_macro .- gray_rot_kernel, c="tab:blue", s=2)
-ax1.set_xlim(6301.8, 6302.2)
-ax1.set_title("Rotation Only")
-ax1.legend()
-plt.show()
- =#
 # now get contribution functions + flux
 cfunc_flux_hirano_norot = FT.convolve_hirano_rotmacro(xs, ys, 0.0, ζ_rt, u1, u2, intres=intres)
 cfunc_flux_hirano_nomacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, 0.0, u1, u2, intres=intres)
 cfunc_flux_hirano_rotmacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2, intres=intres)
 
 cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
-cfunc_flux_macrogray = FT.convolve_gray_rt_macro(xs, ys, ζ_rt)
+cfunc_flux_macrogray = FT.convolve_iso_rt_macro(xs, ys, ζ_rt)
 
 flux_hirano_norot = dropdims(sum(cfunc_flux_hirano_norot, dims=1), dims=1)
 flux_hirano_nomacro = dropdims(sum(cfunc_flux_hirano_nomacro, dims=1), dims=1)
@@ -218,29 +195,10 @@ flux_hirano_nomacro = dropdims(sum(cfunc_flux_hirano_nomacro, dims=1), dims=1)
 flux_rotgray = dropdims(sum(cfunc_flux_rotgray, dims=1), dims=1)
 flux_macrogray = dropdims(sum(cfunc_flux_macrogray, dims=1), dims=1)
 
-#= # plot the RT case
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, flux_macrogray, label="gray")
-ax1.plot(λs_korg, flux_hirano_norot, label="hirano")
-ax2.scatter(λs_korg, 100 .* (flux_hirano_norot .- flux_macrogray) ./ flux_hirano_norot, c="tab:blue", s=2)
-ax1.legend()
-ax1.set_title("Macro Only")
-plt.show()
-
-# plot the vsini case
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, flux_rotgray, label="gray")
-ax1.plot(λs_korg, flux_hirano_nomacro, label="hirano")
-ax2.scatter(λs_korg, 100 .* (flux_hirano_nomacro .- flux_rotgray) ./ flux_hirano_nomacro, c="tab:blue", s=2)
-ax1.legend()
-ax1.set_title("Rotation Only")
-plt.show()
- =#
-
 # overplot the kernels
 fig, ax1 = plt.subplots()
 ax1.plot(vs .- 9600, gray_rot_kernel ./ maximum(gray_rot_kernel), c=ncolors[1], label=L"\mathrm{Rotation}")
-ax1.plot(vs .- 3200, rt_macro_kernel ./ maximum(rt_macro_kernel), c=ncolors[2], ls="--", label=L"\mathrm{Radial\textendash Tangential}")
+ax1.plot(vs .- 3200, rt_macro_kernel ./ maximum(rt_macro_kernel), c=ncolors[2], ls="--", label=L"\mathrm{Isotropic\ RT}")
 ax1.plot(vs .+ 3200, hirano_rot_macro ./ maximum(hirano_rot_macro), c=ncolors[3], ls="-.", label=L"\mathrm{Rotation\ \&\ RT}")
 ax1.plot(vs .+ 9600, gaussian ./ maximum(gaussian), c=ncolors[7], ls=":", label=L"\mathrm{Isotropic\ Gaussian}")
 #  ax1.legend(loc="upper left", fontsize=12)

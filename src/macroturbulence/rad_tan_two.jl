@@ -1,43 +1,57 @@
 """
-Equation 18.14 from The Observation and Analysis of Stellar Photospheres
-(Gray 2008)
+Equation 17.6 from Gray (2008), assuming A_R = A_T
 """
-function gray_rot_kernel(vs::AA{T,1}, vsini::T, u1::T) where T<:AF
-    # get LD terms
-    ld1 = 2.0 * (one(T) - u1)
-    ld2 = 0.5 * π * u1
-    ld3 = π * (one(T) - u1 / 3.0)
+function rt_macro_kernel(vs::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
+    # constants
+    A_R = 0.5
+    A_T = A_R
+    sqrt_π = sqrt(π)
 
-    # evaluate the kernel
-    xs = vs ./ vsini
-    omx2 = abs.(one(T) .- xs .^ 2.0)
-    kernel = (ld1 .* sqrt.(omx2) .+ ld2 .* omx2) ./ ld3
-    kernel[abs.(xs) .> one(T)] .= zero(T)
+    # get trig
+    ϵ = T(1e-6)
+    cosθ = max(μ, ϵ)
+    s2 = one(T) - μ * μ
+    sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
+
+    # the terms
+    t1 = @. A_R * exp(-(vs / (ζ_r * cosθ))^2.0) / (sqrt_π * ζ_r * cosθ)
+    t2 = @. A_T * exp(-(vs / (ζ_t * sinθ))^2.0) / (sqrt_π * ζ_t * sinθ)
+    kernel = t1 + t2
     return kernel ./ sum(kernel)
 end
 
-function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,1}, vsini::T, u1::T) where T<:AF
-    # offset the kernel by the velocity
+function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
+    # short circuit
+    if (iszero(ζ_r) & iszero(ζ_t))
+        return ys
+    end
+
+    # offset the kernel by the velocity (discrete center)
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
 
-    # get the normalized kernel (GPU-style phase: zero-lag at index 1)
-    kernel = gray_rot_kernel(vs, vsini, u1)
+    # get the normalized kernel (GPU-style phase)
+    kernel = rt_macro_kernel(vs, ζ_r, ζ_t, μ)
     kshift = ifftshift(kernel)
 
     # return convolution via FFT (matches GPU convention)
     return real(ifft(fft(ys) .* fft(kshift)))
 end
 
-function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,2}, vsini::T, u1::T) where T<:AF
-    # offset the kernel by the velocity
+function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
+    # short circuit
+    if (iszero(ζ_r) & iszero(ζ_t))
+        return ys
+    end
+
+    # offset the kernel by the velocity (discrete center)
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
 
     # get the normalized kernel (GPU-style phase)
-    kernel = gray_rot_kernel(vs, vsini, u1)
+    kernel = rt_macro_kernel(vs, ζ_r, ζ_t, μ)
     kshift = ifftshift(kernel)
     ftk = fft(kshift)
 
@@ -49,32 +63,41 @@ function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,2}, vsini::T, u1::T) where
     return ys_out
 end
 
-function compute_padded_gray_kernel_1D!(kernel_row, xs, λc, vsini, u1, Nλ, pad_left)
+function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_r, ζ_t, μ, Nλ, pad_left)
     # get thread index
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
 
-    # get LD terms
-    ld1 = 2.0 * (1.0 - u1)
-    ld2 = 0.5 * π * u1
-    ld3 = π * (1.0 - u1 / 3.0)
-
     # evaluate the kernel
     if j <= Nλ
-        xj = c_ms * (xs[j] - λc) / λc / vsini
-        omx2 = CUDA.abs(1.0 - xj ^ 2.0)
+        xj = c_ms * (xs[j] - λc) / λc
 
-        val = (ld1 * sqrt(omx2) + ld2 * omx2) / ld3
-        val *= abs(xj) <= 1.0
-        @inbounds kernel_row[j + pad_left] = val
+        # trig from μ directly; guard μ≈0 or μ≈1
+        T = typeof(ζ_r)
+        ϵ = T(1e-6)
+        cosθ = max(μ, ϵ)
+        s2 = one(T) - μ * μ
+        sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
+
+        invR = 0.5 / (sqrt(π) * ζ_r * cosθ)
+        invT = 0.5 / (sqrt(π) * ζ_t * sinθ)
+
+        t1 = exp(-(xj / (ζ_r * cosθ))^2) * invR
+        t2 = exp(-(xj / (ζ_t * sinθ))^2) * invT
+        @inbounds kernel_row[j + pad_left] = t1 + t2
     end
     return nothing
 end
 
-function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
-                                    ys::AA{T,2}, vsini::T, u1::T) where {T<:AF}
-    # copy inputs to device
+function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
+                               ys::AA{T,2}, ζ_r::T, ζ_t::T, μ::T) where {T<:AF}
+    # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
     copyto!(cmem.ys_gpu, CuArray(ys))
+
+    # short circuit
+    if (iszero(ζ_r) & iszero(ζ_t))
+        return cmem.ys_gpu
+    end
 
     # compute velocity offset from discrete center
     i0 = length(xs) ÷ 2 + 1
@@ -87,17 +110,17 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
     CUDA.synchronize()
 
-    # kernel rows as 1-D views to avoid dim ambiguity
+    # compute the padded kernel once
     kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
     shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
     fill!(kernel_row, zero(T))
-    
+
     ts1 = (256,)
     bs1 = (cld(cmem.Nλ, ts1[1]),)
-    @cuda threads=ts1 blocks=bs1 compute_padded_gray_kernel_1D!(kernel_row,
-                                                                cmem.xs_gpu, λ0,
-                                                                vsini, u1,
-                                                                cmem.Nλ, cmem.pad_left)
+    @cuda threads=ts1 blocks=bs1 compute_padded_rt_kernel_1D!(kernel_row,
+                                                              cmem.xs_gpu, λ0,
+                                                              ζ_r, ζ_t, μ, cmem.Nλ,
+                                                              cmem.pad_left)
     CUDA.synchronize()
 
     # normalize the kernel
@@ -107,7 +130,7 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # ensure zero-lag sits at padded center before FFT layout
     Ltot = length(kernel_row)
     center = Ltot ÷ 2
-    r = center - (cmem.pad_left + i0)  # integer roll needed if pads not perfectly symmetric
+    r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
         CUDA.synchronize()
@@ -119,10 +142,10 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # center -> FFT indexing
     CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
 
-    # contiguous 1-D vector for rfft
+    # make a contiguous 1-D device vector
     kr = copy(shifted_kernel_row)
 
-    # forward fourier transforms (R2C on device; length = floor(Int, L/2)+1)
+    # forward fourier transforms (R2C on device)
     kernel_row_ft = CUDA.CUFFT.rfft(kr)
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
 
@@ -134,7 +157,6 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out

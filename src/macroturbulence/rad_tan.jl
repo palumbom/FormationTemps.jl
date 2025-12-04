@@ -1,14 +1,26 @@
 """
-Equation 17.8 from Gray (2008), assuming A_R = A_T and ξ_R = ξ_T
+Equation 17.6 from Gray (2008), assuming A_R = A_T and ξ_R = ξ_T
 """
-function gray_rt_macro_kernel(vs::AA{T,1}, ζ_rt::T) where T<:AF
-    t1 = 2.0 .* exp.(-1.0 .* (vs ./ ζ_rt).^2.0) ./ (sqrt(π) .* ζ_rt)
-    t2 = -2.0 .* abs.(vs) .* erfc.(abs.(vs) ./ ζ_rt) ./ ζ_rt.^2.0
-    kernel = t1 .+ t2
+function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
+    # constants
+    A_R = 0.5
+    A_T = A_R
+    sqrt_π = sqrt(π)
+
+    # get trig
+    ϵ = T(1e-6)
+    cosθ = max(μ, ϵ)
+    s2 = one(T) - μ * μ
+    sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
+
+    # the terms
+    t1 = @. A_R * exp(-(vs / (ζ_rt * cosθ))^2.0) / (sqrt_π * ζ_rt * cosθ)
+    t2 = @. A_T * exp(-(vs / (ζ_rt * sinθ))^2.0) / (sqrt_π * ζ_rt * sinθ)
+    kernel = t1 + t2
     return kernel ./ sum(kernel)
 end
 
-function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T) where T<:AF
+function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     # short circuit
     if iszero(ζ_rt)
         return ys
@@ -20,14 +32,14 @@ function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T) where T<:AF
     vs = c_ms .* (xs .- λ0) ./ λ0
 
     # get the normalized kernel (GPU-style phase)
-    kernel = gray_rt_macro_kernel(vs, ζ_rt)
+    kernel = rt_macro_kernel(vs, ζ_rt, μ)
     kshift = ifftshift(kernel)
 
     # return convolution via FFT (matches GPU convention)
     return real(ifft(fft(ys) .* fft(kshift)))
 end
 
-function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
+function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T, μ::T) where T<:AF
     # short circuit
     if iszero(ζ_rt)
         return ys
@@ -39,7 +51,7 @@ function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
     vs = c_ms .* (xs .- λ0) ./ λ0
 
     # get the normalized kernel (GPU-style phase)
-    kernel = gray_rt_macro_kernel(vs, ζ_rt)
+    kernel = rt_macro_kernel(vs, ζ_rt, μ)
     kshift = ifftshift(kernel)
     ftk = fft(kshift)
 
@@ -51,25 +63,33 @@ function convolve_gray_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
     return ys_out
 end
 
-function compute_padded_gray_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, Nλ, pad_left)
+function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, μ, Nλ, pad_left)
     # get thread index
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
 
     # evaluate the kernel
     if j <= Nλ
         xj = c_ms * (xs[j] - λc) / λc
-        av = CUDA.abs(xj)
-        z = av / ζ_rt
 
-        t1 = 2.0 * exp(-(xj/ζ_rt)^2) / (sqrt(π) * ζ_rt)
-        t2 = -2.0 * av * erfc(z) / (ζ_rt^2)
+        # trig from μ directly; guard μ≈0 or μ≈1
+        T = typeof(ζ_rt)
+        ϵ = T(1e-6)
+        cosθ = max(μ, ϵ)
+        s2 = one(T) - μ * μ
+        sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
+
+        invR = 0.5 / (sqrt(π) * ζ_rt * cosθ)
+        invT = 0.5 / (sqrt(π) * ζ_rt * sinθ)
+
+        t1 = exp(-(xj / (ζ_rt * cosθ))^2) * invR
+        t2 = exp(-(xj / (ζ_rt * sinθ))^2) * invT
         @inbounds kernel_row[j + pad_left] = t1 + t2
     end
     return nothing
 end
 
-function convolve_gray_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
-                                    ys::AA{T,2}, ζ_rt::T) where {T<:AF}
+function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
+                               ys::AA{T,2}, ζ_rt::T, μ::T) where {T<:AF}
     # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
     copyto!(cmem.ys_gpu, CuArray(ys))
@@ -93,14 +113,14 @@ function convolve_gray_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # compute the padded kernel once
     kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
     shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
-
     fill!(kernel_row, zero(T))
+
     ts1 = (256,)
     bs1 = (cld(cmem.Nλ, ts1[1]),)
-    @cuda threads=ts1 blocks=bs1 compute_padded_gray_rt_kernel_1D!(kernel_row,
-                                                                   cmem.xs_gpu, λ0,
-                                                                   ζ_rt, cmem.Nλ,
-                                                                   cmem.pad_left)
+    @cuda threads=ts1 blocks=bs1 compute_padded_rt_kernel_1D!(kernel_row,
+                                                              cmem.xs_gpu, λ0,
+                                                              ζ_rt, μ, cmem.Nλ,
+                                                              cmem.pad_left)
     CUDA.synchronize()
 
     # normalize the kernel
@@ -137,7 +157,7 @@ function convolve_gray_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
+    out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
 end
