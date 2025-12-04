@@ -101,7 +101,7 @@ continuum = zeros(length(λs_korg), length(μs))
 
 for i in eachindex(μs)
     cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
-    cfuncs[:,:,i] .= Array(cfunc_intensity_struct.cfunc)
+    cfuncs[:,:,i] .= Array(cfunc_intensity_struct.cfunc_dt)
     cfuncs_cum[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_struct))
     intensities[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
 
@@ -112,7 +112,7 @@ end
 # get flux and flux cfunc
 cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
 flux_disk_integrated = Array(FT.get_flux(cfunc_flux_struct))
-cfunc_flux = Array(cfunc_flux_struct.cfunc)
+cfunc_flux = Array(cfunc_flux_struct.cfunc_dt)
 cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_struct))
 
 # now get cumulative contribution functions
@@ -263,7 +263,8 @@ for i in eachindex(μ_vals_to_plot)
     # img = ax3.imshow(cfunc_view, aspect="auto", extent=extent, vmin=vmin, vmax=vmax)
     img = axs[i].pcolormesh(xedges, yedges2, cfunc_view, 
                             shading="gouraud", cmap=img_cmap, 
-                            edgecolors="none", norm=norm)
+                            edgecolors="none", norm=norm,
+                            rasterized=true)
 
     push!(imgs, img)
     axs[i].axvline(xedges[cont_idx - idx1], c="white", ls=":", lw=2.5)
@@ -328,15 +329,15 @@ axs[1].set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
 fig.subplots_adjust(wspace=0.05)
 
 cb = fig.colorbar(imgs[end], ax=axs, pad=0.01)
-cb.set_label(L"C_\nu(t_\nu, \mu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1} \ sr ^{-1} ]}", labelpad=10.0)
+cb.set_label(L"C_\nu(t_\nu, \mu)\ d t_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1} \ sr ^{-1} ]}", labelpad=10.0)
 cb.ax.xaxis.set_label_position("top")
 
-fig.savefig(joinpath(plotdir, "cfunc_mus.pdf"), bbox_inches="tight")
+fig.savefig(joinpath(plotdir, "cfunc_mus.pdf"), bbox_inches="tight", dpi=100)
 plt.clf(); plt.close()
 
 
 # plot slices through the contribution function at different limb angles 
-fig, ax1 = plt.subplots(figsize=1.5 .* (7.2, 5.6))
+fig, ax1 = plt.subplots(figsize=1.1 .* (7.2, 5.6))
 fig.subplots_adjust(bottom=0.3)
 
 ax2 = ax1.twinx()
@@ -399,8 +400,8 @@ ax1_b2.grid(false)
 
 wav_val = string(round(λs_korg[cont_idx], digits=1))
 ax1.set_xlabel(L"{\rm Physical\ Depth\ [Mm]}")
-ax1.set_ylabel(L"C_{\nu}(t_\nu, \mu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1} \ sr ^{-1} ]}")
-ax2.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1}]}")
+ax1.set_ylabel(L"C_{\nu}(t_\nu, \mu)\ d t_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1} \ sr ^{-1} ]}")
+ax2.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ d t_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1}]}")
 ax1.legend()
 
 # ax1.set_ylim(cb_lims)
@@ -420,9 +421,20 @@ plt.clf(); plt.close()
 
 
 # plot the cumulative contribution functions 
+cmap = plt.get_cmap(μ_cmap)
+# norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
+norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=1.075)
+colors = cmap(norm(μs))
+
 fig, ax1 = plt.subplots()
-ax1.plot(elav(Ts), cum_cfunc_flux_norm[:,cont_idx], c="k", label=L"{\rm Flux}")
-ax1.plot(elav(Ts), cum_cfuncs_norm[:,cont_idx, length(μs)], c=colors[end,:], label=L"\mu = 1.0")
+ax1.plot(elav(Ts), cum_cfunc_flux_norm[:,cont_idx], c="k", label=L"{\rm Flux}", zorder=length(μs) + 1)
+for i in eachindex(μs)
+    mui = μs[i]
+    ax1.plot(elav(Ts), cum_cfuncs_norm[:,cont_idx, i], c=colors[i,:])#, label=L"\mu = %$mui")
+end
+sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+cbar = plt.colorbar(sm, ax=ax1)
+cbar.set_label(L"\mu")
 
 itp1 = FT.linear_interp(cum_cfunc_flux_norm[:,cont_idx], elav(Ts))
 itp2 = FT.linear_interp(cum_cfuncs_norm[:,cont_idx, length(μs)], elav(Ts))
@@ -448,6 +460,7 @@ ax1.set_xlabel(L"{\rm Temperature\ [K]}")
 ax1.set_ylabel(L"{\rm Normalized\ Cumulative\ Cont.\ Fn.}")
 ax1.legend()
 
+fig.tight_layout()
 fig.savefig(joinpath(plotdir, "cum_cfunc_comparison.pdf"), bbox_inches="tight")
 plt.clf(); plt.close()
 
@@ -455,21 +468,64 @@ plt.clf(); plt.close()
 fig, ax1 = plt.subplots()
 for i in eachindex(μs)
     mu_val = μs[i]
-    ax1.plot(λs_korg, form_temps_intensity[:,i],  c=colors[i,:], label=L"\mu = %$mu_val")
+    ax1.plot(λs_korg, form_temps_intensity[:,i],  c=colors[i,:])#, label=L"\mu = %$mu_val")
 end
-ax1.plot(λs_korg, form_temps_flux, c="k", label=L"{\rm Flux}")
+sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+cbar = plt.colorbar(sm, ax=ax1)
+cbar.set_label(L"\mu")
+
+ax1.plot(λs_korg, form_temps_flux, c="k", label=L"{\rm Flux}", zorder=length(μs) + 1)
 ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
 ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
-ax1.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
+ax1.legend()#bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
 
 idx1 = findfirst(x -> x .>= first(wls) - 1.25, λs_korg)
 idx2 = findfirst(x -> x .>= last(wls) + 1.25, λs_korg)
 ax1.set_xlim(λs_korg[idx1], λs_korg[idx2])
 
-fig.savefig(joinpath(plotdir, "form_temp_flux_vs_intensity.pdf"))
+fig.tight_layout()
+fig.savefig(joinpath(plotdir, "form_temp_flux_vs_intensity.pdf"), bbox_inches="tight")
 plt.clf(); plt.close()
 
-#= # make a plot of the errors 
+
+
+# do the same with residuals
+fig, (ax1, ax2, ax3, ax4) = plt.subplots(nrows=2, ncols=2, width_ratios=[20,1], height_ratios=[3,1])
+for i in eachindex(μs)
+    mu_val = μs[i]
+    ax1.plot(λs_korg, form_temps_intensity[:,i],  c=colors[i,:])#, label=L"\mu = %$mu_val")
+end
+sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+cbar = plt.colorbar(sm, cax=ax3)
+cbar.set_label(L"\mu")
+ax3.grid(false)
+
+ax1.plot(λs_korg, form_temps_flux, c="k", label=L"{\rm Flux}", zorder=length(μs) + 1)
+ax2.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
+ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
+ax2.set_ylabel(L"{\rm Error\ in}\ T_{1/2}\ {\rm [K]}")
+ax1.legend()#bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
+
+ax2.plot(λs_korg, form_temps_flux .- form_temps_intensity[:,length(μs)], c="k")
+
+idx1 = findfirst(x -> x .>= first(wls) - 1, λs_korg)
+idx2 = findfirst(x -> x .>= last(wls) + 1, λs_korg)
+ax1.set_xlim(λs_korg[idx1], λs_korg[idx2])
+ax2.set_xlim(λs_korg[idx1], λs_korg[idx2])
+ax2.set_ylim(-450, 25)
+ax2.axes.yaxis.set_ticks([-400, -200, 0])
+ax4.axis("off")
+ax1.axes.xaxis.set_ticklabels([])
+
+fig.tight_layout()
+fig.savefig(joinpath(plotdir, "form_temp_flux_vs_intensity_resids.pdf"), bbox_inches="tight")
+plt.clf(); plt.close()
+
+
+
+
+
+# make a plot of the errors 
 form_temp_errors = form_temps_intensity[:,length(μs)] .- form_temps_flux
 fig, ax1 = plt.subplots()
 ax1.plot(λs_korg, form_temp_errors, c="k")
@@ -477,4 +533,4 @@ ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
 ax1.set_ylabel(L"{\rm Error\ in\ } T_{1/2}\ {\rm [K]}")
 ax1.set_xlim(λs_korg[idx1], λs_korg[idx2])
 fig.savefig(joinpath(plotdir, "form_temp_error.pdf"))
-plt.clf(); plt.close() =#
+plt.clf(); plt.close()

@@ -9,8 +9,8 @@ using ProgressMeter
 plt.ioff()
 
 # matplotlib backend
-mpl.use("Qt5Agg")
-# mpl.use("Agg")
+# mpl.use("Qt5Agg")
+mpl.use("Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 colormaps = pyimport("colormaps")
@@ -230,7 +230,7 @@ for i in eachindex(T_effs)
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[i]
-    Nϕ = 32
+    Nϕ = 128
     μs_gpu, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu

@@ -116,7 +116,7 @@ vsinis = range(1000.0, 1.0e4, step=1000)
 ζ_rt = 3400.0
 
 # set resolution grid
-R_grid1 = range(5e3, 1e5, step=1e3)
+R_grid1 = range(5e3, 1e5, step=2e3)
 R_grid2 = range(1e5 + step(R_grid1), 1e6, step=1e4)
 R_grid = vcat([collect(R_grid1), collect(R_grid2)]...)
 
@@ -144,7 +144,7 @@ colors = cmap(norm(vsinis ./ 1e3))
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
-    Nϕ = 64
+    Nϕ = 128
     μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
     # flatten, move to cpu
@@ -185,7 +185,7 @@ colors = cmap(norm(vsinis ./ 1e3))
     flux_integration_norm = Array(flux_integration ./ flux_cont_integration)
 
     # convolve and resample
-    oversampling = 5.0
+    oversampling = 6.0
     rmses = zeros(length(R_grid))
     maxes = zeros(length(R_grid))
     for i in eachindex(R_grid)

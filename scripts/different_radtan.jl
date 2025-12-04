@@ -120,9 +120,9 @@ end
 ζ_rt = 3400.0
 ζ_rt_quad_sum = sqrt(2.0 * ζ_rt^2.0)
 
-ζ_r = 4800.0
-ζ_t = sqrt(ζ_rt_quad_sum^2.0 - ζ_r^2.0)
-ζ_t_string = round(ζ_t, digits=0)
+ζ_r = range(200.0, 4800.0, step=50.0)
+ζ_t = @. sqrt(ζ_rt_quad_sum^2.0 - ζ_r^2.0)
+ζ_t_string = round.(ζ_t, digits=0)
 vsini = 2100.0
 u1 = 0.4
 u2 = 0.26
@@ -136,11 +136,15 @@ flux_convolution_cont = 2π .* dropdims(sum(cfunc_flux_convolution_cont, dims=1)
 
 flux_convolution_norm = Array(flux_convolution ./ flux_convolution_cont)
 
+# allocate for "error"
+err_same = zeros(length(λs_korg), length(ζ_r))
+err_diff = zeros(length(λs_korg), length(ζ_r))
+
 # disk integration stuff
 ρstar = 1.0
 istar = 90.0
 v0 = vsini
-Nϕ = 24
+Nϕ = 16
 μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
 # flatten, move to cpu
@@ -160,58 +164,89 @@ cfunc_flux_integration_diff = CUDA.zeros(Float64, length(zs)-1, length(λs_korg)
 cfunc_flux_cont_integration_same = CUDA.zeros(Float64, length(zs)-1, length(λs_korg))
 cfunc_flux_cont_integration_diff = CUDA.zeros(Float64, length(zs)-1, length(λs_korg))
 
-# loop over disk
-@showprogress for i in eachindex(μs_cpu)
-    # set the rotational velocity
-    μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
-
-    # get intensity stuff
-    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
-
-    # convolution with same RT
-    tbc = cfunc_intensity_struct.cfunc_dt
-    cfunc_int_i_mac_same = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μs_cpu[i])
-    flux_integration_same .+= sum(cfunc_int_i_mac_same, dims=1)' .* dA_cpu[i]
-    cfunc_flux_integration_same .+= cfunc_int_i_mac_same .* dA_cpu[i]
-
-    # convolution with different R and T
-    tbc = cfunc_intensity_struct.cfunc_dt
-    cfunc_int_i_mac_diff = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_r, ζ_t, μs_cpu[i])
-    flux_integration_diff .+= sum(cfunc_int_i_mac_diff, dims=1)' .* dA_cpu[i]
-    cfunc_flux_integration_diff .+= cfunc_int_i_mac_diff .* dA_cpu[i]
-
-    # now do continuum intensity
-    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
-
-    # continuum convolution with same RT
-    tbc_cont = cfunc_intensity_cont.cfunc_dt
-    cfunc_int_cont_i_mac_same = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, ζ_rt, μs_cpu[i])
-    flux_cont_integration_same .+= sum(cfunc_int_cont_i_mac_same, dims=1)' .* dA_cpu[i]
-    cfunc_flux_cont_integration_same .+= cfunc_int_cont_i_mac_same .* dA_cpu[i]
-
-    # continuum convolution with different R and T
-    tbc_cont = cfunc_intensity_cont.cfunc_dt
-    cfunc_int_cont_i_mac_diff = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, ζ_r, ζ_t, μs_cpu[i])
-    flux_cont_integration_diff .+= sum(cfunc_int_cont_i_mac_diff, dims=1)' .* dA_cpu[i]
-    cfunc_flux_cont_integration_diff .+= cfunc_int_cont_i_mac_diff .* dA_cpu[i]
+if !isdir("figures/RT_frames/")
+    mkdir("figures/RT_frames/")
 end
 
-# 2pi
-flux_integration_same .*= 2π
-flux_integration_diff .*= 2π
-flux_cont_integration_same .*= 2π
-flux_cont_integration_diff .*= 2π
+@showprogress for j in eachindex(ζ_r)
+    # re-zero 
+    flux_integration_diff .= 0.0
+    flux_cont_integration_diff .= 0.0
+    cfunc_flux_integration_diff .= 0.0
+    cfunc_flux_cont_integration_diff .= 0.0
 
-# normalize
-flux_integration_same_norm = Array(flux_integration_same ./ flux_cont_integration_same)
-flux_integration_diff_norm = Array(flux_integration_diff ./ flux_cont_integration_diff)
+    # loop over disk
+    for i in eachindex(μs_cpu)
+        # set the rotational velocity
+        μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
 
-# plot it 
-plt.plot(λs_korg, flux_convolution_norm, label="Convolution, R=T=$ζ_rt m/s")
-plt.plot(λs_korg, flux_integration_same_norm, label="Integration, R=T=$ζ_rt m/s")
-plt.plot(λs_korg, flux_integration_diff_norm, label="Integration, R=$ζ_r m/s, T=$ζ_t_string m/s")
+        # get intensity stuff
+        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+
+        # convolution with same RT
+        if j == 1
+            tbc = cfunc_intensity_struct.cfunc_dt
+            cfunc_int_i_mac_same = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μs_cpu[i])
+            flux_integration_same .+= sum(cfunc_int_i_mac_same, dims=1)' .* dA_cpu[i]
+            cfunc_flux_integration_same .+= cfunc_int_i_mac_same .* dA_cpu[i]
+
+
+            # continuum convolution with same RT
+            tbc_cont = cfunc_intensity_cont.cfunc_dt
+            cfunc_int_cont_i_mac_same = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, ζ_rt, μs_cpu[i])
+            flux_cont_integration_same .+= sum(cfunc_int_cont_i_mac_same, dims=1)' .* dA_cpu[i]
+            cfunc_flux_cont_integration_same .+= cfunc_int_cont_i_mac_same .* dA_cpu[i]
+        end
+
+        # convolution with different R and T
+        tbc = cfunc_intensity_struct.cfunc_dt
+        cfunc_int_i_mac_diff = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_r[j], ζ_t[j], μs_cpu[i])
+        flux_integration_diff .+= sum(cfunc_int_i_mac_diff, dims=1)' .* dA_cpu[i]
+        cfunc_flux_integration_diff .+= cfunc_int_i_mac_diff .* dA_cpu[i]
+
+        # continuum convolution with different R and T
+        tbc_cont = cfunc_intensity_cont.cfunc_dt
+        cfunc_int_cont_i_mac_diff = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, ζ_r[j], ζ_t[j], μs_cpu[i])
+        flux_cont_integration_diff .+= sum(cfunc_int_cont_i_mac_diff, dims=1)' .* dA_cpu[i]
+        cfunc_flux_cont_integration_diff .+= cfunc_int_cont_i_mac_diff .* dA_cpu[i]
+    end
+
+    # 2pi
+    flux_integration_same .*= 2π
+    flux_integration_diff .*= 2π
+    flux_cont_integration_same .*= 2π
+    flux_cont_integration_diff .*= 2π
+
+    # normalize
+    flux_integration_same_norm = Array(flux_integration_same ./ flux_cont_integration_same)
+    flux_integration_diff_norm = Array(flux_integration_diff ./ flux_cont_integration_diff)
+
+    # get errors
+    err_same[:,j] .= flux_integration_same_norm .- flux_convolution_norm
+    err_diff[:,j] .= flux_integration_diff_norm .- flux_convolution_norm
+
+    rl = ζ_r[j]
+    tl = ζ_t_string[j]
+
+    # plot it 
+    plt.plot(λs_korg, flux_convolution_norm, label="Convolution, R=T=$ζ_rt m/s")
+    plt.plot(λs_korg, flux_integration_same_norm, label="Integration, R=T=$ζ_rt m/s")
+    plt.plot(λs_korg, flux_integration_diff_norm, label="Integration, R=$rl m/s, T=$tl m/s")
+    plt.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left", mode="expand", borderaxespad=0)
+    plt.xlabel("Wavelength [Å]")
+    plt.ylabel("Normalized Flux")
+    plt.xlim(6301.25, 6301.75)
+    plt.ylim(0.35, 0.55)
+    plt.tight_layout()
+    plt.savefig("figures/RT_frames/frame_$j.png", bbox_inches="tight")
+    plt.clf(); plt.close()
+end
+
+plt.axhline(maximum(abs.(err_same)), c="k", ls=":", label="Integration (same RT) - Convolution (same RT)")
+plt.plot(ζ_r, maximum(abs.(err_diff), dims=1)', label="Integration (diff RT) - Convolution (same RT)")
+plt.xlabel("zeta_R")
+plt.ylabel("Flux 'Error'")
 plt.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left", mode="expand", borderaxespad=0)
-plt.xlabel("Wavelength [Å]")
-plt.ylabel("Normalized Flux")
 plt.tight_layout()
 plt.show()
