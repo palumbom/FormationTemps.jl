@@ -36,6 +36,7 @@ include("structures/ConvolutionMemory.jl")
 include("structures/AtmosphereGPU.jl")
 include("structures/GPUMemory.jl")
 include("structures/ContFunc.jl")
+incluee("structures/StellarProps.jl")
 
 # numerical stuff
 include("interpolations.jl")
@@ -68,7 +69,8 @@ include("disk_calculations.jl")
 
 # convenient high-level functions
 include("convenience.jl")
+include("turb_fits.jl")
 
-export round_to_power, elav, calc_formation_temp
+export round_to_power, elav, calc_formation_temp, StellarProps
 
 end
