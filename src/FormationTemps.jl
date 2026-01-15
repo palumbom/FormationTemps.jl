@@ -6,6 +6,7 @@ using Korg
 using FFTW
 using Statistics
 using AbstractFFTs
+using ProgressMeter
 using LinearAlgebra
 using ImageFiltering
 using SpecialFunctions

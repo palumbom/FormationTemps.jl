@@ -1,5 +1,5 @@
 """
-    calc_formation_temp(star, linelist; use_gpu=true, Δλ=0.01, convolve=false, u1=NaN, u2=NaN)
+    calc_formation_temp(star, linelist; use_gpu=true, Δλ=0.01, convolve=false, u1=NaN, u2=NaN, Nϕ=128)
 
 Compute flux formation temperatures for a given star and linelist.
 
@@ -12,22 +12,26 @@ result = calc_formation_temp(star, linelist; Δλ=0.01, convolve=true, u1=0.43, 
 """
 function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEFAULT,
                              Δλ::T=0.01, convolve::Bool=false,
-                             u1::T=NaN, u2::T=NaN) where T<:AF
+                             u1::T=NaN, u2::T=NaN, Nϕ::Int=128) where T<:AF
     if use_gpu
-        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, convolve=convolve, u1=u1, u2=u2)
+        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, convolve=convolve, u1=u1, u2=u2,
+                                                   Nϕ=Nϕ)
     else
-        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, convolve=convolve, u1=u1, u2=u2)
+        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, convolve=convolve, u1=u1, u2=u2,
+                                                   Nϕ=Nϕ)
     end
     return form_temps_flux
 end
 
 function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
-                                  convolve::Bool=false, u1::T=NaN, u2::T=NaN) where T<:AF
+                                  convolve::Bool=false, u1::T=NaN, u2::T=NaN,
+                                  Nϕ::Int=128) where T<:AF
     throw(ArgumentError("CPU formation temperature path is not implemented; set use_gpu=true."))
 end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
-                                  convolve::Bool=false, u1::T=NaN, u2::T=NaN) where T<:AF
+                                  convolve::Bool=false, u1::T=NaN, u2::T=NaN,
+                                  Nϕ::Int=128) where T<:AF
     # get linelist 
     wls = [l.wl * 1e8 for l in linelist]
     λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
@@ -68,6 +72,45 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         @assert !isnan(u2)
         cfunc_dt_flux = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2)
         cfunc_dt_flux_cont = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
+    else # numerical disk integration
+        # get stellar grid
+        μs_gpu, dA, z_rot, _ = calc_stellar_grid(star.ρstar, star.istar, star.vsini, Nϕ)
+        idx = findall(x -> x .> zero(eltype(μs_gpu)), Array(μs_gpu))
+        μs_cpu = Array(μs_gpu)[idx]
+        dA_cpu = Array(dA)[idx]
+        z_rot_cpu = Array(z_rot)[idx]
+        if iszero(star.vsini)
+            z_rot_cpu .= 0.0
+        end
+
+        # allocate on gpu 
+        μ_v_rot = CUDA.zeros(T, Natm)
+        flux_integration = CUDA.zeros(T, length(λs_korg))
+        flux_cont_integration = CUDA.zeros(T, length(λs_korg))
+        cfunc_flux_integration = CUDA.zeros(T, Natm - 1, length(λs_korg))
+        cfunc_flux_cont_integration = CUDA.zeros(T, Natm - 1, length(λs_korg))
+
+        # loop over cells on grid
+        @showprogress for i in eachindex(μs_cpu)
+            μ_tile = μs_cpu[i]
+            μ_v_rot .= z_rot_cpu[i] .* c_ms
+
+            cfunc_intensity = calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
+            tbc = cfunc_intensity.cfunc_dt
+            cfunc_int_i_mac = convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, star.ζ, μ_tile)
+
+            cfunc_intensity_cont = calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
+            tbc_cont = cfunc_intensity_cont.cfunc_dt
+            cfunc_int_cont_i_mac = convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, star.ζ, μ_tile)
+
+            flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
+            flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
+            cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
+            cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
+        end
+
+        cfunc_dt_flux = cfunc_flux_integration
+        cfunc_dt_flux_cont = cfunc_flux_cont_integration
     end
 
     # get the normalized cumulative contribution function

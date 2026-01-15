@@ -6,9 +6,12 @@ struct StellarProps{T<:AF}
     vsini::T
     ζ::T
     ξ::T
+    ρstar::T
+    istar::T
 end
 
-function StellarProps(;Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_micro=NaN)
+function StellarProps(;Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_micro=NaN,
+                      ρstar=1.0, istar=90.0)
     # get the abundances
     A_X = Korg.format_A_X(Fe_H)
 
@@ -26,5 +29,5 @@ function StellarProps(;Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_m
         ξ = v_micro
     end
 
-    return StellarProps(Teff, logg, Fe_H, A_X, vsini, ζ, ξ)
+    return StellarProps(Teff, logg, Fe_H, A_X, vsini, ζ, ξ, ρstar, istar)
 end
