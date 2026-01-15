@@ -8,18 +8,22 @@ struct StellarProps{T<:AF}
     ξ::T
 end
 
-function StellarProps(Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_micro=NaN)
+function StellarProps(;Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_micro=NaN)
     # get the abundances
     A_X = Korg.format_A_X(Fe_H)
 
     # get macro
     if isnan(v_macro)
         ζ = vmac_fit(Teff, logg)
+    else
+        ζ = v_macro
     end
 
     # get micro
     if isnan(v_micro)
         ξ = vmic_fit(Teff)
+    else 
+        ξ = v_micro
     end
 
     return StellarProps(Teff, logg, Fe_H, A_X, vsini, ζ, ξ)

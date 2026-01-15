@@ -1,26 +1,29 @@
 """
-    calc_formation_temp()
+    calc_formation_temp(star, linelist; use_gpu=true, Δλ=0.01, convolve=false, u1=NaN, u2=NaN)
 
-Compute TODO
+Compute flux formation temperatures for a given star and linelist.
 
 # Examples
 ```julia-repl
-TODO
+star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0)
+linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[1:500]
+result = calc_formation_temp(star, linelist; Δλ=0.01, convolve=true, u1=0.43, u2=0.31)
 ```
 """
-function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEFAULT, kwargs...)
+function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEFAULT,
+                             Δλ::T=0.01, convolve::Bool=false,
+                             u1::T=NaN, u2::T=NaN) where T<:AF
     if use_gpu
-        form_temps_flux = _calc_formation_temp_gpu(star, linelist, kwargs...)
+        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, convolve=convolve, u1=u1, u2=u2)
     else
-        form_temps_flux = _calc_formation_temp_cpu(star, linelist, kwargs...)
+        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, convolve=convolve, u1=u1, u2=u2)
     end
     return form_temps_flux
 end
 
-function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01, convolve::Bool=false) where T<:AF
-
-
-    return nothing
+function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
+                                  convolve::Bool=false, u1::T=NaN, u2::T=NaN) where T<:AF
+    throw(ArgumentError("CPU formation temperature path is not implemented; set use_gpu=true."))
 end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
@@ -29,24 +32,14 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     wls = [l.wl * 1e8 for l in linelist]
     λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
 
-    # get model atmosphere
+    # get model atmosphere and move to GPU
     marcs_atm = Korg.interpolate_marcs(star.Teff, star.logg, star.A_X)
-    τ_500 = Korg.get_tau_5000s(marcs_atm)
-    zs = Korg.get_zs(marcs_atm)
-    Ts = Korg.get_temps(marcs_atm)
-    ne = Korg.get_electron_number_densities(marcs_atm)
-    nd = Korg.get_number_densities(marcs_atm)
-
-    # move stuff to GPU
     atm_gpu = AtmosphereGPU(marcs_atm)
-    zs = atm_gpu.zs
-    Ts = atm_gpu.Ts
-    τ5000 = atm_gpu.τs
 
     # get the absorption coefficients
     αs = zeros(length(atm_gpu.zs), length(λs_korg))
     αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-    FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, star.A_X)
+    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, star.A_X)
 
     # allocate on device
     gpu_mem = GPUMemory(λs_korg, atm_gpu)
@@ -56,55 +49,43 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     Natm = size(αs, 1)
     Npad = 100
     cmem = ConvolutionMemory(Nλ, Natm, Npad)
+    cmem_mac = ConvolutionMemory(Nλ, Natm - 1, Npad)
 
     # set microturbulent broadening
-    σ_v = CUDA.zeros(Float64, length(zs)) .+ star.ξ
+    σ_v = CUDA.zeros(T, length(atm_gpu.zs)) .+ star.ξ
 
-    # if/else block for convolution or integration
-    if convolve # convolution
+    # get the "stationary" flux
+    cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+    cfunc_dt_flux = cfunc_flux_struct.cfunc_dt
+
+    # same for the continuum
+    cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
+    cfunc_dt_flux_cont = cfunc_flux_struct_cont.cfunc_dt
+
+    # convolution or numerical integration
+    if convolve
         @assert !isnan(u1)
         @assert !isnan(u2)
-
-        # get the "stationary" flux
-        cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
-        # cfunc_dt_flux_stationary = Array(cfunc_flux_struct.cfunc_dt)
-        cfunc_dt_flux_stationary = cfunc_flux_struct.cfunc_dt
-
-        # same for the continuum
-        cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
-        # cfunc_dt_flux_stationary_cont = Array(cfunc_flux_struct_cont.cfunc_dt)
-        cfunc_dt_flux_stationary_cont = cfunc_flux_struct_cont.cfunc_dt
-
-        # convolve with hirano kernel
-        cfunc_dt_flux_convolution = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux_stationary, star.vsini, star.ζ, u1, u2)
-        cfunc_dt_flux_convolution_cont = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux_stationary_cont, star.vsini, star.ζ, u1, u2)
-
-        # get the normalized cumulative contribution function 
-        cum_cfunc_flux_convolution = Array(cumsum(cfunc_dt_flux_convolution, dims=1))
-        cum_cfunc_flux_convolution ./= maximum(cum_cfunc_flux_convolution, dims=1)
-
-        # get the normalized flux
-        flux_convolution_norm = sum(cfunc_dt_flux_convolution, dims=1) ./ sum(cfunc_dt_flux_convolution_cont, dims=1)
-        flux_convolution_norm = Array(flux_convolution_norm)
-    
-        # loop over wavelength
-        form_temp_convolution = zeros(length(λs_korg))
-        for i in eachindex(λs_korg)
-            xs = view(cum_cfunc_flux_convolution, :, i)
-            itp = FT.linear_interp(xs, elav(Ts))
-            form_temp_convolution[i] = itp(0.5)
-        end
-
-        # create object for return
-        out = FormTempResult(flux_convolution_norm, form_temp_convolution, cont_func)
-
-        return out 
-    else # integration 
-
-
-
-        return nothing
+        cfunc_dt_flux = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2)
+        cfunc_dt_flux_cont = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
     end
-    return nothing
-end
 
+    # get the normalized cumulative contribution function
+    cum_cfunc_flux = Array(cumsum(cfunc_dt_flux, dims=1))
+    cum_cfunc_flux ./= maximum(cum_cfunc_flux, dims=1)
+
+    # get the normalized flux
+    flux_norm = vec(Array(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1)))
+
+    # loop over wavelength
+    form_temps = zeros(length(λs_korg))
+    mid_temps = elav(atm_gpu.Ts)
+    for i in eachindex(λs_korg)
+        xs = view(cum_cfunc_flux, :, i)
+        itp = linear_interp(xs, mid_temps)
+        form_temps[i] = itp(0.5)
+    end
+
+    cont_func = Array(cfunc_dt_flux)
+    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)
+end
