@@ -26,7 +26,111 @@ end
 function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128) where T<:AF
-    throw(ArgumentError("CPU formation temperature path is not implemented; set use_gpu=true."))
+    # get linelist 
+    wls = [l.wl * 1e8 for l in linelist]
+    λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
+
+    # get model atmosphere
+    atm_cpu = AtmosphereCPU(Korg.interpolate_marcs(star.Teff, star.logg, star.A_X))
+    zs = atm_cpu.zs
+    Ts = atm_cpu.Ts
+
+    # get the absorption coefficients
+    Natm = length(zs)
+    Nλ = length(λs_korg)
+    αs = zeros(T, Natm, Nλ)
+    αs_cont = zeros(T, Natm, Nλ)
+    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_cpu, star.A_X)
+
+    # set microturbulent broadening
+    σ_v = fill(star.ξ, Natm)
+    μ_v = zeros(T, Natm)
+
+    # get the "stationary" flux
+    αs_broad = convolve_wavelength_axis(λs_korg, αs, μ_v, σ_v)
+    αs_cont_broad = convolve_wavelength_axis(λs_korg, αs_cont, μ_v, σ_v)
+
+    τs = zeros(T, Natm, Nλ)
+    τs_cont = zeros(T, Natm, Nλ)
+    calc_tau_cpu!(one(T), zs, αs_broad, τs)
+    calc_tau_cpu!(one(T), zs, αs_cont_broad, τs_cont)
+
+    cfunc_flux = zeros(T, Natm - 1, Nλ)
+    cfunc_flux_cont = zeros(T, Natm - 1, Nλ)
+    calc_flux_cfunc_cpu!(cfunc_flux, Ts, λs_korg, τs)
+    calc_flux_cfunc_cpu!(cfunc_flux_cont, Ts, λs_korg, τs_cont)
+
+    cfunc_dt_flux = cfunc_flux .* diff(τs, dims=1)
+    cfunc_dt_flux_cont = cfunc_flux_cont .* diff(τs_cont, dims=1)
+
+    # convolution or numerical integration
+    if convolve
+        @assert !isnan(u1)
+        @assert !isnan(u2)
+        cfunc_dt_flux = convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2)
+        cfunc_dt_flux_cont = convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
+    else # numerical disk integration
+        μs, dA, z_rot = calc_stellar_grid_cpu(star.ρstar, star.istar, star.vsini, Nϕ)
+        idx = findall(x -> x .> zero(T), μs)
+        μs_cpu = μs[idx]
+        dA_cpu = dA[idx]
+        z_rot_cpu = z_rot[idx]
+        if iszero(star.vsini)
+            z_rot_cpu .= 0.0
+        end
+
+        flux_integration = zeros(T, Nλ)
+        flux_cont_integration = zeros(T, Nλ)
+        cfunc_flux_integration = zeros(T, Natm - 1, Nλ)
+        cfunc_flux_cont_integration = zeros(T, Natm - 1, Nλ)
+
+        μ_v_rot = zeros(T, Natm)
+        τs_int = zeros(T, Natm, Nλ)
+        τs_int_cont = zeros(T, Natm, Nλ)
+        cfunc_int = zeros(T, Natm - 1, Nλ)
+        cfunc_int_cont = zeros(T, Natm - 1, Nλ)
+
+        @showprogress for i in eachindex(μs_cpu)
+            μ_tile = μs_cpu[i]
+            μ_v_rot .= z_rot_cpu[i] .* c_ms
+
+            αs_broad_i = convolve_wavelength_axis(λs_korg, αs, μ_v_rot, σ_v)
+            calc_tau_cpu!(μ_tile, zs, αs_broad_i, τs_int)
+            calc_intensity_cfunc_cpu!(cfunc_int, Ts, λs_korg, τs_int)
+            cfunc_dt_int = cfunc_int .* diff(τs_int, dims=1)
+            cfunc_int_i_mac = convolve_rt_macro(λs_korg, cfunc_dt_int, star.ζ, μ_tile)
+
+            αs_cont_broad_i = convolve_wavelength_axis(λs_korg, αs_cont, μ_v_rot, σ_v)
+            calc_tau_cpu!(μ_tile, zs, αs_cont_broad_i, τs_int_cont)
+            calc_intensity_cfunc_cpu!(cfunc_int_cont, Ts, λs_korg, τs_int_cont)
+            cfunc_dt_int_cont = cfunc_int_cont .* diff(τs_int_cont, dims=1)
+            cfunc_int_cont_i_mac = convolve_rt_macro(λs_korg, cfunc_dt_int_cont, star.ζ, μ_tile)
+
+            flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
+            flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
+            cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
+            cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
+        end
+
+        cfunc_dt_flux = cfunc_flux_integration
+        cfunc_dt_flux_cont = cfunc_flux_cont_integration
+    end
+
+    cum_cfunc_flux = cumsum(cfunc_dt_flux, dims=1)
+    cum_cfunc_flux ./= maximum(cum_cfunc_flux, dims=1)
+
+    flux_norm = vec(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1))
+
+    form_temps = zeros(T, Nλ)
+    mid_temps = elav(Ts)
+    for i in eachindex(λs_korg)
+        xs = view(cum_cfunc_flux, :, i)
+        itp = linear_interp(xs, mid_temps)
+        form_temps[i] = itp(0.5)
+    end
+
+    cont_func = cfunc_dt_flux
+    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)#, αs_broad
 end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
@@ -37,8 +141,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
 
     # get model atmosphere and move to GPU
-    marcs_atm = Korg.interpolate_marcs(star.Teff, star.logg, star.A_X)
-    atm_gpu = AtmosphereGPU(marcs_atm)
+    atm_gpu = AtmosphereGPU(Korg.interpolate_marcs(star.Teff, star.logg, star.A_X))
 
     # get the absorption coefficients
     αs = zeros(length(atm_gpu.zs), length(λs_korg))
@@ -130,5 +233,5 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     end
 
     cont_func = Array(cfunc_dt_flux)
-    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)
+    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)#, Array(αs_gpu)
 end

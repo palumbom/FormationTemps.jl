@@ -1,7 +1,7 @@
 """
 Adapted from Korg.jl -> line_absorption!()
 """
-function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, atm, A_X; partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, atm::Atmosphere{T}, A_X::AA{T,1}; partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1) where T<:AF
     compute_alpha!(αs, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ, 
                    A_X; partition_funcs=Korg.default_partition_funcs,
                    ne_warn_thresh=ne_warn_thresh)

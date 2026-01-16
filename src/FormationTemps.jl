@@ -34,7 +34,7 @@ include("expint.jl")
 
 # structures
 include("structures/ConvolutionMemory.jl")
-include("structures/AtmosphereGPU.jl")
+include("structures/Atmosphere.jl")
 include("structures/GPUMemory.jl")
 include("structures/ContFunc.jl")
 include("structures/StellarProps.jl")
@@ -56,9 +56,6 @@ include("macroturbulence/iso_gaussian.jl")
 
 # instrumental profile
 include("instrumental.jl")
-
-# linelist + stellar model stuff
-include("atmosphere.jl")
 
 # radiative transport
 include("absorption.jl")

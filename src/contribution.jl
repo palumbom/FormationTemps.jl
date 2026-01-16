@@ -149,86 +149,59 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
     return nothing
 end
 
-#= 
-# TODO CPU methods
-function calc_intensity_cfunc_cpu(μ::T, Ts::AA{T,1}, λs::AA{T,1}, τs::AA{T,2}) where {T<:AF}
-    # get dims, preallocate
-    Natm, Nλ = size(τs)
-    one_over_sqrt3 = 1.0 / sqrt(3.0)
-    cfunc = zeros(Natm - 1, Nλ)
-
-    # loop over wavelength
-    for j in 1:Nλ
-        # convert to cm
-        λ_cm = λs[j] * 1e-8
-
-        # loop over layers of atmospbere
+function calc_intensity_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
+                                   τs::AA{T,2}) where {T<:AF}
+    Natm = length(Ts)
+    one_over_sqrt3 = one(T) / sqrt(T(3))
+    @inbounds for j in 1:length(λs)
+        λ_cm = λs[j] * T(1e-8)
         for k in 1:Natm-1
-            # endpoints in τ-space
             τ0 = τs[k, j]
             τ1 = τs[k+1, j]
             Δτ = τ1 - τ0
             τ_mid = 0.5 * (τ0 + τ1)
 
-            # Gauss–Legendre nodes
             τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
-            # linear T interp wrt τ
             dT = Ts[k+1] - Ts[k]
-            inv_Δτ = 1.0 / Δτ
-            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_Δτ)
-            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_Δτ)
+            inv_dτ = one(T) / Δτ
+            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
+            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
 
-            # evaluate integrand f = B(T,λ) * exp(-τ)
             f1 = Korg.blackbody(T1, λ_cm) * exp(-τp1)
             f2 = Korg.blackbody(T2, λ_cm) * exp(-τp2)
-
-            # two-point Gauss weight = Δτ/2
-            cfunc[k, j] = 0.5 * (f1 + f2) * Δτ
+            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * T(1e-8)
         end
     end
-    return cfunc
+    return nothing
 end
 
-function calc_flux_cfunc_cpu(Ts::AA{T,1}, λs::AA{T,1}, τs::AA{T,2}) where {T<:AF}
-    # get dims, preallocate
-    Natm, Nλ = size(τs)
-    one_over_sqrt3 = 1.0 / sqrt(3.0)
-    cfunc = zeros(Natm - 1, Nλ)
-
-    # loop over wavelength
-    for j in 1:Nλ
-        # convert to cm
-        λ_cm = λs[j] * 1e-8
-
-        # loop over layers of atmospbere
+function calc_flux_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
+                              τs::AA{T,2}) where {T<:AF}
+    Natm = length(Ts)
+    one_over_sqrt3 = one(T) / sqrt(T(3))
+    E2 = Korg.RadiativeTransfer.exponential_integral_2
+    @inbounds for j in 1:length(λs)
+        λ_cm = λs[j] * T(1e-8)
         for k in 1:Natm-1
-            # endpoints in τ-space
             τ0 = τs[k, j]
             τ1 = τs[k+1, j]
             Δτ = τ1 - τ0
             τ_mid = 0.5 * (τ0 + τ1)
 
-            # Gauss–Legendre nodes
             τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
-            # linear T interp wrt τ
             dT = Ts[k+1] - Ts[k]
-            inv_Δτ = 1.0 / Δτ
-            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_Δτ)
-            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_Δτ)
+            inv_dτ = one(T) / Δτ
+            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
+            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
 
-            # evaluate integrand f = B(T,λ) * exp(-τ)
-            f1 = Korg.blackbody(T1, λ_cm) * SpecialFunctions.expint(2, τp1)
-            f2 = Korg.blackbody(T2, λ_cm) * SpecialFunctions.expint(2, τp2)
-
-            # two-point Gauss weight = Δτ/2
-            # convert to per angstrom 
-            cfunc[k, j] = 0.5 * (f1 + f2) * Δτ * 1e-8
+            f1 = Korg.blackbody(T1, λ_cm) * E2(τp1)
+            f2 = Korg.blackbody(T2, λ_cm) * E2(τp2)
+            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * T(1e-8)
         end
     end
-    return cfunc
+    return nothing
 end
-=#

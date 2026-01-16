@@ -1,5 +1,12 @@
 # calc_tau!(μ_i, zs, αs, τs) = calc_tau_gauss_legendre!(μ_i, zs, αs, τs)
 calc_tau!(μ_i, zs, αs, τs) = calc_tau_bezier!(μ_i, zs, αs, τs)
+# calc_tau_cpu!(μ_i, zs, αs, τs) = Korg.RadiativeTransfer.compute_tau_bezier!(τs, zs ./ μ_i, αs)
+
+function calc_tau_cpu!(μ_i, zs, αs, τs) 
+    for i in axes(τs,2)
+        Korg.RadiativeTransfer.compute_tau_bezier!(view(τs,:,i), zs ./ μ_i, view(αs,:,1))
+    end
+end 
 
 function calc_tau_bezier!(μ_i, zs, αs, τs)
     # get indices
@@ -111,6 +118,19 @@ function calc_tau_trapezoid!(μ_i, zs, αs, τs)
     return nothing
 end
 
+function calc_tau_trap_cpu!(μ_i::T, zs::AA{T,1}, αs::AA{T,2}, τs::AA{T,2}) where T<:AF
+    N = length(zs)
+    inv_μ = one(T) / μ_i
+    @inbounds for j in 1:size(αs, 2)
+        τs[1, j] = T(1e-5)
+        for p in 2:N
+            ds = inv_μ * (zs[p-1] - zs[p])
+            τs[p, j] = τs[p-1, j] + 0.5 * (αs[p-1, j] + αs[p, j]) * ds
+        end
+    end
+    return nothing
+end
+
 function calc_tau_simpson!(μ_i, zs, αs, τs)
     # get indices
     idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
@@ -189,4 +209,3 @@ function calc_tau_gauss_legendre!(μ_i, zs, αs, τs)
     end
     return nothing
 end
-

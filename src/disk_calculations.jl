@@ -10,6 +10,75 @@ function calc_stellar_grid(ρs::T1, i::T1, vsini::T1, Nϕ::Int) where T1<:AF
     return μs, dA, z_rot, z_cbs
 end
 
+function calc_stellar_grid_cpu(ρs::T, i::T, vsini::T, Nϕ::Int) where T<:AF
+    ϕe = range(deg2rad(-90.0), deg2rad(90.0), length=Nϕ + 1)
+    ϕc = get_grid_centers(ϕe)
+
+    Nθ = ceil.(Int, 2π .* cos.(ϕc) ./ step(ϕe))
+    Nθ_max = maximum(Nθ)
+
+    μs = zeros(T, Nϕ, Nθ_max)
+    dA = zeros(T, Nϕ, Nθ_max)
+    z_rot = zeros(T, Nϕ, Nθ_max)
+
+    dϕ = π / Nϕ
+    iₛ = deg2rad(90.0 - i)
+    R_x = [one(T) zero(T) zero(T);
+           zero(T) cos(iₛ) -sin(iₛ);
+           zero(T) sin(iₛ) cos(iₛ)]
+    O⃗ = T[zero(T), zero(T), T(1e12)]
+
+    for m in 1:Nϕ
+        ϕc_m = ϕc[m]
+        dθ = 2π / Nθ[m]
+        for n in 1:Nθ[m]
+            θc = (dθ / 2.0) + (n - 1) * dθ
+            coords = sphere_to_cart(ρs, ϕc_m, θc)
+            x = coords[1]
+            y = coords[2]
+            z = coords[3]
+
+            a = x
+            c = z
+            d = -ρs * c
+            e = zero(T)
+            f = ρs * a
+
+            def_norm = sqrt(d^2 + e^2 + f^2)
+            d /= def_norm
+            e /= def_norm
+            f /= def_norm
+
+            rp = vsini / c_ms
+            d *= rp
+            e *= rp
+            f *= rp
+
+            x, y, z = rotate_vector(x, y, z, R_x)
+            μ_tile = calc_mu(x, y, z, O⃗)
+            if μ_tile <= 0.0
+                continue
+            end
+            μs[m, n] = μ_tile
+            dA[m, n] = calc_dA(ρs, ϕc_m, dϕ, dθ) * μ_tile
+
+            d, e, f = rotate_vector(d, e, f, R_x)
+            a = x - O⃗[1]
+            b = y - O⃗[2]
+            c = z - O⃗[3]
+
+            n1 = sqrt(a^2 + b^2 + c^2)
+            n2 = sqrt(d^2 + e^2 + f^2)
+            angle = (a * d + b * e + c * f) / (n1 * n2)
+            z_rot[m, n] = n2 * angle
+        end
+    end
+    if iszero(vsini)
+        z_rot .= 0.0
+    end
+    return μs, dA, z_rot
+end
+
 function calc_stellar_grid!(ρs::T1, inclination::T1, vsini::T1, Nϕ::Int,
                             μs::CuArray{T2,2}, dA::CuArray{T2,2},
                             z_rot::CuArray{T2,2}, z_cbs::CuArray{T2,2}) where {T1<:AF, T2<:AF}
@@ -156,4 +225,3 @@ function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, v
     end
     return nothing
 end
-

@@ -1,0 +1,102 @@
+abstract type Atmosphere{T<:AF} end
+
+mutable struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
+    Natm::Int
+    τs::AA{T,1}
+    zs::AA{T,1}
+    Ts::AA{T,1}
+    nₑ::AA{T,1}
+    nd::AA{T,1}
+
+    zs_gpu::AA{T,1}
+    Ts_gpu::AA{T,1}
+    vx::CA{T,1}
+    vy::CA{T,1}
+    vz::CA{T,1}
+    σ_v::CA{T,1}
+    μ_v::CA{T,1}
+end
+
+function AtmosphereGPU(atm_korg)
+    # Korg atmosphere parameters
+    τs = Korg.get_tau_refs(atm_korg)
+    zs = Korg.get_zs(atm_korg)
+    Ts = Korg.get_temps(atm_korg)
+    ne = Korg.get_electron_number_densities(atm_korg)
+    nd = Korg.get_number_densities(atm_korg)
+
+    # allocate on gpu 
+    Natm = length(zs)
+    zs_gpu = CuArray{Float64}(zs)
+    Ts_gpu = CuArray{Float64}(Ts)
+    vx = CUDA.zeros(Float64, Natm)
+    vy = CUDA.zeros(Float64, Natm)
+    vz = CUDA.zeros(Float64, Natm)
+    σ_v = CUDA.zeros(Float64, Natm)
+    μ_v = CUDA.zeros(Float64, Natm)
+
+    return AtmosphereGPU(Natm, τs, zs, Ts, ne, nd, zs_gpu, Ts_gpu, vx, vy, vz, σ_v, μ_v)
+end
+
+mutable struct AtmosphereCPU{T<:AF} <: Atmosphere{T}
+    Natm::Int
+    τs::AA{T,1}
+    zs::AA{T,1}
+    Ts::AA{T,1}
+    nₑ::AA{T,1}
+    nd::AA{T,1}
+
+    vx::AA{T,1}
+    vy::AA{T,1}
+    vz::AA{T,1}
+    σ_v::AA{T,1}
+    μ_v::AA{T,1}
+end
+
+function AtmosphereCPU(atm_korg)
+    # Korg atmosphere parameters
+    τs = Korg.get_tau_refs(atm_korg)
+    zs = Korg.get_zs(atm_korg)
+    Ts = Korg.get_temps(atm_korg)
+    ne = Korg.get_electron_number_densities(atm_korg)
+    nd = Korg.get_number_densities(atm_korg)
+
+    # allocate on gpu 
+    Natm = length(zs)
+    vx = zeros(Float64, Natm)
+    vy = zeros(Float64, Natm)
+    vz = zeros(Float64, Natm)
+    σ_v = zeros(Float64, Natm)
+    μ_v = zeros(Float64, Natm)
+
+    return AtmosphereCPU(Natm, τs, zs, Ts, ne, nd, vx, vy, vz, σ_v, μ_v)
+end
+
+function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=56) where T<:AF
+    # get the model atmosphere
+    marcs_atm = Korg.interpolate_marcs(Teff, logg, A_X)
+    τ_500 = Korg.get_tau_refs(marcs_atm)
+    zs = Korg.get_zs(marcs_atm)
+    Ts = Korg.get_temps(marcs_atm)
+    ne = Korg.get_electron_number_densities(marcs_atm)
+    nd = Korg.get_number_densities(marcs_atm)
+
+    # interpolate in zs 
+    itp_τs = Korg.CubicSplines.CubicSpline(reverse(zs), reverse(τ_500))
+    itp_Ts = Korg.CubicSplines.CubicSpline(reverse(zs), reverse(Ts))
+    itp_ne = Korg.CubicSplines.CubicSpline(reverse(zs), reverse(ne))
+    itp_nd = Korg.CubicSplines.CubicSpline(reverse(zs), reverse(nd))
+
+    zs_new = range(last(zs), first(zs), length=n_layers)
+    τs_new = reverse(itp_τs.(zs_new))
+    Ts_new = reverse(itp_Ts.(zs_new))
+    ne_new = reverse(itp_ne.(zs_new))
+    nd_new = reverse(itp_nd.(zs_new))
+    zs_new = reverse(collect(zs_new))
+
+    ls = Array{Korg.PlanarAtmosphereLayer{Float64, Float64, Float64, Float64, Float64}}(undef, length(zs_new))
+    for i in eachindex(zs_new)
+        ls[i] = Korg.PlanarAtmosphereLayer(τs_new[i], zs_new[i], Ts_new[i], ne_new[i], nd_new[i])
+    end
+    return Korg.PlanarAtmosphere(ls, 5000.0 / 1e8)
+end
