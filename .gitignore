@@ -1,6 +1,7 @@
 Manifest*.toml
 index.auto
 uv.lock
+docs/build
 
 *.pdf
 *.csv

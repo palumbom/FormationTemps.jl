@@ -6,6 +6,6 @@ CurrentModule = FormationTemps
 
 TBD
 
-## Citing GRASS
+## Citing FormationTemps.jl
 
 If you use FormationTemps.jl in your research, please cite the [relevant software release]() as well as the [paper]().
