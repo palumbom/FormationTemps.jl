@@ -1,7 +1,7 @@
 # add relative load path
 push!(LOAD_PATH,"../src/")
 
-using Documenter, FormationTemps
+using Documenter#, FormationTemps
 
 # set pages
 Introduction = "Quickstart" => "quickstart.md"
