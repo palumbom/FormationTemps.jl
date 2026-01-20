@@ -3,6 +3,11 @@ push!(LOAD_PATH,"../src/")
 
 using Documenter, FormationTemps
 
+# sync the readme and the landing page
+readme_path = joinpath(docs_base, "..", "README.md")
+target_path = joinpath(docs_base, "src", "index.md")
+cp(readme_path, target_path; force=true)
+
 # set pages
 Introduction = "Quickstart" => "index.md"
 License = "License" => "license.md"
@@ -26,4 +31,5 @@ makedocs(;
 deploydocs(;
     devbranch="main",
     repo="github.com/palumbom/FormationTemps.jl.git",
+    push_preview=true
 )
