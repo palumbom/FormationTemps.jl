@@ -6,7 +6,7 @@ FormationTemperatures.jl wraps [Korg.jl](https://github.com/ajwheeler/Korg.jl) t
 
 ## Installation
 
-GRASS is written entirely in Julia and requires Julia v1.12 or greater. Installation instructions for Julia are available from [julialang.org](https://julialang.org/downloads/).
+FormationTemperatures.jl is written entirely in Julia and requires Julia v1.12 or greater. Installation instructions for Julia are available from [julialang.org](https://julialang.org/downloads/).
 
 To install FormationTemps.jl:
 

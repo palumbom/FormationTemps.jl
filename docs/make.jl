@@ -4,6 +4,7 @@ push!(LOAD_PATH,"../src/")
 using Documenter, FormationTemps
 
 # sync the readme and the landing page
+docs_base = basename(pwd()) == "docs" ? "." : "./docs"
 readme_path = joinpath(docs_base, "..", "README.md")
 target_path = joinpath(docs_base, "src", "index.md")
 cp(readme_path, target_path; force=true)
@@ -12,9 +13,13 @@ cp(readme_path, target_path; force=true)
 Introduction = "Quickstart" => "index.md"
 License = "License" => "license.md"
 Index = "Index" => "longlist.md"
-pages = [Introduction, License, Index]
+Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
+                      "Contribution Functions" => "cont_func.md"]
+Caveats = "Caveats" => "caveats.md"
 
-# makdocs
+pages = [Introduction, Guides, License, Index]
+
+# makedocs
 makedocs(;
     modules=[FormationTemps],
     authors="Michael Palumbo",
@@ -28,6 +33,7 @@ makedocs(;
     pages=pages,
 )
 
+# deploydocs
 deploydocs(;
     devbranch="main",
     repo="github.com/palumbom/FormationTemps.jl.git",
