@@ -154,7 +154,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     # allocate memory for convolutions
     Nλ = length(λs_korg)
     Natm = size(αs, 1)
-    Npad = 100
+    Npad = 512
     cmem = ConvolutionMemory(Nλ, Natm, Npad)
     cmem_mac = ConvolutionMemory(Nλ, Natm - 1, Npad)
 

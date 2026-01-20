@@ -8,7 +8,7 @@ if !CUDA.functional()
     error("No GPU found; cannot compare CPU and GPU paths.")
 end
 
-Δλ = 0.01
+Δλ = 0.005
 Nϕ = 16
 convolve_cases = [true,]# false]
 
@@ -32,8 +32,8 @@ for convolve in convolve_cases
     println()
     println("convolve = ", convolve)
     if convolve
-        result_gpu, τs_gpu = FT.calc_formation_temp(star_props, linelist; use_gpu=true, Δλ=Δλ, convolve=true, u1=u1, u2=u2, Nϕ=Nϕ)
-        result_cpu, τs_cpu = FT.calc_formation_temp(star_props, linelist; use_gpu=false, Δλ=Δλ, convolve=true, u1=u1, u2=u2, Nϕ=Nϕ)
+        result_gpu = FT.calc_formation_temp(star_props, linelist; use_gpu=true, Δλ=Δλ, convolve=true, u1=u1, u2=u2, Nϕ=Nϕ)
+        result_cpu = FT.calc_formation_temp(star_props, linelist; use_gpu=false, Δλ=Δλ, convolve=true, u1=u1, u2=u2, Nϕ=Nϕ)
     else
         result_gpu = FT.calc_formation_temp(star_props, linelist; use_gpu=true, Δλ=Δλ, convolve=false, Nϕ=Nϕ)
         result_cpu = FT.calc_formation_temp(star_props, linelist; use_gpu=false, Δλ=Δλ, convolve=false, Nϕ=Nϕ)
@@ -46,8 +46,10 @@ for convolve in convolve_cases
     max_abs_flux = maximum(abs.(result_gpu.flux .- result_cpu.flux))
     mean_abs_flux = mean(abs.(result_gpu.flux .- result_cpu.flux))
 
-    plt.plot(result_cpu.wavs, result_gpu.flux)
-    plt.plot(result_cpu.wavs, result_cpu.flux)
+    # plt.plot(result_cpu.wavs, result_gpu.flux)
+    # plt.plot(result_cpu.wavs, result_cpu.flux)
+    # plt.plot(result_cpu.wavs, result_gpu.flux .- result_cpu.flux)
+    plt.plot(result_cpu.wavs, result_gpu.form_temps .- result_cpu.form_temps)
     plt.savefig("derp.pdf")
     plt.close()
 

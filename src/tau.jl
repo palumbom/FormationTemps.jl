@@ -4,7 +4,7 @@ calc_tau!(μ_i, zs, αs, τs) = calc_tau_bezier!(μ_i, zs, αs, τs)
 
 function calc_tau_cpu!(μ_i, zs, αs, τs) 
     for i in axes(τs,2)
-        Korg.RadiativeTransfer.compute_tau_bezier!(view(τs,:,i), zs ./ μ_i, view(αs,:,1))
+        Korg.RadiativeTransfer.compute_tau_bezier!(view(τs,:,i), zs ./ μ_i, view(αs,:,i))
     end
 end 
 
