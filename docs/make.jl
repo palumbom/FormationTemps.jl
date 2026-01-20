@@ -24,5 +24,5 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/palumbom/FormationTemps",
+    repo="palumbom/FormationTemps.jl",
 )
