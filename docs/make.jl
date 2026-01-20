@@ -7,7 +7,7 @@ using Documenter, FormationTemps
 Introduction = "Quickstart" => "quickstart.md"
 License = "License" => "license.md"
 Index = "Index" => "longlist.md"
-pages = [Introduction, Getting_Started, Input_Data, License, Index]
+pages = [Introduction, License, Index]
 
 # makdocs
 makedocs(;
