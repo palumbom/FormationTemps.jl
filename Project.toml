@@ -3,6 +3,9 @@ uuid = "03bcd87b-2230-4045-a5fa-95a5fcdd1ff8"
 version = "1.0.0-DEV"
 authors = ["Michael Palumbo"]
 
+[workspace]
+projects = ["docs"]
+
 [deps]
 AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"

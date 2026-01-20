@@ -33,14 +33,6 @@ AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
 
-# relate vmac to teff and logg
-# from Doyle et al. 2014
-vmac_fit(teff, logg) = 3.21 + 2.33e-3 * (teff - 5777) + 2e-6 * (teff - 5777)^2.0 - 2.0 * (logg - 4.44)
-
-# from Bruntt et al. 2010
-vmac_fit(teff) = 2.26 + 2.90e-3 * (teff - 5777) + 5.86e-7 * (teff - 5777)^2.0
-vmic_fit(teff) = 1.01 + 4.56e-4 * (teff - 5777) + 2.75e-7 * (teff - 5777)^2.0
-
 # from Brewer (private communication)
 const line_coeffs = (6.86575985e-01, 1.58202083e-03, -1.71374049e-07)
 function isdwarf(teff, logg)
@@ -176,7 +168,7 @@ for i in eachindex(T_effs)
     FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X, ne_warn_thresh=Inf)
 
     # get vmicro 
-    vmic = vmic_fit(T_effs[i]) * 1000.0
+    vmic = FT.vmic_fit(T_effs[i])
     @show vmic
     @show vsinis[i]
     @show vmacs[i]

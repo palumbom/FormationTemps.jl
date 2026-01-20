@@ -1,7 +1,18 @@
 """
     calc_formation_temp(star, linelist; use_gpu=true, Δλ=0.01, convolve=false, u1=NaN, u2=NaN, Nϕ=128)
 
-Compute flux formation temperatures for a given star and linelist.
+Compute flux formation temperatures, normalized flux, and flux contribution function for a given `star` and `linelist`.
+
+The wavelength grid is built from the line list (`wl * 1e8`) with padding and step `Δλ`.
+Returns a `FormTempResult` with fields:
+- `wavs`: wavelength grid (Angstrom).
+- `flux`: normalized flux (`sum(cfunc_dt_flux) / sum(cfunc_dt_flux_cont)`).
+- `form_temps`: formation temperature defined at 50% of the cumulative flux contribution.
+- `cont_func`: contribution function, shape `(Natm - 1, Nλ)`.
+
+If `convolve=true`, applies Hirano rotation + macroturbulent convolution using limb-darkening
+coefficients `u1` and `u2`. Otherwise, performs numerical disk integration using `Nϕ` latitude
+bins. Set `use_gpu=true` to use the GPU implementation when available.
 
 # Examples
 ```julia-repl
@@ -70,6 +81,11 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
         cfunc_dt_flux = convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2)
         cfunc_dt_flux_cont = convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
     else # numerical disk integration
+        if any(map(!isnan, (u1, u2)))
+            @warn "Prescribed limb darkening coefficients are not used in integration method!"
+        end
+
+        # get stellar grid
         μs, dA, z_rot = calc_stellar_grid_cpu(star.ρstar, star.istar, star.vsini, Nϕ)
         idx = findall(x -> x .> zero(T), μs)
         μs_cpu = μs[idx]
@@ -130,7 +146,7 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     end
 
     cont_func = cfunc_dt_flux
-    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)#, αs_broad
+    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)
 end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
@@ -176,6 +192,10 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         cfunc_dt_flux = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2)
         cfunc_dt_flux_cont = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
     else # numerical disk integration
+        if any(map(!isnan, (u1, u2)))
+            @warn "Prescribed limb darkening coefficients are not used in integration method!"
+        end
+
         # get stellar grid
         μs_gpu, dA, z_rot, _ = calc_stellar_grid(star.ρstar, star.istar, star.vsini, Nϕ)
         idx = findall(x -> x .> zero(eltype(μs_gpu)), Array(μs_gpu))
@@ -233,5 +253,5 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     end
 
     cont_func = Array(cfunc_dt_flux)
-    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)#, Array(αs_gpu)
+    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)
 end
