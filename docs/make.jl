@@ -12,12 +12,12 @@ cp(readme_path, target_path; force=true)
 # set pages
 Introduction = "Quickstart" => "index.md"
 License = "License" => "license.md"
-Index = "Index" => "longlist.md"
+Index = "Full Index" => "longlist.md"
 Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
                       "Contribution Functions" => "cont_func.md"]
-Caveats = "Caveats" => "caveats.md"
+Internals = "Public Functions" => "internals.md"
 
-pages = [Introduction, Guides, License, Index]
+pages = [Introduction, Guides, Internals, License, Index]
 
 # makedocs
 makedocs(;
