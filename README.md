@@ -66,7 +66,7 @@ plt.show()
 ```
 ![formation_temps](./docs/src/examples/temp_example_jl.png)
 
-By default, ```calc_formation_temp``` will use a GPU to accelerate the calculation, if one is present and configured. 
+More detail on the above example can be found in the [Basic Tutorial](https://michaelpalumbo.me/FormationTemps.jl/dev/tutorial/) and the [high-level API documentation]().
 
 ### Calling FormationTemps.jl from Python
 
