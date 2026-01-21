@@ -16,6 +16,18 @@ StellarProps
 FormTempResult
 ```
 
+## Atmosphere Types
+
+```FormTempResult``` includes an ```atmosphere``` field which contains the model atmosphere used in the spectrum modeling. 
+
+```@docs
+Atmosphere
+get_τs
+get_zs
+get_Ts
+```
+
+
 ## Empirical Relations
 
 A few works have reported empirical relationships between fundamental stellar parameters and the measured micro- and macroturbulent velocities. FormationTemps.jl implements these for cases where micro- and macroturbulence are not available. 
@@ -61,13 +73,4 @@ rt_macro_kernel
 round_to_power
 elav
 searchsortednearest
-```
-
-## Atmosphere Types
-
-```@docs
-Atmosphere
-get_τs
-get_zs
-get_Ts
 ```
