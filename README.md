@@ -72,7 +72,7 @@ More detail on the above example can be found in the [Basic Tutorial](https://mi
 ### Calling FormationTemps.jl from Python
 
 > [!WARNING] 
-> Calling FormationTemps.jl from Python is currently somewhat fragile and currently a work in progress. 
+> Calling FormationTemps.jl from Python is currently somewhat fragile and a work in progress. 
 
 FormationTemps.jl can be called from Python. The instructions can be found in the [Python Tutorial](https://michaelpalumbo.me/FormationTemps.jl/dev/pycall/). 
 

@@ -1,7 +1,7 @@
 # Python Tutorial
 
 !!! warning
-    Calling FormationTemps.jl from Python is currently somewhat fragile and currently a work in progress. 
+    Calling FormationTemps.jl from Python is currently somewhat fragile and a work in progress. 
 
 
 ## Installation 
