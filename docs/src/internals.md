@@ -1,6 +1,10 @@
 # Public Functions 
 
-The public functions exported by FormationTemps.jl are documented on this page. The high-level convenience functions  should meet the needs of most users. However, some potentially useful, slightly lower-level methods are exposed by FormationTemps.jl and documented below. A full index of all methods defined by FormationTemps.jl is available in the [Full Index](@ref).
+```@meta
+CurrentModule = FormationTemps
+```
+
+The public functions exported by FormationTemps.jl are documented on this page. The high-level convenience functions  should meet the needs of most users. However, some potentially useful, slightly lower-level methods are exposed by FormationTemps.jl and documented below. A full index of all methods defined by FormationTemps.jl is available in the [Full Index](@ref "Full Index").
 
 ## High-level Convenience Functions
 

@@ -75,7 +75,7 @@ export round_to_power, elav, searchsortednearest,
        FormTempResult, vmac_fit, vmic_fit, convolve_gray_rotation,
        convolve_hirano_rotmacro, convolve_iso_rt_macro, 
        convolve_rt_macro, gray_rot_kernel, hirano_rotmacro_ft_kernel, 
-       gray_iso_rt_macro_kernel, rt_macro_kernel, convolve_instrument_gauss
+       gray_iso_rt_macro_kernel, rt_macro_kernel, convolve_instrument_gauss,
        rebin_spectrum
 
 end

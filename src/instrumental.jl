@@ -12,13 +12,13 @@ end
     rebin_spectrum(xs_old, ys_old, xs_new)
     rebin_spectrum(xs_old, ys_old, σs_old, xs_new)
 
-Rebin a spectrum (and optional uncertainties) from `xs_old` to `xs_new`. # follows from implementation at https://github.com/ACCarnall/SpectRes/blob/master/spectres/spectral_resampling.py
+Rebin a spectrum (and optional uncertainties) from `xs_old` to `xs_new`.
 
-TODO: finish docs.
+Based on the SpectRes spectral resampling implementation:
+https://github.com/ACCarnall/SpectRes/blob/master/spectres/spectral_resampling.py
+
+Note: the algorithm may introduce small shifts if the wavelength grids are misaligned.
 """
-
-# TODO algorithm might cause shift based on input wavelength grid?
-# might cause issue if wavelengths shift across
 function rebin_spectrum(xs_old::AA{T,1}, ys_old::AA{T,1}, xs_new::AA{T,1}) where T<:AF
     @assert issorted(xs_old)
     @assert issorted(xs_new)

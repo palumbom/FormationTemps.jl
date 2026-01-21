@@ -7,7 +7,9 @@ using Documenter, FormationTemps
 docs_base = basename(pwd()) == "docs" ? "." : "./docs"
 readme_path = joinpath(docs_base, "..", "README.md")
 target_path = joinpath(docs_base, "src", "index.md")
-cp(readme_path, target_path; force=true)
+readme_text = read(readme_path, String)
+readme_text = replace(readme_text, "./docs/src/" => "./")
+write(target_path, readme_text)
 
 # set pages
 Introduction = "Quickstart" => "index.md"
