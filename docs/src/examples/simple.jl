@@ -15,7 +15,8 @@ vsini = 2100.0
 ξ = 850.0       # microturbulent broadenign
 
 # create StellarProps composite type to hold everything 
-star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
+star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, 
+                          vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
 # get the flux + formation temperature spectra
 form_temp_result = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, Nϕ=16, use_gpu=true)

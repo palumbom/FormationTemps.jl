@@ -9,6 +9,26 @@ readme_path = joinpath(docs_base, "..", "README.md")
 target_path = joinpath(docs_base, "src", "index.md")
 readme_text = read(readme_path, String)
 readme_text = replace(readme_text, "./docs/src/" => "./")
+readme_text = replace(readme_text, r"(?m)^> \[!WARNING\]\s*\n(?:> ?.*\n?)+" => m -> begin
+    lines = split(m, '\n'; keepempty=true)
+    body = String[]
+    for line in lines[2:end]
+        if startswith(line, ">")
+            stripped = replace(line, r"^>\s?" => "")
+            push!(body, stripped)
+        elseif !isempty(line)
+            push!(body, line)
+        end
+    end
+    while !isempty(body) && isempty(body[end])
+        pop!(body)
+    end
+    if isempty(body)
+        return "!!! warning"
+    end
+    indented = join(["    " * l for l in body], "\n")
+    return "!!! warning\n" * indented
+end)
 write(target_path, readme_text)
 
 # set pages
