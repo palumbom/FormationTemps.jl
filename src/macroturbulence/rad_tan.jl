@@ -20,6 +20,14 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     return kernel ./ sum(kernel)
 end
 
+"""
+    convolve_rt_macro(xs, ys, ζ_rt, μ)
+    convolve_rt_macro(xs, ys, ζ_r, ζ_t, μ)
+
+Convolve a spectrum with a radial-tangential macroturbulence kernel.
+
+TODO: finish docs.
+"""
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     # short circuit
     if iszero(ζ_rt)

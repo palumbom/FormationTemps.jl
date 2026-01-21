@@ -8,7 +8,15 @@ function get_bin_edges(arr::AA{T,1}) where T<:AF
     return edges, widths
 end
 
-# follows from implementation at https://github.com/ACCarnall/SpectRes/blob/master/spectres/spectral_resampling.py
+"""
+    rebin_spectrum(xs_old, ys_old, xs_new)
+    rebin_spectrum(xs_old, ys_old, σs_old, xs_new)
+
+Rebin a spectrum (and optional uncertainties) from `xs_old` to `xs_new`. # follows from implementation at https://github.com/ACCarnall/SpectRes/blob/master/spectres/spectral_resampling.py
+
+TODO: finish docs.
+"""
+
 # TODO algorithm might cause shift based on input wavelength grid?
 # might cause issue if wavelengths shift across
 function rebin_spectrum(xs_old::AA{T,1}, ys_old::AA{T,1}, xs_new::AA{T,1}) where T<:AF
@@ -125,6 +133,13 @@ function rebin_spectrum(xs_old::AA{T,1}, ys_old::AA{T,1}, σs_old::AA{T,1}, xs_n
     return ys_new, σs_new
 end
 
+"""
+    convolve_instrument_gauss(xs, ys; new_res=1.17e5, oversampling=2.0)
+
+Convolve a spectrum with a Gaussian LSF at resolving power `new_res`.
+
+TODO: finish docs.
+"""
 function convolve_instrument_gauss(xs::AA{T,1}, ys::AA{T,1}; new_res::T=1.17e5,
                                    oversampling::T=2.0) where T<:AF
     # get kernel

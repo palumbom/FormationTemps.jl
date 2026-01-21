@@ -16,6 +16,13 @@ function gray_rot_kernel(vs::AA{T,1}, vsini::T, u1::T) where T<:AF
     return kernel ./ sum(kernel)
 end
 
+"""
+    convolve_gray_rotation(xs, ys, vsini, u1)
+
+Convolve a spectrum with the Gray (2008) rotation kernel using linear limb darkening.
+
+TODO: finish docs.
+"""
 function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,1}, vsini::T, u1::T) where T<:AF
     # offset the kernel by the velocity
     i0 = length(xs) ÷ 2 + 1

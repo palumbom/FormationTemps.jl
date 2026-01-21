@@ -26,6 +26,13 @@ function hirano_rotmacro_ft_kernel(σs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43,
     return vec(s) .* dt
 end
 
+"""
+    convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2; intres=intres_glob)
+
+Convolve a spectrum with the Hirano et al. (2011) rotation+macroturbulence kernel.
+
+TODO: finish docs.
+"""
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T, 
                                   ζ_rt::T, u1::T, u2::T; 
                                   intres::Int=intres_glob) where T<:AF
@@ -154,4 +161,3 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     return out
 end
-
