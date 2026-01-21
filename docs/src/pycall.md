@@ -20,6 +20,12 @@ code = read(joinpath(pwd(), "examples", "setup_pycall.py"), String)
 Markdown.parse("```python\n" * code * "\n```")
 ``` 
 
+This script can also be run by ```uv``` via:
+
+```bash
+uv run FormationTemps.jl/docs/src/examples.setup_pycall.py
+```
+
 ## Basic Usage
 
 Once installed, FormationTemps.jl can be loaded in Python via:

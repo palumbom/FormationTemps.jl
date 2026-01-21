@@ -1,5 +1,6 @@
 # FormationTemps.jl
-[![Documentation](https://img.shields.io/badge/Documentation-blue.svg)](https://michaelpalumbo.me/FormationTemps.jl/dev/)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://palumbom.github.io/FormationTemps.jl/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://palumbom.github.io/FormationTemps.jl/dev/)
 [![Build Status](https://github.com/palumbom/FormationTemps.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/palumbom/FormationTemps.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![arXiv](https://img.shields.io/badge/arXiv-2512.09861-b31b1b.svg)](https://arxiv.org/abs/2512.09861)
 
@@ -65,7 +66,7 @@ ax1.set_xlabel("Vacuum Wavelength [Å]")
 ax1.set_ylabel("Formation Temperature [K]")
 plt.show()
 ```
-![formation_temps](./docs/src/examples/temp_example_jl.png)
+![formation_temps](./docs/src/static/temp_example_jl.png)
 
 More detail on the above example can be found in the [Basic Tutorial](https://michaelpalumbo.me/FormationTemps.jl/dev/tutorial/) and the [high-level API documentation]().
 

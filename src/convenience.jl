@@ -146,7 +146,7 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     end
 
     cont_func = cfunc_dt_flux
-    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)
+    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func, atm_cpu)
 end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
@@ -253,5 +253,5 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     end
 
     cont_func = Array(cfunc_dt_flux)
-    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func)
+    return FormTempResult(λs_korg, flux_norm, form_temps, cont_func, atm_gpu)
 end

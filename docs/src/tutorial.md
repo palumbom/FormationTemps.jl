@@ -7,7 +7,7 @@ using Markdown
 code = read(joinpath(pwd(), "examples", "simple.jl"), String)
 Markdown.parse("```julia\n" * code * "\n```")
 ```
-![formation_temps](examples/temp_example_jl.png)
+![formation_temps](static/temp_example_jl.png)
 
 The high-level convenience function ```calc_formation_temp``` provides a few optional arguments discussed below. 
 

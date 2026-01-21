@@ -1,5 +1,36 @@
+"""
+    Atmosphere{T}
+
+Abstract atmosphere type used by formation temperature calculations.
+"""
 abstract type Atmosphere{T<:AF} end
 
+"""
+    get_τs(atm)
+
+Return the optical depth grid as a standard `Array`.
+"""
+get_τs(atm::Atmosphere) = Array(atm.τs)
+
+"""
+    get_zs(atm)
+
+Return the height grid as a standard `Array`.
+"""
+get_zs(atm::Atmosphere) = Array(atm.zs)
+
+"""
+    get_Ts(atm)
+
+Return the temperature grid as a standard `Array`.
+"""
+get_Ts(atm::Atmosphere) = Array(atm.Ts)
+
+"""
+    AtmosphereGPU(atm_korg)
+
+Build a GPU-backed atmosphere from a Korg atmosphere object.
+"""
 mutable struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
     Natm::Int
     τs::AA{T,1}
@@ -17,6 +48,12 @@ mutable struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
     μ_v::CA{T,1}
 end
 
+"""
+    AtmosphereGPU(atm_korg)
+
+Construct an `AtmosphereGPU` with thermodynamic fields from Korg and velocity
+fields allocated on the GPU.
+"""
 function AtmosphereGPU(atm_korg)
     # Korg atmosphere parameters
     τs = Korg.get_tau_refs(atm_korg)
@@ -38,6 +75,11 @@ function AtmosphereGPU(atm_korg)
     return AtmosphereGPU(Natm, τs, zs, Ts, ne, nd, zs_gpu, Ts_gpu, vx, vy, vz, σ_v, μ_v)
 end
 
+"""
+    AtmosphereCPU(atm_korg)
+
+Build a CPU-backed atmosphere from a Korg atmosphere object.
+"""
 mutable struct AtmosphereCPU{T<:AF} <: Atmosphere{T}
     Natm::Int
     τs::AA{T,1}
@@ -53,6 +95,11 @@ mutable struct AtmosphereCPU{T<:AF} <: Atmosphere{T}
     μ_v::AA{T,1}
 end
 
+"""
+    AtmosphereCPU(atm_korg)
+
+Construct an `AtmosphereCPU` with thermodynamic and velocity fields on the CPU.
+"""
 function AtmosphereCPU(atm_korg)
     # Korg atmosphere parameters
     τs = Korg.get_tau_refs(atm_korg)
@@ -72,6 +119,11 @@ function AtmosphereCPU(atm_korg)
     return AtmosphereCPU(Natm, τs, zs, Ts, ne, nd, vx, vy, vz, σ_v, μ_v)
 end
 
+"""
+    get_marcs_atm(Teff, logg, A_X; n_layers=56)
+
+Interpolate a MARCS atmosphere from Korg and return it with `n_layers` layers.
+"""
 function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=56) where T<:AF
     # get the model atmosphere
     marcs_atm = Korg.interpolate_marcs(Teff, logg, A_X)
