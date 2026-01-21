@@ -4,5 +4,5 @@
 
 ```@autodocs
 Modules = [FormationTemps]
-Order = [:function]
+Order = [:type, :function]
 ```

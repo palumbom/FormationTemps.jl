@@ -62,3 +62,12 @@ round_to_power
 elav
 searchsortednearest
 ```
+
+## Atmosphere Types
+
+```@docs
+Atmosphere
+get_τs
+get_zs
+get_Ts
+```
