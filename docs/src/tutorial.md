@@ -2,7 +2,7 @@
 
 In the simplest use case, a model flux spectrum and associated formation temperatures can be calculated given stellar parameters as input. For further details on specifying linelists, abundances, and other details of the model atmosphere, please see the [Korg.jl documentation](https://ajwheeler.github.io/Korg.jl/stable/generated/tutorials/Basics/).
 
-```julia
+<!-- ```julia
 using Korg
 using PyPlot
 using FormationTemps; FT = FormationTemps
@@ -20,7 +20,9 @@ vsini = 2100.0
 ξ = 850.0       # microturbulent broadenign
 
 # create StellarProps composite type to hold everything 
-star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
+star_props = StellarProps(Teff=Teff, logg=logg, 
+                          Fe_H=Fe_H, vsini=vsini, 
+                          v_macro=ζ_RT, v_micro=ξ)
 
 # get the flux + formation temperature spectra
 form_temp_result = calc_formation_temp(star_props, linelist; Δλ=0.01)
@@ -36,6 +38,11 @@ ax1.plot(wavs, temp, c="k")
 ax1.set_xlabel("Vacuum Wavelength [Å]")
 ax1.set_ylabel("Formation Temperature [K]")
 plt.show()
+``` -->
+```@eval
+using Markdown
+code = read(joinpath(pwd(), "examples", "simple.jl"), String)
+Markdown.parse("```julia\n" * code * "\n```")
 ```
 ![formation_temps](examples/temp_example_jl.png)
 

@@ -16,7 +16,8 @@ Introduction = "Quickstart" => "index.md"
 License = "License" => "license.md"
 Index = "Full Index" => "longlist.md"
 Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
-                      "Contribution Functions" => "cont_func.md"]
+                      "Contribution Functions" => "cont_func.md",
+                      "Python Tutorial" => "pycall.md"]
 Internals = "Public Functions" => "internals.md"
 
 pages = [Introduction, Guides, Internals, License, Index]
