@@ -49,7 +49,7 @@ Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
                       "Python Tutorial" => "pycall.md"]
 Internals = "Public Functions" => "internals.md"
 
-pages = [Introduction, Guides, Internals, License, Index]
+pages = [Introduction, Guides, Internals, Index, License]
 
 # makedocs
 makedocs(;

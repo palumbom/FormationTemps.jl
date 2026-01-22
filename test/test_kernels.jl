@@ -1,4 +1,4 @@
-using Revise
+#= using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
 using HDF5, Printf
@@ -8,33 +8,6 @@ using CSV, DataFrames, Statistics
 using PyPlot, PyCall; mpl = plt.matplotlib
 plt.ioff()
 
-# matplotlib backend
-mpl.use("Qt5Agg")
-mpl.style.use(FT.moddir * "fig.mplstyle")
-inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
-
-# get fancy fonts
-plt.rc("text", usetex=true)
-plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                               \\usepackage{mathrsfs}")
-
-# python interpolation for matplotlib stuff
-interp1d = pyimport("scipy.interpolate").interp1d
-
-ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
-
-# set colormaps
-img_cmap = "viridis"
-μ_cmap = "autumn"
-
-# alias type 
-AA = AbstractArray
-CA = CuArray
-AF = AbstractFloat
-
-# make plotdir
-plotdir = joinpath(pwd(), "figures")
-!isdir(plotdir) && mkdir(plotdir)
 
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
@@ -181,55 +154,56 @@ g(x, n) = exp(-((x - n) / σ_g(x))^2.0)
 gaussian = g.(λs_korg, λc)
 gaussian ./= sum(gaussian)
 
-# plot the RT case
-plt.close("all")
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, iso_rt_macro_kernel, label="gray")
-ax1.plot(λs_korg, hirano_no_rot, label="hirano")
-ax2.scatter(λs_korg, hirano_no_rot .- iso_rt_macro_kernel, c="tab:blue", s=2)
-ax1.set_xlim(6301.8, 6302.2)
-ax1.legend()
-ax1.set_title("Macro Only")
-plt.show()
+# # plot the RT case
+# plt.close("all")
+# fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+# ax1.plot(λs_korg, iso_rt_macro_kernel, label="gray")
+# ax1.plot(λs_korg, hirano_no_rot, label="hirano")
+# ax2.scatter(λs_korg, hirano_no_rot .- iso_rt_macro_kernel, c="tab:blue", s=2)
+# ax1.set_xlim(6301.8, 6302.2)
+# ax1.legend()
+# ax1.set_title("Macro Only")
+# plt.show()
 
-# plot the vsini case
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, gray_rot_kernel, label="gray")
-ax1.plot(λs_korg, hirano_no_macro, label="hirano")
-ax2.scatter(λs_korg, hirano_no_macro .- gray_rot_kernel, c="tab:blue", s=2)
-ax1.set_xlim(6301.8, 6302.2)
-ax1.set_title("Rotation Only")
-ax1.legend()
-plt.show()
+# # plot the vsini case
+# fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+# ax1.plot(λs_korg, gray_rot_kernel, label="gray")
+# ax1.plot(λs_korg, hirano_no_macro, label="hirano")
+# ax2.scatter(λs_korg, hirano_no_macro .- gray_rot_kernel, c="tab:blue", s=2)
+# ax1.set_xlim(6301.8, 6302.2)
+# ax1.set_title("Rotation Only")
+# ax1.legend()
+# plt.show()
 
-# now get contribution functions + flux
-cfunc_flux_hirano_norot = FT.convolve_hirano_rotmacro(xs, ys, 0.0, ζ_rt, u1, u2, intres=intres)
-cfunc_flux_hirano_nomacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, 0.0, u1, u2, intres=intres)
-cfunc_flux_hirano_rotmacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2, intres=intres)
+# # now get contribution functions + flux
+# cfunc_flux_hirano_norot = FT.convolve_hirano_rotmacro(xs, ys, 0.0, ζ_rt, u1, u2, intres=intres)
+# cfunc_flux_hirano_nomacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, 0.0, u1, u2, intres=intres)
+# cfunc_flux_hirano_rotmacro = FT.convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2, intres=intres)
 
-cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
-cfunc_flux_macrogray = FT.convolve_iso_rt_macro(xs, ys, ζ_rt)
+# cfunc_flux_rotgray = FT.convolve_gray_rotation(xs, ys, vsini, u1)
+# cfunc_flux_macrogray = FT.convolve_iso_rt_macro(xs, ys, ζ_rt)
 
-flux_hirano_norot = dropdims(sum(cfunc_flux_hirano_norot, dims=1), dims=1)
-flux_hirano_nomacro = dropdims(sum(cfunc_flux_hirano_nomacro, dims=1), dims=1)
+# flux_hirano_norot = dropdims(sum(cfunc_flux_hirano_norot, dims=1), dims=1)
+# flux_hirano_nomacro = dropdims(sum(cfunc_flux_hirano_nomacro, dims=1), dims=1)
 
-flux_rotgray = dropdims(sum(cfunc_flux_rotgray, dims=1), dims=1)
-flux_macrogray = dropdims(sum(cfunc_flux_macrogray, dims=1), dims=1)
+# flux_rotgray = dropdims(sum(cfunc_flux_rotgray, dims=1), dims=1)
+# flux_macrogray = dropdims(sum(cfunc_flux_macrogray, dims=1), dims=1)
 
-# plot the RT case
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, flux_macrogray, label="gray")
-ax1.plot(λs_korg, flux_hirano_norot, label="hirano")
-ax2.scatter(λs_korg, 100 .* (flux_hirano_norot .- flux_macrogray) ./ flux_hirano_norot, c="tab:blue", s=2)
-ax1.legend()
-ax1.set_title("Macro Only")
-plt.show()
+# # plot the RT case
+# fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+# ax1.plot(λs_korg, flux_macrogray, label="gray")
+# ax1.plot(λs_korg, flux_hirano_norot, label="hirano")
+# ax2.scatter(λs_korg, 100 .* (flux_hirano_norot .- flux_macrogray) ./ flux_hirano_norot, c="tab:blue", s=2)
+# ax1.legend()
+# ax1.set_title("Macro Only")
+# plt.show()
 
-# plot the vsini case
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
-ax1.plot(λs_korg, flux_rotgray, label="gray")
-ax1.plot(λs_korg, flux_hirano_nomacro, label="hirano")
-ax2.scatter(λs_korg, 100 .* (flux_hirano_nomacro .- flux_rotgray) ./ flux_hirano_nomacro, c="tab:blue", s=2)
-ax1.legend()
-ax1.set_title("Rotation Only")
-plt.show()
+# # plot the vsini case
+# fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+# ax1.plot(λs_korg, flux_rotgray, label="gray")
+# ax1.plot(λs_korg, flux_hirano_nomacro, label="hirano")
+# ax2.scatter(λs_korg, 100 .* (flux_hirano_nomacro .- flux_rotgray) ./ flux_hirano_nomacro, c="tab:blue", s=2)
+# ax1.legend()
+# ax1.set_title("Rotation Only")
+# plt.show()
+ =#
