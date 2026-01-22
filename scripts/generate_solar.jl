@@ -160,4 +160,5 @@ ax2r.set_ylabel(L"T_{1/2}\ {\rm Error\ [K]}")
 ax1.legend(bbox_to_anchor=(0.33, 1.02, 1.05, 0.2), loc="lower center",
            mode="expand", borderaxespad=0, ncol=2)
 fig.tight_layout()
+fig.savefig("docs/src/static/convolution_vs_integration.png", bbox_inches="tight")
 plt.show()
