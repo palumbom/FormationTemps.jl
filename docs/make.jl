@@ -37,7 +37,7 @@ function replace_admonition(text, github_style, documenter_style)
 end
 
 readme_text = replace_admonition(readme_text, "WARNING", "!!! warning")
-readme_text = replace_admonition(readme_text, "CAUTION", "!!! caution")
+readme_text = replace_admonition(readme_text, "CAUTION", "!!! danger")
 write(target_path, readme_text)
 
 # set pages

@@ -80,12 +80,12 @@ FormationTemps.jl can be called from Python. The instructions can be found in th
 ## Caveats
 
 > [!CAUTION] 
-> Users should be aware of the technical and "philosophical" comments discussed in Sections 4.2 and 4.3 of [the paper](https://arxiv.org/abs/2512.09861) presenting FormationTemps.jl. 
+> Users should be aware of the technical and "philosophical" discussion on formation temperatures in Sections 4.2 and 4.3 of [the paper](https://arxiv.org/abs/2512.09861) presenting FormationTemps.jl. 
 
 In brief:
 
 * Formation temperatures are *modeled* and not measured quantities
-* The definition/concept of a formation temperature can belie some realities of radiative transfer (see the contribution function comparison in the [relevant tutorial](https://michaelpalumbo.me/FormationTemps.jl/dev/cont_func/))
+* The definition/concept of a formation temperature can belie some realities of radiative transfer (see the contribution function comparison in the [relevant tutorial](https://michaelpalumbo.me/FormationTemps.jl/dev/cont_func/#Formation-temperatures-can-lie-to-you!))
 * Korg.jl only assumes LTE, and the MARCS model atmospheres used by default do not have chromospheres
 * The model atmospheres are 1D, and do not handle the effects of convection (limb shift, line asymmetry, etc.) or magnetism
 
