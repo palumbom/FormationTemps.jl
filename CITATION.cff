@@ -17,6 +17,8 @@ authors:
 identifiers:
   - type: url
     value: 'https://arxiv.org/abs/2512.09861'
+  - type: doi
+    value: '10.5281/zenodo.18343828'
 repository-code: 'https://github.com/palumbom/FormationTemps.jl'
 license: MIT
 version: 1.0.0
