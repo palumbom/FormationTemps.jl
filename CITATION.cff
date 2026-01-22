@@ -8,10 +8,9 @@ message: >-
   metadata from this file.
 type: software
 authors:
-  - given-names: Michael
+  - given-names: Michael L.
     family-names: Palumbo
     name-suffix: III
-    name-particle: L.
     email: mpalumbo@flatironinstitute.org
     affiliation: Flatiron Institute
     orcid: 'https://orcid.org/0000-0002-4677-8796'
@@ -20,4 +19,4 @@ identifiers:
     value: 'https://arxiv.org/abs/2512.09861'
 repository-code: 'https://github.com/palumbom/FormationTemps.jl'
 license: MIT
-version: 1.0.0-DEV
+version: 1.0.0

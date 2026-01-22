@@ -90,7 +90,7 @@ In brief:
 * The model atmospheres are 1D, and do not handle the effects of convection (limb shift, line asymmetry, etc.) or magnetism
 
 ## Citation
-[![DOI](https://zenodo.org/badge/{1034682708}.svg)](https://zenodo.org/badge/latestdoi/{1034682708})
+[![DOI](https://zenodo.org/badge/1034682708.svg)](https://zenodo.org/badge/latestdoi/1034682708)
 [![arXiv](https://img.shields.io/badge/arXiv-2512.09861-b31b1b.svg)](https://arxiv.org/abs/2512.09861)
 
 If you use FormationTemps.jl in your research, please cite the relevant [software release](https://github.com/palumbom/FormationTemps.jl/releases) and [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract).
