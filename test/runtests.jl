@@ -13,7 +13,10 @@ if use_gpu
 end
 
 # run tests
+# include("Aqua.jl") # [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 include("test_definitions.jl")
 include("test_atmosphere.jl")
 include("test_kernels.jl")
 include("test_convenience.jl")
+
+# TODO finish implementing other tests

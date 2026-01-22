@@ -6,7 +6,7 @@ vsini = 2100.0
 u1 = 0.4
 u2 = 0.0
 
-xs = λs_korg
+xs = range(6301.0, 6310.0, step=0.005)
 # ys = Array(cfunc_flux_stationary.cfunc_dt)
 intres = 1024
 
