@@ -1,14 +1,18 @@
 """
-    calc_formation_temp(star, linelist; use_gpu=true, Δλ=0.01, convolve=false, u1=NaN, u2=NaN, Nϕ=128)
+    calc_formation_temp(star, linelist; use_gpu=GPU_DEFAULT, Δλ=0.01, convolve=false,
+                        minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN, Nϕ=128, kwargs...)
 
 Compute flux formation temperatures, normalized flux, and flux contribution function for a given `star` and `linelist`.
 
 The wavelength grid is built from the line list (`wl * 1e8`) with padding and step `Δλ`.
+Use `minλ`/`maxλ` (Angstrom) to override the default bounds (first/last line ± 2 A).
+
 Returns a `FormTempResult` with fields:
 - `wavs`: wavelength grid (Angstrom).
 - `flux`: normalized flux (`sum(cfunc_dt_flux) / sum(cfunc_dt_flux_cont)`).
 - `form_temps`: formation temperature defined at 50% of the cumulative flux contribution.
 - `cont_func`: contribution function, shape `(Natm - 1, Nλ)`.
+- `atmosphere`: atmosphere structure used for the calculation.
 
 If `convolve=true`, applies Hirano rotation + macroturbulent convolution using limb-darkening
 coefficients `u1` and `u2`. Otherwise, performs numerical disk integration using `Nϕ` latitude
@@ -23,24 +27,30 @@ result = calc_formation_temp(star, linelist; Δλ=0.01, convolve=true, u1=0.43, 
 """
 function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEFAULT,
                              Δλ::T=0.01, convolve::Bool=false,
+                             minλ::T=NaN, maxλ::T=NaN,
                              u1::T=NaN, u2::T=NaN, Nϕ::Int=128,
                              kwargs...) where T<:AF
     if use_gpu
-        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, convolve=convolve, 
+        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, 
+                                                   minλ, maxλ, convolve=convolve, 
                                                    u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
     else
-        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, convolve=convolve, 
+        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, 
+                                                   minλ, maxλ, convolve=convolve, 
                                                    u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
     end
     return form_temps_flux
 end
 
-function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
+function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01, 
+                                  minλ::T=NaN, maxλ::T=NaN, 
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128, kwargs...) where T<:AF
     # get linelist 
     wls = [l.wl * 1e8 for l in linelist]
-    λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
+    minλ = isnan(minλ) ? first(wls) - 2.0 : minλ
+    maxλ = isnan(maxλ) ? last(wls) + 2.0 : maxλ
+    λs_korg = range(minλ, maxλ, step=Δλ)
 
     # get model atmosphere
     atm_cpu = AtmosphereCPU(Korg.interpolate_marcs(star.Teff, star.logg, star.A_X))
@@ -151,12 +161,15 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
 end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
+                                  minλ::T=NaN, maxλ::T=NaN, 
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128, kwargs...) where T<:AF
     # get linelist 
     wls = [l.wl * 1e8 for l in linelist]
-    λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
-
+    minλ = isnan(minλ) ? first(wls) - 2.0 : minλ
+    maxλ = isnan(maxλ) ? last(wls) + 2.0 : maxλ
+    λs_korg = range(minλ, maxλ, step=Δλ)
+    
     # get model atmosphere and move to GPU
     atm_gpu = AtmosphereGPU(Korg.interpolate_marcs(star.Teff, star.logg, star.A_X))
 
