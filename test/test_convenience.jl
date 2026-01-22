@@ -22,14 +22,20 @@ Fe_H = 0.0
 vsini = 0.0
 ζ_RT = 0.0
 ξ = 850.0
-star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
+star_stat = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
 # get stationary convenience flux
-result_stationary_convenience = calc_formation_temp(star_props, linelist, use_gpu=false, 
-                                                    u1=u1, u2=u2, Δλ=Δλ, convolve=true)
+result_stationary_convenience = calc_formation_temp(star_stat, linelist, use_gpu=false, 
+                                                    u1=u1, u2=u2, Δλ=Δλ, convolve=true,
+                                                    ne_warn_thresh=Inf)
+if use_gpu 
+    result_stationary_convenience_gpu = calc_formation_temp(star_stat, linelist, use_gpu=true, 
+                                                            u1=u1, u2=u2, Δλ=Δλ, convolve=true,
+                                                            ne_warn_thresh=Inf)
+end
 
 # get model atmosphere
-atm_cpu = FT.AtmosphereCPU(Korg.interpolate_marcs(Teff, logg, star_props.A_X))
+atm_cpu = FT.AtmosphereCPU(Korg.interpolate_marcs(Teff, logg, star_stat.A_X))
 zs = atm_cpu.zs
 Ts = atm_cpu.Ts
 
@@ -39,7 +45,7 @@ Natm = length(zs)
 Nλ = length(λs_korg)
 αs = zeros(T, Natm, Nλ)
 αs_cont = zeros(T, Natm, Nλ)
-FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_cpu, star_props.A_X)
+FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_cpu, star_stat.A_X, ne_warn_thresh=Inf)
 
 # set microturbulent broadening
 σ_v = fill(ξ, Natm)
@@ -79,7 +85,42 @@ end
     @test all(isapprox.(result_stationary_convenience.flux, flux_norm))
 end
 
+# now do non-stationary flux
+Teff = 5777.0
+logg = 4.44
+Fe_H = 0.0
+vsini = 2100.0
+ζ_RT = 3400.0
+ξ = 850.0
+star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
+# get stationary convenience flux
+result_convenience = calc_formation_temp(star, linelist, use_gpu=false, 
+                                         u1=u1, u2=u2, Δλ=Δλ, convolve=true,
+                                         ne_warn_thresh=Inf)
+if use_gpu
+    result_convenience_gpu = calc_formation_temp(star, linelist, use_gpu=true, 
+                                                 u1=u1, u2=u2, Δλ=Δλ, convolve=true,
+                                                 ne_warn_thresh=Inf)
+end
+
+# convolve manually
+cfunc_dt_flux = FT.convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2)
+cfunc_dt_flux_cont = FT.convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
+flux_rotating = vec(Array(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1)))
+
+@testset "Testing convolved convenience flux" begin
+    @test maximum(flux_rotating) .<= one(T)
+    @test maximum(result_convenience.flux) .<= one(T)
+    @test all(isapprox.(result_convenience.flux, flux_rotating))
+end
+
+if use_gpu
+    @testset "Testing GPU convolved convenience flux" begin
+        @test all(isapprox.(result_stationary_convenience.flux, result_stationary_convenience_gpu.flux)) 
+        @test all(isapprox.(result_convenience.flux, result_convenience_gpu.flux)) 
+    end
+end
 
 # # absorption coefficients
 # αs = zeros(length(atm_gpu.zs), length(λs_korg))

@@ -23,20 +23,21 @@ result = calc_formation_temp(star, linelist; Δλ=0.01, convolve=true, u1=0.43, 
 """
 function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEFAULT,
                              Δλ::T=0.01, convolve::Bool=false,
-                             u1::T=NaN, u2::T=NaN, Nϕ::Int=128) where T<:AF
+                             u1::T=NaN, u2::T=NaN, Nϕ::Int=128,
+                             kwargs...) where T<:AF
     if use_gpu
-        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, convolve=convolve, u1=u1, u2=u2,
-                                                   Nϕ=Nϕ)
+        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, convolve=convolve, 
+                                                   u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
     else
-        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, convolve=convolve, u1=u1, u2=u2,
-                                                   Nϕ=Nϕ)
+        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, convolve=convolve, 
+                                                   u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
     end
     return form_temps_flux
 end
 
 function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
-                                  Nϕ::Int=128) where T<:AF
+                                  Nϕ::Int=128, kwargs...) where T<:AF
     # get linelist 
     wls = [l.wl * 1e8 for l in linelist]
     λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
@@ -51,7 +52,7 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     Nλ = length(λs_korg)
     αs = zeros(T, Natm, Nλ)
     αs_cont = zeros(T, Natm, Nλ)
-    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_cpu, star.A_X)
+    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_cpu, star.A_X; kwargs...)
 
     # set microturbulent broadening
     σ_v = fill(star.ξ, Natm)
@@ -151,7 +152,7 @@ end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
-                                  Nϕ::Int=128) where T<:AF
+                                  Nϕ::Int=128, kwargs...) where T<:AF
     # get linelist 
     wls = [l.wl * 1e8 for l in linelist]
     λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
@@ -162,7 +163,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     # get the absorption coefficients
     αs = zeros(length(atm_gpu.zs), length(λs_korg))
     αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, star.A_X)
+    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, star.A_X; kwargs...)
 
     # allocate on device
     gpu_mem = GPUMemory(λs_korg, atm_gpu)

@@ -1,93 +1,3 @@
-#= using Revise
-using FormationTemps; FT = FormationTemps
-using Korg
-using HDF5, Printf
-using CUDA, BenchmarkTools
-using FFTW
-using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
-plt.ioff()
-
-
-# get the linelist
-linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
-linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
-specs = [string(l.species) for l in linelist]
-
-# cut on species
-linelist = linelist[specs .== "Fe I"]
-
-# get the Fe I 6301 & 6302 lines (just cuz)
-wls = [l.wl for l in linelist] 
-idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
-idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
-linelist = vcat([linelist[idx1], linelist[idx2]])
-
-# re-get values
-wls = [l.wl * 1e8 for l in linelist]
-log_gf =  [l.log_gf for l in linelist]
-species =  [l.species for l in linelist]
-E_lower =  [l.E_lower for l in linelist]
-gamma_rad =  [l.gamma_rad for l in linelist]
-gamma_stark =  [l.gamma_stark for l in linelist]
-
-# make the wavelength grid
-buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.0005)
-cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
-
-# get some abundances
-A_X = Korg.asplund_2020_solar_abundances
-
-# get the atmosphere
-marcs_atm = FT.get_marcs_atm(5777.0, 4.44, A_X, n_layers=56)
-τ_500 = Korg.get_tau_refs(marcs_atm)
-zs = Korg.get_zs(marcs_atm)
-Ts = Korg.get_temps(marcs_atm)
-ne = Korg.get_electron_number_densities(marcs_atm)
-nd = Korg.get_number_densities(marcs_atm)
-
-# make my atmosphere 
-atm_gpu = FT.AtmosphereGPU(marcs_atm)
-zs = atm_gpu.zs
-Ts = atm_gpu.Ts
-τ5000 = atm_gpu.τs
-
-# synthesis to get the alphas
-αs = zeros(length(atm_gpu.zs), length(λs_korg))
-αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
-
-# allocate memory for convolutions
-Nλ = length(λs_korg)
-Natm = size(αs, 1)
-Npad = 100
-cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-
-# allocate on device
-gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
-
-# velocities
-μ_v_rot = CUDA.zeros(Float64, length(zs))
-σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-
-μ_v_mac = CUDA.zeros(Float64, length(zs)-1)
-σ_v_mac = CUDA.zeros(Float64, length(zs)-1)
-
-cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
-
-# get the formation temperature for a stationary star
-cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_stationary))
-flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
-
-form_temp_stationary = zeros(length(λs_korg))
-for i in eachindex(λs_korg)
-    xs = view(cfunc_flux_cum, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_stationary[i] = itp(0.5)
-end
-
 # set rotational and macroturbulence 
 vsini = 2100.0
 ζ_rt = 1400.0
@@ -97,7 +7,7 @@ u1 = 0.4
 u2 = 0.0
 
 xs = λs_korg
-ys = Array(cfunc_flux_stationary.cfunc_dt)
+# ys = Array(cfunc_flux_stationary.cfunc_dt)
 intres = 1024
 
 N = length(xs)
@@ -142,17 +52,23 @@ hirano_rot_macro = circshift(k_ctr ./ sum(k_ctr), shift)
 iso_rt_macro_kernel = FT.gray_iso_rt_macro_kernel(vs, ζ_rt)
 gray_rot_kernel = FT.gray_rot_kernel(vs, vsini, u1)
 
-# get isotropic gaussian
-σ_g(x) = x * (ζ_rt / FT.c_ms)
-g(x, n) = exp(-((x - n) / σ_g(x))^2.0)
+# do the testing
+@testset "Testing kernel outputs" begin
+    @test maximum(abs.(hirano_no_rot .- iso_rt_macro_kernel)) < 0.5
+    @test maximum(abs.(gray_rot_kernel .- hirano_no_macro)) < 0.5
+end
 
-# offset the kernel by the velocity
-λ0 = mean(λs_korg)
-λc = λ0
+# # get isotropic gaussian
+# σ_g(x) = x * (ζ_rt / FT.c_ms)
+# g(x, n) = exp(-((x - n) / σ_g(x))^2.0)
 
-# sample the kernel
-gaussian = g.(λs_korg, λc)
-gaussian ./= sum(gaussian)
+# # offset the kernel by the velocity
+# λ0 = mean(λs_korg)
+# λc = λ0
+
+# # sample the kernel
+# gaussian = g.(λs_korg, λc)
+# gaussian ./= sum(gaussian)
 
 # # plot the RT case
 # plt.close("all")
@@ -160,9 +76,10 @@ gaussian ./= sum(gaussian)
 # ax1.plot(λs_korg, iso_rt_macro_kernel, label="gray")
 # ax1.plot(λs_korg, hirano_no_rot, label="hirano")
 # ax2.scatter(λs_korg, hirano_no_rot .- iso_rt_macro_kernel, c="tab:blue", s=2)
-# ax1.set_xlim(6301.8, 6302.2)
+# # ax1.set_xlim(6301.8, 6302.2)
 # ax1.legend()
 # ax1.set_title("Macro Only")
+# plt.savefig("derp.pdf")
 # plt.show()
 
 # # plot the vsini case
@@ -206,4 +123,3 @@ gaussian ./= sum(gaussian)
 # ax1.legend()
 # ax1.set_title("Rotation Only")
 # plt.show()
- =#
