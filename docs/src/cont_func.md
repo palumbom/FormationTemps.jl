@@ -50,3 +50,10 @@ end
 Markdown.parse("```julia\n" * code * "\n```")
 ```
 ![formation_temps](static/cont_func_example.png)
+
+## Formation temperatures can lie to you!
+
+We can also slice through the contribution functions of individual pixels in lines. Doing so, we can demonstrate that wavelength elements which share a formation temperature need not have the same (or even similar) contribution functions! In each frame of the below animations, the contribution functions for the black pixel in each absorption line are shown. These pixels share the same formation temperature (within a tolerance of a couple Kelvin), yet their contribution functions look very different in the cores of the lines! Of course, the contribution functions tend to each other toward the continuum, but the bulk of the radial velocity information is found where the derivative of the spectrum is highest. 
+
+![line_animation](static/line_lineup.gif)
+![cont_func_animation](static/cont_comparison.gif)
