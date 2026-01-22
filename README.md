@@ -93,7 +93,7 @@ In brief:
 [![DOI](https://zenodo.org/badge/1034682708.svg)](https://doi.org/10.5281/zenodo.18343827)
 [![arXiv](https://img.shields.io/badge/arXiv-2512.09861-b31b1b.svg)](https://arxiv.org/abs/2512.09861)
 
-If you use FormationTemps.jl in your research, please cite the relevant [software release](https://github.com/palumbom/FormationTemps.jl/releases) and [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract).
+If you use FormationTemps.jl in your research, please cite the relevant [software release](https://zenodo.org/records/18343828) and [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract).
 
 ## Author & Contact 
 [![GitHub followers](https://img.shields.io/github/followers/palumbom?label=Follow&style=social)](https://github.com/palumbom)
