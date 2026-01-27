@@ -1,4 +1,4 @@
-# FormationTemps.jl
+# <img src="docs/src/assets/logo.png" height="24">  FormationTemps.jl
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://palumbom.github.io/FormationTemps.jl/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://palumbom.github.io/FormationTemps.jl/dev/)
 [![Build Status](https://github.com/palumbom/FormationTemps.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/palumbom/FormationTemps.jl/actions/workflows/CI.yml?query=branch%3Amain)
