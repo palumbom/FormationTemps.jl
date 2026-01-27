@@ -1,6 +1,4 @@
 # Full Index
-```@index
-```
 
 ```@autodocs
 Modules = [FormationTemps]

@@ -4,7 +4,7 @@
 [![Build Status](https://github.com/palumbom/FormationTemps.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/palumbom/FormationTemps.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![arXiv](https://img.shields.io/badge/arXiv-2512.09861-b31b1b.svg)](https://arxiv.org/abs/2512.09861)
 
-FormationTemps.jl wraps [Korg.jl](https://github.com/ajwheeler/Korg.jl) to produce model spectra and formation temperatures given fundamental stellar parameters and a linelist as input. We encourage users to read [the paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract) that presents FormationTemps.jl. The scripts used to generate the plots and other quantitative results presented therein can be found in the [scripts/](https://github.com/palumbom/FormationTemps.jl/tree/main/scripts) directory. 
+FormationTemps.jl wraps [Korg.jl](https://github.com/ajwheeler/Korg.jl) to produce model spectra and formation temperatures given fundamental stellar parameters and a linelist as input. We encourage users to read [the paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract) that presents FormationTemps.jl. The scripts used to generate the plots and other quantitative results presented therein can be found in the [`scripts/` directory](https://github.com/palumbom/FormationTemps.jl/tree/main/scripts) of the GitHub repo. 
 
 ## Installation
 
@@ -68,14 +68,14 @@ plt.show()
 ```
 ![formation_temps](./docs/src/static/temp_example_jl.png)
 
-More detail on the above example can be found in the [Basic Tutorial](https://michaelpalumbo.me/FormationTemps.jl/dev/tutorial/) and the [high-level API documentation](https://michaelpalumbo.me/FormationTemps.jl/dev/internals/).
+More detail on the above example can be found in the [Basic Tutorial](https://michaelpalumbo.me/FormationTemps.jl/stable/tutorial/) and the [high-level API documentation](https://michaelpalumbo.me/FormationTemps.jl/stable/internals/).
 
 ### Calling FormationTemps.jl from Python
 
 > [!WARNING] 
 > Calling FormationTemps.jl from Python is currently somewhat fragile and a work in progress. 
 
-FormationTemps.jl can be called from Python. The instructions can be found in the [Python Tutorial](https://michaelpalumbo.me/FormationTemps.jl/dev/pycall/). 
+FormationTemps.jl can be called from Python. The instructions can be found in the [Python Tutorial](https://michaelpalumbo.me/FormationTemps.jl/stable/pycall/). 
 
 ## Caveats
 
@@ -85,7 +85,7 @@ FormationTemps.jl can be called from Python. The instructions can be found in th
 In brief:
 
 * Formation temperatures are *modeled* and not measured quantities
-* The definition/concept of a formation temperature can belie some realities of radiative transfer (see the contribution function comparison in the [relevant tutorial](https://michaelpalumbo.me/FormationTemps.jl/dev/cont_func/#Formation-temperatures-can-lie-to-you!))
+* The definition/concept of a formation temperature can belie some realities of radiative transfer (see the contribution function comparison in the [relevant tutorial](https://michaelpalumbo.me/FormationTemps.jl/stable/cont_func/#Formation-temperatures-can-lie-to-you!))
 * Korg.jl only assumes LTE, and the MARCS model atmospheres used by default do not have chromospheres
 * The model atmospheres are 1D, and do not handle the effects of convection (limb shift, line asymmetry, etc.) or magnetism
 

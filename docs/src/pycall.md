@@ -12,7 +12,7 @@ cd FormationTemps.jl
 uv sync
 ```
 
-Before FormationTemps.jl is used from Python for the first time, a few things will need to be configured in Python:
+We do not recommend Conda. Before FormationTemps.jl is used from Python for the first time, a few things will need to be configured in Python:
 
 ```@eval
 using Markdown
