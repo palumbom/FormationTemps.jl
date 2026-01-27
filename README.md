@@ -22,7 +22,7 @@ Then from the Julia REPL:
 
 ```julia
 using Pkg
-Pkg.add(path=".")
+Pkg.add(path=".") # assuming you are in /PATH/TO/FormationTemps.jl
 using FormationTemps
 ```
 
