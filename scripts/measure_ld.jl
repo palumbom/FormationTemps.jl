@@ -93,15 +93,6 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 # velocities
 μ_v_rot = CUDA.zeros(Float64, length(zs))
 σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-
-# get cfunc for flux
-cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
-flux_stationary = Array(FT.get_flux(cfunc_flux_struct))
-
-# get disk integrated continuum
-cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
-continuum_flux_stationary = Array(FT.get_flux(cfunc_flux_cont_struct))
-
 vmac = 3400.0
 
 # allocate for intensities 
@@ -109,12 +100,12 @@ vmac = 3400.0
 ints = zeros(length(λs_korg), length(μs))
 ints_cont = zeros(length(λs_korg), length(μs))
 for i in eachindex(μs)
-    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v_rot, σ_v_mic)
     ints_temp = dropdims(Array(FT.get_intensity(cfunc_intensity_struct))', dims=1)
     # ints[:,i] .= FT.convolve_rt_macro(λs_korg, ints_temp, vmac, μs[i])
     ints[:,i] .= ints_temp
 
-    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v_rot, σ_v_mic)
     ints_cont_temp = dropdims(Array(FT.get_intensity(cfunc_intensity_cont))', dims=1)
     # ints_cont[:,i] .= FT.convolve_rt_macro(λs_korg, ints_cont_temp, vmac, μs[i])
     ints_cont[:,i] .= ints_cont_temp
