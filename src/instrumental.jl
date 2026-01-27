@@ -136,9 +136,21 @@ end
 """
     convolve_instrument_gauss(xs, ys; new_res=1.17e5, oversampling=2.0)
 
-Convolve a spectrum with a Gaussian LSF at resolving power `new_res`.
+Convolve a spectrum with a Gaussian LSF at resolving power `new_res`. 
+The output spectrum is resampled onto a new wavelength grid (evenly spaced in log-wavelength, i.e., velocity) 
+at the specified oversampling factor. 
 
-TODO: finish docs.
+Arguments:
+- `xs::AbstractVector{<:Real}`: Input wavelength grid.
+- `ys::AbstractVector{<:Real}`: Input spectrum sampled on `xs`.
+- `new_res::Real=1.17e5`: Target resolving power (λ/Δλ) for the Gaussian LSF.
+- `oversampling::Real=2.0`: Oversampling factor for the output log-wavelength grid.
+
+Returns:
+- `xs_out::Vector{<:Real}`: Output wavelength grid at the requested resolution.
+- `ys_out::Vector{<:Real}`: Spectrum convolved with the Gaussian LSF and rebinned to `xs_out`.
+
+See also: [`rebin_spectrum`](@ref)
 """
 function convolve_instrument_gauss(xs::AA{T,1}, ys::AA{T,1}; new_res::T=1.17e5,
                                    oversampling::T=2.0) where T<:AF

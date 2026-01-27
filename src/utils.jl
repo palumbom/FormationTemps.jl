@@ -3,8 +3,6 @@
     round_to_power(x::Real)
 
 Round `x` to one significant digit based on its order of magnitude.
-
-TODO: finish docs.
 """
 function round_to_power(x::Real)
     iszero(x) && return 0
@@ -17,8 +15,6 @@ end
     searchsortednearest(x, a)
 
 Return the index of the element in sorted vector `a` that is closest to `x`.
-
-TODO: finish docs.
 """
 function searchsortednearest(a::AbstractVector{T}, x::T) where T
     idx = searchsortedfirst(a,x)
@@ -41,8 +37,6 @@ end
     elav(a; dims)
 
 Compute midpoints between adjacent elements along `dims`.
-
-TODO: finish docs.
 """
 elav(a::AbstractVector) = elav(a, dims=1)
 function elav(a::AbstractArray{T,N}; dims::Integer) where {T,N}

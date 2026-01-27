@@ -1,3 +1,21 @@
+"""
+    calc_stellar_grid(ρs, i, vsini, Nϕ)
+
+Compute a stellar surface grid on the GPU for disk integration. Geometry follows 
+that from  S. S. Vogt et al. (1987) and N. Piskunov & O. Kochukhov (2002). 
+
+Arguments:
+- `ρs::Real`: Stellar radius (in solar radii)
+- `i::Real`: Inclination in degrees, in the range [-90, 90].
+- `vsini::Real`: Projected rotational velocity.
+- `Nϕ::Int`: Number of latitude bins; longitude bins vary with latitude.
+
+Returns:
+- `μs::CuArray`: Cosine of the angle between the surface normal and the line of sight per tile.
+- `dA::CuArray`: Projected surface area per tile.
+- `z_rot::CuArray`: Line-of-sight rotational velocity per tile.
+- `z_cbs::CuArray`: Additional per-tile velocity term. Disused in this implementation. 
+"""
 function calc_stellar_grid(ρs::T1, i::T1, vsini::T1, Nϕ::Int) where T1<:AF
     # allocate on GPU
     μs = CUDA.zeros(T1, Nϕ, 2 * Nϕ)

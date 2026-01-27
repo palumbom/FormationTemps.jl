@@ -4,11 +4,11 @@
 [![Build Status](https://github.com/palumbom/FormationTemps.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/palumbom/FormationTemps.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![arXiv](https://img.shields.io/badge/arXiv-2512.09861-b31b1b.svg)](https://arxiv.org/abs/2512.09861)
 
-FormationTemperatures.jl wraps [Korg.jl](https://github.com/ajwheeler/Korg.jl) to produce model spectra and formation temperatures given fundamental stellar parameters and a linelist as input.
+FormationTemps.jl wraps [Korg.jl](https://github.com/ajwheeler/Korg.jl) to produce model spectra and formation temperatures given fundamental stellar parameters and a linelist as input. We encourage users to read [the paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract) that presents FormationTemps.jl. The scripts used to generate the plots and other quantitative results presented therein can be found in the [scripts/](https://github.com/palumbom/FormationTemps.jl/tree/main/scripts) directory. 
 
 ## Installation
 
-FormationTemperatures.jl is written entirely in Julia and requires Julia v1.12 or greater. Installation instructions for Julia are available from [julialang.org](https://julialang.org/downloads/).
+FormationTemps.jl is written entirely in Julia and requires Julia v1.12 or greater. Installation instructions for Julia are available from [julialang.org](https://julialang.org/downloads/).
 
 To install FormationTemps.jl:
 

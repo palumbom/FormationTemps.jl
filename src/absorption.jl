@@ -1,5 +1,23 @@
 """
-Adapted from Korg.jl -> line_absorption!()
+    compute_alpha!(αs, wls, linelist, atm, A_X; partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+    compute_alpha!(αs, wls, linelist, zs, Ts, nds, nes, A_X; partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+
+Compute total (continuum + line) absorption coefficients in-place.
+
+Arguments:
+- `αs::AbstractArray{<:Real}`: Output array for absorption coefficients, sized `(Nlayers, Nλ)`.
+- `wls::Korg.Wavelengths`: Wavelength grid for the absorption calculation.
+- `linelist`: Line list passed to `Korg.line_absorption!`.
+- `atm::Atmosphere` or `(zs, Ts, nds, nes)`: Atmospheric structure (heights, temperatures, number densities, electron densities).
+- `A_X::AbstractVector{<:Real}`: Elemental abundances on the usual astronomical scale.
+- `partition_funcs=Korg.default_partition_funcs`: Partition function table for chemical equilibrium.
+- `ne_warn_thresh=0.1`: Relative warning threshold for electron density updates.
+
+Returns:
+- `nothing`: `αs` is filled in-place.
+
+Notes:
+- Adapted from `Korg.line_absorption!`.
 """
 function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, atm::Atmosphere{T}, A_X::AA{T,1}; partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1) where T<:AF
     compute_alpha!(αs, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ, 
@@ -7,6 +25,26 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, atm::Atmosphere{T}
                    ne_warn_thresh=ne_warn_thresh)
     return nothing
 end
+
+"""
+    compute_alpha!(αs, αs_cont, wls, linelist, atm, A_X; partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+    compute_alpha!(αs, αs_cont, wls, linelist, zs, Ts, nds, nes, A_X; partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+
+Compute continuum and total absorption coefficients in-place.
+
+Arguments:
+- `αs::AbstractArray{<:Real}`: Output array for total (continuum + line) absorption.
+- `αs_cont::AbstractArray{<:Real}`: Output array for continuum-only absorption.
+- `wls::Korg.Wavelengths`: Wavelength grid for the absorption calculation.
+- `linelist`: Line list passed to `Korg.line_absorption!`.
+- `atm::Atmosphere` or `(zs, Ts, nds, nes)`: Atmospheric structure (heights, temperatures, number densities, electron densities).
+- `A_X::AbstractVector{<:Real}`: Elemental abundances on the usual astronomical scale.
+- `partition_funcs=Korg.default_partition_funcs`: Partition function table for chemical equilibrium.
+- `ne_warn_thresh=0.1`: Relative warning threshold for electron density updates.
+
+Returns:
+- `nothing`: `αs` and `αs_cont` are filled in-place.
+"""
 
 function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X; 
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)

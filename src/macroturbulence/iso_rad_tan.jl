@@ -1,5 +1,15 @@
 """
-Equation 17.8 from Gray (2008), assuming A_R = A_T and ζ_R = ζ_T
+    gray_iso_rt_macro_kernel(vs, ζ_rt)
+
+Compute the isotropic radial-tangential macroturbulence kernel from Gray (2008)
+(Eq. 17.8) assuming A_R = A_T and ζ_R = ζ_T.
+
+Arguments:
+- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core.
+- `ζ_rt::Real`: Isotropic radial-tangential macroturbulence velocity scale.
+
+Returns:
+- `kernel::Vector{<:Real}`: Normalized macroturbulence kernel evaluated on `vs`.
 """
 function gray_iso_rt_macro_kernel(vs::AA{T,1}, ζ_rt::T) where T<:AF
     t1 = 2.0 .* exp.(-1.0 .* (vs ./ ζ_rt).^2.0) ./ (sqrt(π) .* ζ_rt)
@@ -13,7 +23,15 @@ end
 
 Convolve a spectrum with the isotropic radial-tangential macroturbulence kernel.
 
-TODO: finish docs.
+Arguments:
+- `xs::AbstractVector{<:Real}`: Wavelength grid.
+- `ys::AbstractArray{<:Real}`: Spectrum on `xs` (vector or matrix with rows as spectra).
+- `ζ_rt::Real`: Isotropic radial-tangential macroturbulence velocity scale.
+
+Returns:
+- `ys_out::AbstractArray{<:Real}`: Convolved spectrum (or `ys` if `ζ_rt == 0`).
+
+See also: [`gray_iso_rt_macro_kernel`](@ref)
 """
 function convolve_iso_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T) where T<:AF
     # short circuit

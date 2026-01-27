@@ -1,6 +1,16 @@
 """
-Equation 18.14 from The Observation and Analysis of Stellar Photospheres
-(Gray 2008)
+    gray_rot_kernel(vs, vsini, u1)
+
+Compute the Gray (2008) rotation broadening kernel (Eq. 18.14) with linear
+limb darkening.
+
+Arguments:
+- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core.
+- `vsini::Real`: Projected rotational velocity.
+- `u1::Real`: Linear limb-darkening coefficient.
+
+Returns:
+- `kernel::Vector{<:Real}`: Normalized rotation kernel evaluated on `vs`.
 """
 function gray_rot_kernel(vs::AA{T,1}, vsini::T, u1::T) where T<:AF
     # get LD terms
@@ -21,7 +31,16 @@ end
 
 Convolve a spectrum with the Gray (2008) rotation kernel using linear limb darkening.
 
-TODO: finish docs.
+Arguments:
+- `xs::AbstractVector{<:Real}`: Wavelength grid.
+- `ys::AbstractArray{<:Real}`: Spectrum on `xs` (vector or matrix with rows as spectra).
+- `vsini::Real`: Projected rotational velocity.
+- `u1::Real`: Linear limb-darkening coefficient.
+
+Returns:
+- `ys_out::AbstractArray{<:Real}`: Convolved spectrum with the same shape as `ys`.
+
+See also: [`gray_rot_kernel`](@ref)
 """
 function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,1}, vsini::T, u1::T) where T<:AF
     # offset the kernel by the velocity

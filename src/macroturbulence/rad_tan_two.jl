@@ -1,5 +1,17 @@
 """
-Equation 17.6 from Gray (2008), assuming A_R = A_T
+    rt_macro_kernel(vs, ζ_r, ζ_t, μ)
+
+Compute the radial-tangential macroturbulence kernel from Gray (2008) (Eq. 17.6)
+assuming A_R = A_T.
+
+Arguments:
+- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core.
+- `ζ_r::Real`: Radial macroturbulence velocity scale.
+- `ζ_t::Real`: Tangential macroturbulence velocity scale.
+- `μ::Real`: Cosine of the angle between the local normal and the line of sight.
+
+Returns:
+- `kernel::Vector{<:Real}`: Normalized macroturbulence kernel evaluated on `vs`.
 """
 function rt_macro_kernel(vs::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
     # constants
@@ -19,6 +31,24 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
     kernel = t1 + t2
     return kernel ./ sum(kernel)
 end
+
+"""
+    convolve_rt_macro(xs, ys, ζ_r, ζ_t, μ)
+
+Convolve a spectrum with a radial-tangential macroturbulence kernel.
+
+Arguments:
+- `xs::AbstractVector{<:Real}`: Wavelength grid.
+- `ys::AbstractArray{<:Real}`: Spectrum on `xs` (vector or matrix with rows as spectra).
+- `ζ_r::Real`: Radial macroturbulence velocity scale.
+- `ζ_t::Real`: Tangential macroturbulence velocity scale.
+- `μ::Real`: Cosine of the angle between the local normal and the line of sight.
+
+Returns:
+- `ys_out::AbstractArray{<:Real}`: Convolved spectrum (or `ys` if `ζ_r == 0` and `ζ_t == 0`).
+
+See also: [`rt_macro_kernel`](@ref)
+"""
 
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
     # short circuit

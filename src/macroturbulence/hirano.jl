@@ -1,8 +1,21 @@
 global const intres_glob = 500
 
 """
-Equation B12 from Hirano et al. (2011). NOTE: This is returns the Fourier
-Transform of the rotmacro convolution kernel, not the kernel itself!! 
+    hirano_rotmacro_ft_kernel(σs, vsini, ζ_rt; u1=0.43, u2=0.31, intres=intres_glob)
+
+Compute the Fourier transform of the Hirano et al. (2011) rotation+macroturbulence
+kernel (Eq. B12).
+
+Arguments:
+- `σs::AbstractVector{<:Real}`: Frequency grid (inverse velocity units).
+- `vsini::Real`: Projected rotational velocity.
+- `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale.
+- `u1::Real=0.43`: Linear limb-darkening coefficient.
+- `u2::Real=0.31`: Quadratic limb-darkening coefficient.
+- `intres::Int=intres_glob`: Quadrature resolution for the kernel integral.
+
+Returns:
+- `Kσ::Vector{<:Real}`: Fourier transform of the rotation+macroturbulence kernel.
 """
 function hirano_rotmacro_ft_kernel(σs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=intres_glob) where T<:AF
     # quadrature grid in t∈[0,1]
@@ -31,7 +44,19 @@ end
 
 Convolve a spectrum with the Hirano et al. (2011) rotation+macroturbulence kernel.
 
-TODO: finish docs.
+Arguments:
+- `xs::AbstractVector{<:Real}`: Wavelength grid.
+- `ys::AbstractArray{<:Real}`: Spectrum on `xs` (vector or matrix with rows as spectra).
+- `vsini::Real`: Projected rotational velocity.
+- `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale.
+- `u1::Real`: Linear limb-darkening coefficient.
+- `u2::Real`: Quadratic limb-darkening coefficient.
+- `intres::Int=intres_glob`: Quadrature resolution for the kernel integral.
+
+Returns:
+- `ys_out::AbstractArray{<:Real}`: Convolved spectrum with the same shape as `ys`.
+
+See also: [`hirano_rotmacro_ft_kernel`](@ref)
 """
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T, 
                                   ζ_rt::T, u1::T, u2::T; 
