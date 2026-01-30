@@ -21,7 +21,7 @@ cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
-outfile = joinpath(outdir, "temp_spectrum_chunks.h5")
+outfile = joinpath(outdir, "temp_spectrum_chunks_hires.h5")
 
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
@@ -50,7 +50,7 @@ star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                           vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
 # set linelist chunk size
-chunksize = 1000
+chunksize = 500
 
 h5open(outfile, "w") do h5
     HDF5.attributes(h5)["chunksize"] = chunksize
@@ -62,7 +62,7 @@ h5open(outfile, "w") do h5
         ll = view(linelist, i:min(i + chunksize - 1, length(linelist)))
 
         # high-level formation temperature calculation
-        form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=0.001, 
+        form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=0.0001, 
                                                   convolve=false, Nϕ=16, 
                                                   ne_warn_thresh=Inf)
 
