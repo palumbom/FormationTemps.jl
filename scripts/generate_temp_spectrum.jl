@@ -21,7 +21,7 @@ cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
-outfile = joinpath(outdir, "temp_spectrum_chunks_hires.h5")
+outfile = joinpath(outdir, "temp_spectrum_chunks_hires2.h5")
 
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
@@ -50,7 +50,7 @@ star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                           vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
 # set linelist chunk size
-chunksize = 500
+chunksize = 250
 
 h5open(outfile, "w") do h5
     HDF5.attributes(h5)["chunksize"] = chunksize
