@@ -10,20 +10,19 @@ FormationTemps.jl wraps [Korg.jl](https://github.com/ajwheeler/Korg.jl) to produ
 
 FormationTemps.jl is written entirely in Julia and requires Julia v1.12 or greater. Installation instructions for Julia are available from [julialang.org](https://julialang.org/downloads/).
 
-To install FormationTemps.jl:
-
-```bash
-git clone git@github.com:palumbom/FormationTemps.jl.git
-cd FormationTemps.jl
-julia
-```
-
-Then from the Julia REPL:
+To install FormationTemps.jl from the Julia REPL:
 
 ```julia
 using Pkg
-Pkg.add(path=".") # assuming you are in /PATH/TO/FormationTemps.jl
+Pkg.add("FormationTemps")
 using FormationTemps
+```
+
+Alternatively, if you'd like to tinker with the source of FormationTemps.jl, you can clone the repo from GitHub and add it in develop mode:
+
+```julia
+using Pkg
+Pkg.develop(path="/path/to/FormationTemps.jl")
 ```
 
 ### Basic Julia Example
