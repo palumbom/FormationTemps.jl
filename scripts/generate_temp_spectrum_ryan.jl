@@ -25,7 +25,7 @@ if !isdir(tmpdir); mkdir(tmpdir); end
 outfile = joinpath(outdir, "temp_spectrum_chunks_ryan.h5")
 
 # get the linelist
-linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")[5000:10000]
+linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
 # linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 
@@ -83,7 +83,7 @@ h5open(outfile, "w") do h5
         line_centers = [l.wl * 1e8 for l in ll]
 
         # high-level formation temperature calculation
-        Δλ=0.01
+        Δλ=0.001
         # Δλ=0.0001
         form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=Δλ, 
                                                   convolve=false, Nϕ=16, 
