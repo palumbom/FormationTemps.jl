@@ -23,9 +23,10 @@ outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
 outfile = joinpath(outdir, "temp_spectrum_chunks_ryan.h5")
+outfile_1d = joinpath(outdir, "temp_spectrum_1D.h5")
 
 # get the linelist
-linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")[5000:10000]
+linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
 # linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 
@@ -58,7 +59,7 @@ Ts = atm_cpu.Ts
 
 # set linelist chunk size
 chunksize = 400
-overlap_lines = 125
+overlap_lines = 100
 @assert 0 <= overlap_lines < chunksize "overlap_lines must satisfy 0 <= overlap_lines < chunksize."
 chunk_step = chunksize - overlap_lines
 
@@ -84,7 +85,7 @@ h5open(outfile, "w") do h5
         line_centers = [l.wl * 1e8 for l in ll]
 
         # high-level formation temperature calculation
-        Δλ=0.01
+        Δλ=0.001
         # Δλ=0.0001
         form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=Δλ, 
                                                   convolve=false, Nϕ=16, 
@@ -109,4 +110,61 @@ h5open(outfile, "w") do h5
 end
 
 println(">>> Splicing chunks...")
-# TODO add a loop that stitches the files into a 1D spectrum
+h5open(outfile, "r") do h5in
+    chunk_names = sort(filter(name -> startswith(name, "chunk_"), collect(keys(h5in))))
+    nchunks = length(chunk_names)
+    if nchunks == 0
+        error("No chunk groups found in $(outfile).")
+    end
+
+    # determine chunk centers to split overlap regions consistently
+    centers = zeros(Float64, nchunks)
+    for (i, group_name) in enumerate(chunk_names)
+        g = h5in[group_name]
+        if haskey(g, "line_centers")
+            line_centers = vec(read(g["line_centers"]))
+            centers[i] = median(line_centers)
+        else
+            wavs = vec(read(g["wavs"]))
+            centers[i] = 0.5 * (first(wavs) + last(wavs))
+        end
+    end
+
+    # enforce increasing wavelength order in the output chunks
+    sort_idx = sortperm(centers)
+    centers = centers[sort_idx]
+    chunk_names = chunk_names[sort_idx]
+
+    h5open(outfile_1d, "w") do h5out
+        HDF5.attributes(h5out)["chunksize"] = chunksize
+        HDF5.attributes(h5out)["n_lines"] = length(linelist)
+        HDF5.attributes(h5out)["n_chunks"] = nchunks
+        HDF5.attributes(h5out)["spliced"] = 1
+
+        # retain model atmosphere info in the new file
+        g_atm = create_group(h5out, "model_atmosphere")
+        g_atm["zs"] = zs
+        g_atm["Ts"] = Ts
+        g_atm["τs_ref"] = τs_ref
+
+        for i in eachindex(chunk_names)
+            g_in = h5in[chunk_names[i]]
+            wavs = vec(read(g_in["wavs"]))
+            flux = vec(read(g_in["flux"]))
+            temp = vec(read(g_in["temp"]))
+            cfunc = read(g_in["cfunc"])
+            line_centers = haskey(g_in, "line_centers") ? vec(read(g_in["line_centers"])) : [0.5 * (first(wavs) + last(wavs))]
+
+            left_bound = i == 1 ? -Inf : 0.5 * (centers[i - 1] + centers[i])
+            right_bound = i == nchunks ? Inf : 0.5 * (centers[i] + centers[i + 1])
+            keep = (wavs .>= left_bound) .& (wavs .< right_bound)
+
+            g_out = create_group(h5out, @sprintf("chunk_%04d", i))
+            g_out["line_centers"] = line_centers
+            g_out["wavs"] = wavs[keep]
+            g_out["flux"] = flux[keep]
+            g_out["temp"] = temp[keep]
+            g_out["cfunc"] = cfunc[:, keep]
+        end
+    end
+end
