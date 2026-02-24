@@ -25,7 +25,7 @@ if !isdir(tmpdir); mkdir(tmpdir); end
 outfile = joinpath(outdir, "temp_spectrum_chunks_ryan.h5")
 
 # get the linelist
-linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
+linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")[1:1000]
 # linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 
@@ -56,25 +56,31 @@ zs = atm_cpu.zs
 Ts = atm_cpu.Ts
 τs_ref = atm_cpu.τs
 
-# write out
-atm_file = joinpath(outdir, "solar_model_atmosphere.h5")
-h5open(atm_file, "w") do h5
-    h5["zs"] = zs
-    h5["Ts"] = Ts
-    h5["τs_ref"] = τs_ref
-end
-
 # set linelist chunk size
 chunksize = 200
+overlap_lines = 20
+@assert 0 <= overlap_lines < chunksize "overlap_lines must satisfy 0 <= overlap_lines < chunksize."
+chunk_step = chunksize - overlap_lines
 
 h5open(outfile, "w") do h5
+    # metadata
     HDF5.attributes(h5)["chunksize"] = chunksize
+    HDF5.attributes(h5)["overlap_lines"] = overlap_lines
+    HDF5.attributes(h5)["chunk_step"] = chunk_step
     HDF5.attributes(h5)["n_lines"] = length(linelist)
 
+    # include atmosphere data in the same output file
+    g_atm = create_group(h5, "model_atmosphere")
+    g_atm["zs"] = zs
+    g_atm["Ts"] = Ts
+    g_atm["τs_ref"] = τs_ref
+
     # loop over chunks
-    for i in 1:chunksize:length(linelist)
+    for (chunk_idx, i) in enumerate(1:chunk_step:length(linelist))
         # get view of linelist
-        ll = view(linelist, i:min(i + chunksize - 1, length(linelist)))
+        chunk_end = min(i + chunksize - 1, length(linelist))
+        ll = view(linelist, i:chunk_end)
+        line_centers = [l.wl * 1e8 for l in ll]
 
         # high-level formation temperature calculation
         Δλ=0.001
@@ -90,13 +96,13 @@ h5open(outfile, "w") do h5
         cfunc = form_temp_result.cont_func
 
         # write to a file
-        chunk_idx = (i - 1) ÷ chunksize + 1
         g = create_group(h5, @sprintf("chunk_%04d", chunk_idx))
+        g["line_centers"] = line_centers
         g["wavs"] = wavs
         g["flux"] = flux
         g["temp"] = temp
         g["cfunc"] = cfunc
         HDF5.attributes(g)["start_index"] = i
-        HDF5.attributes(g)["end_index"] = i + length(ll) - 1
+        HDF5.attributes(g)["end_index"] = chunk_end
     end
 end
