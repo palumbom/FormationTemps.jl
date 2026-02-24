@@ -5,6 +5,8 @@ Abstract atmosphere type used by formation temperature calculations.
 """
 abstract type Atmosphere{T<:AF} end
 
+# TODO set up Atmosphere constructor
+
 """
     get_τs(atm)
 

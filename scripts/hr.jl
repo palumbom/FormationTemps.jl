@@ -272,6 +272,10 @@ for i in eachindex(T_effs)
     max_errors[i] = maximum(abs.(100 .* (Array(flux_integration_norm) .- flux_convolution_norm)))
 end
 
+# save the result
+outfile = joinpath(FT.datdir, "hr_error_data.jld2")
+jldsave(outfile; df.Teff, df.logg, vsinis, max_errors)
+
 # scatter plot 
 fig, ax1 = plt.subplots()
 sc = ax1.scatter(df.Teff, df.logg, s=vsinis./1000, c=max_errors, vmin=0.0, vmax=4.0)
