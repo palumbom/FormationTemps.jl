@@ -77,7 +77,9 @@ h5open(outfile, "w") do h5
         ll = view(linelist, i:min(i + chunksize - 1, length(linelist)))
 
         # high-level formation temperature calculation
-        form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=0.0001, 
+        Δλ=0.001
+        # Δλ=0.0001
+        form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=Δλ, 
                                                   convolve=false, Nϕ=16, 
                                                   ne_warn_thresh=Inf)
 

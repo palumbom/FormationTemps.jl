@@ -27,29 +27,29 @@ result = calc_formation_temp(star, linelist; Δλ=0.01, convolve=true, u1=0.43, 
 """
 function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEFAULT,
                              Δλ::T=0.01, convolve::Bool=false,
-                             minλ::T=NaN, maxλ::T=NaN,
+                             minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                              u1::T=NaN, u2::T=NaN, Nϕ::Int=128,
                              kwargs...) where T<:AF
     if use_gpu
         form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, 
-                                                   minλ, maxλ, convolve=convolve, 
+                                                   minλ, maxλ, buffer, convolve=convolve, 
                                                    u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
     else
         form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, 
-                                                   minλ, maxλ, convolve=convolve, 
+                                                   minλ, maxλ, buffer, convolve=convolve, 
                                                    u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
     end
     return form_temps_flux
 end
 
 function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01, 
-                                  minλ::T=NaN, maxλ::T=NaN, 
+                                  minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128, kwargs...) where T<:AF
     # get linelist 
     wls = [l.wl * 1e8 for l in linelist]
-    minλ = isnan(minλ) ? first(wls) - 2.0 : minλ
-    maxλ = isnan(maxλ) ? last(wls) + 2.0 : maxλ
+    minλ = isnan(minλ) ? first(wls) - buffer : minλ
+    maxλ = isnan(maxλ) ? last(wls) + buffer : maxλ
     λs_korg = range(minλ, maxλ, step=Δλ)
 
     # get model atmosphere
@@ -161,13 +161,13 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
 end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
-                                  minλ::T=NaN, maxλ::T=NaN, 
+                                  minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128, kwargs...) where T<:AF
     # get linelist 
     wls = [l.wl * 1e8 for l in linelist]
-    minλ = isnan(minλ) ? first(wls) - 2.0 : minλ
-    maxλ = isnan(maxλ) ? last(wls) + 2.0 : maxλ
+    minλ = isnan(minλ) ? first(wls) - buffer : minλ
+    maxλ = isnan(maxλ) ? last(wls) + buffer : maxλ
     λs_korg = range(minλ, maxλ, step=Δλ)
     
     # get model atmosphere and move to GPU
