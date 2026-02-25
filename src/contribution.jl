@@ -43,7 +43,7 @@ function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GP
 end
 
 function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                         cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+                          cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
     # move alphas to GPU
     μ_v = CUDA.zeros(T, length(σ_v))
     αs_gpu = CuArray{Float64}(αs_init)

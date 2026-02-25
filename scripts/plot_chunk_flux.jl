@@ -22,7 +22,8 @@ h5open(h5path_chunks, "r") do h5
     end
 
     # overplot each chunk as-is.
-    for group_name in group_names
+    for (idx, group_name) in enumerate(group_names)
+        # idx > 10 && break
         g = h5[group_name]
         wavs = vec(read(g["wavs"]))
         flux = vec(read(g["flux"]))
@@ -45,7 +46,8 @@ if show_spliced
         end
 
         # Spliced file is already reconciled: reconstruct by simple concatenation.
-        for group_name in group_names
+        for (idx, group_name) in enumerate(group_names)
+            # idx > 10 && break
             g = h5[group_name]
             append!(wavs_spliced, vec(read(g["wavs"])))
             append!(flux_spliced, vec(read(g["flux"])))
