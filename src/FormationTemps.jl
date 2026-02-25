@@ -57,8 +57,11 @@ include("macroturbulence/hirano.jl")
 # instrumental profile
 include("instrumental.jl")
 
-# radiative transport
+# chemical equilibrium and absorption coefficients
 include("absorption.jl")
+include("structures/AlphaCache.jl")
+
+# radaiative transport
 include("contribution.jl")
 include("tau.jl")
 
