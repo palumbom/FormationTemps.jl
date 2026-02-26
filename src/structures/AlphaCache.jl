@@ -21,9 +21,10 @@ mutable struct AlphaCache{T<:AF, TI}
     warm_ne::Vector{T}
     has_warm_ne::Bool
     ne_solved::Vector{T}
-    n_dicts::Vector{Dict{Korg.Species, T}}
+    species_layout_initialized::Bool
 
     species_keys::Vector{Korg.Species}
+    species_density_vectors::Vector{Vector{T}}
     nds_by_species::Dict{Korg.Species, Vector{T}}
     α_cntm::Vector{TI}
 end
@@ -50,8 +51,9 @@ function AlphaCache(wls::Korg.Wavelengths, A_X::AA{T, 1}, Nlayers::Integer;
         zeros(T, Int(Nlayers)),
         false,
         zeros(T, Int(Nlayers)),
-        [Dict{Korg.Species, T}() for _ in 1:Int(Nlayers)],
+        false,
         Korg.Species[],
+        Vector{Vector{T}}(),
         Dict{Korg.Species, Vector{T}}(),
         [dummy_itp for _ in 1:Int(Nlayers)],
     )
@@ -108,41 +110,44 @@ function _seed_ne_guesses!(cache::AlphaCache{T}, nes::AA{T, 1}) where {T<:AF}
     return nothing
 end
 
-function _build_species_density_view!(cache::AlphaCache{T}) where {T<:AF}
+function _initialize_species_layout!(cache::AlphaCache{T}, n_dict::Dict) where {T<:AF}
+    if cache.species_layout_initialized
+        return nothing
+    end
+
     empty!(cache.species_keys)
-    first_layer = cache.n_dicts[1]
-    for spec in keys(first_layer)
+    empty!(cache.species_density_vectors)
+    empty!(cache.nds_by_species)
+    for spec in keys(n_dict)
         if spec != _HIII_SPECIES
+            vec = zeros(T, cache.Nlayers)
             push!(cache.species_keys, spec)
-            vec = get!(cache.nds_by_species, spec, zeros(T, cache.Nlayers))
-            length(vec) == cache.Nlayers || (cache.nds_by_species[spec] = zeros(T, cache.Nlayers))
+            push!(cache.species_density_vectors, vec)
+            cache.nds_by_species[spec] = vec
         end
     end
 
-    # Remove stale species not present in the current chemistry solution.
-    keep = Set(cache.species_keys)
-    for spec in collect(keys(cache.nds_by_species))
-        spec in keep || delete!(cache.nds_by_species, spec)
-    end
+    cache.species_layout_initialized = true
+    return nothing
+end
 
-    for spec in cache.species_keys
-        vec = cache.nds_by_species[spec]
-        @inbounds for i in 1:cache.Nlayers
-            vec[i] = cache.n_dicts[i][spec]
-        end
+function _fill_species_layer!(cache::AlphaCache{T}, n_dict::Dict, i::Int) where {T<:AF}
+    @inbounds for j in eachindex(cache.species_keys)
+        cache.species_density_vectors[j][i] = n_dict[cache.species_keys[j]]
     end
     return nothing
 end
 
 function _solve_layer_chemistry!(cache::AlphaCache{T}, αs::AA{T, 2}, i::Int, wls::Korg.Wavelengths,
-                                 Ts::AA{T, 1}, nds::AA{T, 1}, partition_funcs, ne_warn_thresh) where {T<:AF}
+                                 Ts::AA{T, 1}, nds::AA{T, 1}, partition_funcs, ne_warn_thresh;
+                                 fill_species::Bool=true) where {T<:AF}
     temp = Ts[i]
     nd = nds[i]
     ne_guess = cache.ne_solved[i]
 
-    ne, n_dict = Korg.chemical_equilibrium(temp, nd, ne_guess, cache.abs_abundances, 
-                                           Korg.ionization_energies, partition_funcs, 
-                                           Korg.default_log_equilibrium_constants, 
+    ne, n_dict = Korg.chemical_equilibrium(temp, nd, ne_guess, cache.abs_abundances,
+                                           Korg.ionization_energies, partition_funcs,
+                                           Korg.default_log_equilibrium_constants,
                                            electron_number_density_warn_threshold=ne_warn_thresh)
 
     α_cntm_vals = reverse(Korg.total_continuum_absorption(Korg.eachfreq(cache.cntm_wls),
@@ -151,8 +156,18 @@ function _solve_layer_chemistry!(cache::AlphaCache{T}, αs::AA{T, 2}, i::Int, wl
 
     @views αs[i, :] .= α_cntm_layer(wls)
     cache.ne_solved[i] = ne
-    cache.n_dicts[i] = n_dict
     cache.α_cntm[i] = α_cntm_layer
+    fill_species && _fill_species_layer!(cache, n_dict, i)
+    return n_dict
+end
+
+function _fill_continuum_from_cache!(αs_cont::AA{T,2}, cache::AlphaCache{T},
+                                     wls::Korg.Wavelengths) where {T<:AF}
+    N = size(αs_cont, 1)
+    N == cache.Nlayers || throw(ArgumentError("continuum array layer count $(N) != cache layer count $(cache.Nlayers)"))
+    @inbounds for i in 1:N
+        @views αs_cont[i, :] .= cache.α_cntm[i](wls)
+    end
     return nothing
 end
 
@@ -163,23 +178,32 @@ function _compute_alpha_cached!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist, 
                                 cutoff_threshold=3e-4,
                                 threaded::Bool=true) where {T<:AF}
     N = length(Ts)
+    N == 0 && return nothing
+
     _validate_alpha_cache(cache, wls, N)
     _seed_ne_guesses!(cache, nes)
 
-    if threaded && Threads.nthreads() > 1
-        Threads.@threads for i in 1:N
-            _solve_layer_chemistry!(cache, αs, i, wls, Ts, nds, partition_funcs, ne_warn_thresh)
-        end
-    else
-        @inbounds for i in 1:N
-            _solve_layer_chemistry!(cache, αs, i, wls, Ts, nds, partition_funcs, ne_warn_thresh)
+    # solve one layer first to initialize the species layout once
+    n_dict_first = _solve_layer_chemistry!(cache, αs, 1, wls, Ts, nds, partition_funcs,
+                                           ne_warn_thresh; fill_species=false)
+    _initialize_species_layout!(cache, n_dict_first)
+    _fill_species_layer!(cache, n_dict_first, 1)
+
+    if N > 1
+        if threaded && Threads.nthreads() > 1
+            Threads.@threads for i in 2:N
+                _solve_layer_chemistry!(cache, αs, i, wls, Ts, nds, partition_funcs, ne_warn_thresh)
+            end
+        else
+            @inbounds for i in 2:N
+                _solve_layer_chemistry!(cache, αs, i, wls, Ts, nds, partition_funcs, ne_warn_thresh)
+            end
         end
     end
 
-    _build_species_density_view!(cache)
     vmic = zero(T)
-    Korg.line_absorption!(αs, linelist, wls, Ts, cache.ne_solved, 
-                          cache.nds_by_species, partition_funcs, 
+    Korg.line_absorption!(αs, linelist, wls, Ts, cache.ne_solved,
+                          cache.nds_by_species, partition_funcs,
                           vmic, cache.α_cntm; cutoff_threshold=cutoff_threshold)
 
     # Persist solved n_e profile for warm-starting the next column.
@@ -205,9 +229,9 @@ function compute_alpha!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist,
                         threaded::Bool=true,
                         refresh_abundances::Bool=false) where {T<:AF}
     refresh_abundances && set_abundances!(cache, A_X)
-    _compute_alpha_cached!(αs, wls, linelist, atm.Ts, atm.nd, atm.nₑ, cache; 
-                           partition_funcs=partition_funcs, 
-                           ne_warn_thresh=ne_warn_thresh, 
+    _compute_alpha_cached!(αs, wls, linelist, atm.Ts, atm.nd, atm.nₑ, cache;
+                           partition_funcs=partition_funcs,
+                           ne_warn_thresh=ne_warn_thresh,
                            cutoff_threshold=cutoff_threshold, threaded=threaded)
     return nothing
 end
@@ -221,9 +245,9 @@ function compute_alpha!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist,
                         threaded::Bool=true,
                         refresh_abundances::Bool=false) where {T<:AF}
     refresh_abundances && set_abundances!(cache, A_X)
-    _compute_alpha_cached!(αs, wls, linelist, Ts, nds, nes, cache; 
-                           partition_funcs=partition_funcs, 
-                           ne_warn_thresh=ne_warn_thresh, 
+    _compute_alpha_cached!(αs, wls, linelist, Ts, nds, nes, cache;
+                           partition_funcs=partition_funcs,
+                           ne_warn_thresh=ne_warn_thresh,
                            cutoff_threshold=cutoff_threshold, threaded=threaded)
     return nothing
 end
@@ -235,12 +259,12 @@ function compute_alpha!(αs::AA{T, 2}, αs_cont::AA{T, 2}, wls::Korg.Wavelengths
                         cutoff_threshold=3e-4,
                         threaded::Bool=true,
                         refresh_abundances::Bool=false) where {T<:AF}
-    compute_alpha!(αs, wls, linelist, atm, A_X, cache; 
-                   partition_funcs=partition_funcs, 
-                   ne_warn_thresh=ne_warn_thresh, 
-                   cutoff_threshold=cutoff_threshold, 
+    compute_alpha!(αs, wls, linelist, atm, A_X, cache;
+                   partition_funcs=partition_funcs,
+                   ne_warn_thresh=ne_warn_thresh,
+                   cutoff_threshold=cutoff_threshold,
                    threaded=threaded, refresh_abundances=refresh_abundances)
-    αs_cont .= αs
+    _fill_continuum_from_cache!(αs_cont, cache, wls)
     return nothing
 end
 
@@ -250,10 +274,10 @@ function compute_alpha!(αs::AA{T, 2}, αs_cont::AA{T, 2}, wls::Korg.Wavelengths
                         partition_funcs=Korg.default_partition_funcs,
                         ne_warn_thresh=0.1, cutoff_threshold=3e-4,
                         threaded::Bool=true, refresh_abundances::Bool=false) where {T<:AF}
-    compute_alpha!(αs, wls, linelist, zs, Ts, nds, nes, A_X, cache; 
-                   partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh, 
-                   cutoff_threshold=cutoff_threshold, threaded=threaded, 
+    compute_alpha!(αs, wls, linelist, zs, Ts, nds, nes, A_X, cache;
+                   partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh,
+                   cutoff_threshold=cutoff_threshold, threaded=threaded,
                    refresh_abundances=refresh_abundances)
-    αs_cont .= αs
+    _fill_continuum_from_cache!(αs_cont, cache, wls)
     return nothing
 end
