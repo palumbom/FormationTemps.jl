@@ -7,11 +7,15 @@ on:
     tags: '*'
   pull_request:
 
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   build:
     permissions:
       actions: write
-      contents: write
+      contents: read
       pull-requests: read
       statuses: write
     runs-on: ubuntu-latest
@@ -36,8 +40,27 @@ jobs:
           project: docs
         env:
           PYTHON: python
-      - uses: julia-actions/julia-docdeploy@latest
+      - name: Build documentation
+        run: julia --color=yes --project=docs docs/make.jl
         env:
           PYTHON: python
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # If authenticating with GitHub Actions token
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }} # If authenticating with SSH deploy key
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/build
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
