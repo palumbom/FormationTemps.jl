@@ -66,9 +66,9 @@ makedocs(;
     pages=pages,
 )
 
-# # deploydocs
-# deploydocs(;
-#     devbranch="main",
-#     repo="github.com/palumbom/FormationTemps.jl.git",
-#     push_preview=true
-# )
+# deploydocs
+deploydocs(;
+    devbranch="main",
+    repo="github.com/palumbom/FormationTemps.jl.git",
+    push_preview=true
+)
