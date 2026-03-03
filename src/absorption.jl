@@ -68,8 +68,8 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
     triples = Vector{Tuple{Float64, Dict, typeof(Korg.linear_interpolation(cntm_wls, zeros(length(cntm_wls))))}}(undef, N)
 
     # loop over layers and do chemical equilibrium
-    # Threads.@threads for i in 1:N
-    for i in 1:N
+    Threads.@threads for i in 1:N
+    # for i in 1:N
         # index the layers
         temp = Ts[i]
         nd = nds[i]
@@ -140,8 +140,8 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
     triples = Vector{Tuple{Float64, Dict, typeof(Korg.linear_interpolation(cntm_wls, zeros(length(cntm_wls))))}}(undef, N)
 
     # loop over layers and do chemical equilibrium
-    # Threads.@threads for i in 1:N
-    for i in 1:N
+    Threads.@threads for i in 1:N
+    # for i in 1:N
         # index the layers
         temp = Ts[i]
         nd = nds[i]
