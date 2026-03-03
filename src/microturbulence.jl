@@ -113,73 +113,65 @@ function roll_rows_2d!(dst, src, r, L)
     return nothing
 end
 
-function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1}, 
+# Build per-row Fourier-domain filter for a Doppler shift + optional Gaussian broadening.
+# H[i, f] = exp(-2πi · f · s[i] / L) · exp(-(π · σ_pix[i] · f / L)²)
+# where s[i] is the shift in pixels and σ_pix[i] is the Gaussian width in pixels (both
+# computed from the velocity arrays before calling this kernel).
+# f is a 1-indexed column mapped to the 0-indexed frequency bin f-1.
+function build_doppler_filter!(filter, s, σ_pix, L, nfreq)
+    i    = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    f_idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x   # 1-indexed
+    if i <= size(filter, 1) && f_idx <= nfreq
+        f0    = f_idx - 1                                        # 0-indexed bin
+        θ     = -2π * f0 * s[i] / L
+        gauss = exp(-(π * σ_pix[i] * f0 / L)^2)
+        @inbounds filter[i, f_idx] = complex(gauss * cos(θ), gauss * sin(θ))
+    end
+    return nothing
+end
+
+function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, μ_v::CA{T,1}, σ_v::CA{T,1}) where {T<:AF}
     # copy to device
     copyto!(cmem.xs_gpu, xs)
     copyto!(cmem.ys_gpu, ys)
 
-    # compute velocity offset and width in wavelength units (discrete center)
+    # compute per-row shift (pixels) and Gaussian width (pixels)
+    # s[i]     = μ_v[i] * λ0 / (c * Δλ)  — shift of row i in pixels
+    # σ_pix[i] = σ_v[i] * λ0 / (c * Δλ)  — Gaussian broadening width in pixels
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
-    μ_host = Array(μ_v)
-    λc_host = λ0 .* (1 .+ μ_host ./ c_ms)
-    copyto!(cmem.λc_gpu, CuArray(λc_host))
-    cmem.σ_fac_gpu .= σ_v ./ c_ms
-
-    # clamp broadening to prevent div by 0
     Δλ = median(diff(xs))
-    σ_floor = T(max(eps(T) * mean(xs), T(0.1) * Δλ))
+    μ_h = Array(μ_v)
+    σ_h = Array(σ_v)
+    copyto!(cmem.λc_gpu,    CuArray(T.(μ_h .* (λ0 / (c_ms * Δλ)))))
+    copyto!(cmem.σ_fac_gpu, CuArray(T.(σ_h .* (λ0 / (c_ms * Δλ)))))
 
-    # pad the signal
-    ts = (32,32)
+    # pad the signal (edge-value extension)
+    ts = (32, 32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
-                                           cmem.Nλ, cmem.pad_left, 
-                                           cmem.pad_right)
+                                           cmem.Nλ, cmem.pad_left, cmem.pad_right)
     CUDA.synchronize()
 
-    # compute the padded kernel
-    fill!(cmem.padded_kernel_gpu, zero(T))
-    ts2 = (32,32)
-    bs2 = (cld(cmem.Nλ, ts2[1]), cld(cmem.Natm, ts2[2]))
-    @cuda threads=ts2 blocks=bs2 compute_padded_kernel2D!(cmem.padded_kernel_gpu,
-                                                          cmem.xs_gpu, cmem.λc_gpu,
-                                                          cmem.σ_fac_gpu,
-                                                          cmem.Nλ, cmem.pad_left,
-                                                          σ_floor)
-    CUDA.synchronize()
-
-    # normalize the kernel (row-wise)
-    cmem.norm_buffer .= CUDA.sum(cmem.padded_kernel_gpu, dims=2)
-    cmem.padded_kernel_gpu ./= cmem.norm_buffer
-
-    # constant roll: align zero-lag index (pad_left + i0) to padded center; preserves μ_v
-    center = cmem.L ÷ 2
-    r0 = center - (cmem.pad_left + i0)
-    r_gpu = CUDA.fill(Int32(r0), cmem.Natm)
-
-    tsr = (32,32)
-    bsr = (cld(cmem.L, tsr[1]), cld(cmem.Natm, tsr[2]))
-    @cuda threads=tsr blocks=bsr roll_rows_2d!(cmem.shift_kernel_gpu, cmem.padded_kernel_gpu, r_gpu, cmem.L)
-    CUDA.synchronize()
-
-    # center -> FFT indexing
-    CUDA.CUFFT.ifftshift!(cmem.padded_kernel_gpu, cmem.shift_kernel_gpu, 2)
-
-    # forward fourier transforms
-    mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.padded_kernel_gpu)
+    # FFT the padded signal
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
 
-    # convolution theorem
-    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
+    # build per-row Fourier filter analytically (no spatial kernel, no normalization)
+    nfreq = size(cmem.kernel_ft_gpu, 2)
+    ts2 = (32, 32)
+    bs2 = (cld(nfreq, ts2[1]), cld(cmem.Natm, ts2[2]))
+    @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
+                                                       cmem.λc_gpu, cmem.σ_fac_gpu,
+                                                       cmem.L, nfreq)
+    CUDA.synchronize()
 
-    # inverse fourier transform
+    # convolution theorem + inverse FFT
+    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # out = @view cmem.conv_gpu[:, cmem.pad_left: cmem.pad_left + cmem.Nλ - 1]
-    out = cmem.conv_gpu[:, cmem.pad_left: cmem.pad_left + cmem.Nλ - 1]
+    out = cmem.conv_gpu[:, cmem.pad_left:cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
 end
@@ -194,64 +186,41 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     copyto!(cmem.xs_gpu, xs_d)
     copyto!(cmem.ys_gpu, ys_d)
 
-    # compute i0, λ0 on host via bulk copy (no scalar device access)
+    # compute per-row shift (pixels) and Gaussian width (pixels) on host
     xs_h = Array(xs_d)
     i0 = length(xs_h) ÷ 2 + 1
     λ0 = xs_h[i0]
-
-    # centers and width factors
-    μ_h = Array(μ_v_d)
-    λc_h = λ0 .* (1 .+ μ_h ./ c_ms)
-    copyto!(cmem.λc_gpu, CuArray(λc_h))
-    cmem.σ_fac_gpu .= σ_v_d ./ c_ms
-
-    # σ_floor on host
     Δλ = median(diff(xs_h))
-    σ_floor = T(max(eps(T) * mean(xs_h), T(0.1) * Δλ))
+    μ_h = Array(μ_v_d)
+    σ_h = Array(σ_v_d)
+    copyto!(cmem.λc_gpu,    CuArray(T.(μ_h .* (λ0 / (c_ms * Δλ)))))
+    copyto!(cmem.σ_fac_gpu, CuArray(T.(σ_h .* (λ0 / (c_ms * Δλ)))))
 
-    # pad the signal
-    ts = (32,32)
+    # pad the signal (edge-value extension)
+    ts = (32, 32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
-    @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu, cmem.Nλ, cmem.pad_left, cmem.pad_right)
+    @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
+                                           cmem.Nλ, cmem.pad_left, cmem.pad_right)
     CUDA.synchronize()
 
-    # compute kernel on device
-    fill!(cmem.padded_kernel_gpu, zero(T))
-    ts2 = (32,32)
-    bs2 = (cld(cmem.Nλ, ts2[1]), cld(cmem.Natm, ts2[2]))
-    @cuda threads=ts2 blocks=bs2 compute_padded_kernel2D!(cmem.padded_kernel_gpu,
-                                                          cmem.xs_gpu, cmem.λc_gpu,
-                                                          cmem.σ_fac_gpu,
-                                                          cmem.Nλ, cmem.pad_left,
-                                                          σ_floor)
-    CUDA.synchronize()
-
-    # normalize row-wise
-    cmem.norm_buffer .= CUDA.sum(cmem.padded_kernel_gpu, dims=2)
-    cmem.padded_kernel_gpu ./= cmem.norm_buffer
-
-    # constant roll to align zero-lag, preserve μ_v
-    center = cmem.L ÷ 2
-    r0 = center - (cmem.pad_left + i0)
-    r_gpu = CUDA.fill(Int32(r0), cmem.Natm)
-
-    tsr = (32,32)
-    bsr = (cld(cmem.L, tsr[1]), cld(cmem.Natm, tsr[2]))
-    @cuda threads=tsr blocks=bsr roll_rows_2d!(cmem.shift_kernel_gpu, cmem.padded_kernel_gpu, r_gpu, cmem.L)
-    CUDA.synchronize()
-
-    # center -> FFT indexing
-    CUDA.CUFFT.ifftshift!(cmem.padded_kernel_gpu, cmem.shift_kernel_gpu, 2)
-
-    # FFTs and convolution theorem
-    mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.padded_kernel_gpu)
+    # FFT the padded signal
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
+
+    # build per-row Fourier filter analytically (no spatial kernel, no normalization)
+    nfreq = size(cmem.kernel_ft_gpu, 2)
+    ts2 = (32, 32)
+    bs2 = (cld(nfreq, ts2[1]), cld(cmem.Natm, ts2[2]))
+    @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
+                                                       cmem.λc_gpu, cmem.σ_fac_gpu,
+                                                       cmem.L, nfreq)
+    CUDA.synchronize()
+
+    # convolution theorem + inverse FFT
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # out = @view cmem.conv_gpu[:, cmem.pad_left: cmem.pad_left + cmem.Nλ - 1]
-    out = cmem.conv_gpu[:, cmem.pad_left: cmem.pad_left + cmem.Nλ - 1]
+    out = cmem.conv_gpu[:, cmem.pad_left:cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
 end
