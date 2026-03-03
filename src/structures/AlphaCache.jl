@@ -87,22 +87,22 @@ function reset_alpha_cache!(cache::AlphaCache)
 end
 
 function _validate_alpha_cache(cache::AlphaCache, wls::Korg.Wavelengths, N::Int)
-    N == cache.Nlayers || throw(ArgumentError("AlphaCache layer count $(cache.Nlayers) != input layer count $N"))
+    N <= cache.Nlayers || throw(ArgumentError("AlphaCache layer count $(cache.Nlayers) < input layer count $N"))
     if first(wls) < first(cache.cntm_wls) || last(wls) > last(cache.cntm_wls)
         throw(ArgumentError("wavelength grid lies outside cached continuum grid; rebuild AlphaCache for this wls"))
     end
     return nothing
 end
 
-function _seed_ne_guesses!(cache::AlphaCache{T}, nes::AA{T, 1}) where {T<:AF}
+function _seed_ne_guesses!(cache::AlphaCache{T}, nes::AA{T, 1}, N::Int) where {T<:AF}
     tiny = eps(T)
     if cache.has_warm_ne
-        @inbounds for i in eachindex(cache.ne_solved, cache.warm_ne)
+        @inbounds for i in 1:N
             cache.ne_solved[i] = max(cache.warm_ne[i], tiny)
         end
     else
         cache.ne_solved[1] = max(nes[1], tiny)
-        @inbounds for i in 2:length(cache.ne_solved)
+        @inbounds for i in 2:N
             # Depth-coupled fallback guess: use the previous-layer value.
             cache.ne_solved[i] = max(nes[i - 1], tiny)
         end
@@ -164,7 +164,7 @@ end
 function _fill_continuum_from_cache!(αs_cont::AA{T,2}, cache::AlphaCache{T},
                                      wls::Korg.Wavelengths) where {T<:AF}
     N = size(αs_cont, 1)
-    N == cache.Nlayers || throw(ArgumentError("continuum array layer count $(N) != cache layer count $(cache.Nlayers)"))
+    N <= cache.Nlayers || throw(ArgumentError("continuum array layer count $(N) > cache layer count $(cache.Nlayers)"))
     @inbounds for i in 1:N
         @views αs_cont[i, :] .= cache.α_cntm[i](wls)
     end
@@ -181,7 +181,7 @@ function _compute_alpha_cached!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist, 
     N == 0 && return nothing
 
     _validate_alpha_cache(cache, wls, N)
-    _seed_ne_guesses!(cache, nes)
+    _seed_ne_guesses!(cache, nes, N)
 
     # solve one layer first to initialize the species layout once
     n_dict_first = _solve_layer_chemistry!(cache, αs, 1, wls, Ts, nds, partition_funcs,
@@ -202,13 +202,16 @@ function _compute_alpha_cached!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist, 
     end
 
     vmic = zero(T)
-    Korg.line_absorption!(αs, linelist, wls, Ts, cache.ne_solved,
-                          cache.nds_by_species, partition_funcs,
-                          vmic, cache.α_cntm; cutoff_threshold=cutoff_threshold)
+    ne_view     = view(cache.ne_solved, 1:N)
+    nds_by_spec = Dict(k => view(v, 1:N) for (k, v) in cache.nds_by_species)
+    α_cntm_view = view(cache.α_cntm,    1:N)
+    Korg.line_absorption!(αs, linelist, wls, Ts, ne_view,
+                          nds_by_spec, partition_funcs,
+                          vmic, α_cntm_view; cutoff_threshold=cutoff_threshold)
 
     # Persist solved n_e profile for warm-starting the next column.
-    nes .= cache.ne_solved
-    cache.warm_ne .= cache.ne_solved
+    nes .= ne_view
+    view(cache.warm_ne, 1:N) .= ne_view
     cache.has_warm_ne = true
     return nothing
 end
