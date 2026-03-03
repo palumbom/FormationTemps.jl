@@ -13,7 +13,7 @@ function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem
 end
 
 function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                           cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+                              cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
     # get contribution function
     calc_flux_cfunc!(αs_init, atm, mem, cmem, σ_v)
 
@@ -23,8 +23,8 @@ function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPU
 end
 
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                              cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, 
-                              σ_v::CA{T,1}) where T<:AF
+                               cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, 
+                               σ_v::CA{T,1}) where T<:AF
     # perturb the alphas
     αs_gpu = CuArray{Float64}(αs_init)
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, αs_gpu, μ_v, σ_v)
