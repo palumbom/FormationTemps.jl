@@ -24,15 +24,15 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         αv = @view αs[:,j]
         τv = @view τs[:,j]
 
-        # bounds for clamping
-        αmin = αv[1]; αmax = αmin
+        # bounds for clamping — opacity is non-negative, so lo = 0 prevents negative
+        # τ increments even when FFT ringing produces tiny negative α values
+        αmax = αv[1]
         for p in 2:N
             v = αv[p]
-            αmin = v < αmin ? v : αmin
             αmax = v > αmax ? v : αmax
         end
-        lo = 0.5 * αmin
-        hi = 2.0 * αmax
+        lo = 0.0
+        hi = max(2.0 * αmax, 0.0)
 
         # init
         τv[1] = 1e-5
@@ -44,7 +44,10 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         prev_dC = (αv[2] - αv[1]) / ds0
         dC = (αv[3] - αv[2]) / ds1
 
-        ybar = (prev_dC * dC) / (αC * dC + (1.0 - αC) * prev_dC)
+        # monotone limiter: zero derivative at local extrema to prevent denominator
+        # blow-up (αC*dC + (1-αC)*prev_dC → 0) and Cf overshoot
+        ybar = ifelse(prev_dC * dC <= 0.0, 0.0,
+                      (prev_dC * dC) / (αC * dC + (1.0 - αC) * prev_dC))
         C0 = αv[2] + 0.5 * ds0 * ybar
         C1 = αv[2] - 0.5 * ds1 * ybar
         Cf = C0
@@ -71,7 +74,8 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
             αC = one_third * (1.0 + ds1 / (ds0 + ds1))
             dC = (αv[t+2] - αv[t+1]) / ds1
 
-            ybar = (prev_dC * dC) / (αC * dC + (1.0 - αC) * prev_dC)
+            ybar = ifelse(prev_dC * dC <= 0.0, 0.0,
+                          (prev_dC * dC) / (αC * dC + (1.0 - αC) * prev_dC))
             C0 = αv[t+1] + 0.5 * ds0 * ybar
             C1 = αv[t+1] - 0.5 * ds1 * ybar
             Cf = 0.5 * (C0 + prev_C1)

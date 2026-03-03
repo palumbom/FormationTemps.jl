@@ -144,7 +144,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     Δλ = median(diff(xs))
     μ_h = Array(μ_v)
     σ_h = Array(σ_v)
-    copyto!(cmem.λc_gpu,    CuArray(T.(μ_h .* (λ0 / (c_ms * Δλ)))))
+    s_max = T(cmem.pad_left - 1)
+    copyto!(cmem.λc_gpu,    CuArray(clamp.(T.(μ_h .* (λ0 / (c_ms * Δλ))), -s_max, s_max)))
     copyto!(cmem.σ_fac_gpu, CuArray(T.(σ_h .* (λ0 / (c_ms * Δλ)))))
 
     # pad the signal (edge-value extension)
@@ -170,8 +171,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
-    # slice valid region
-    out = cmem.conv_gpu[:, cmem.pad_left:cmem.pad_left + cmem.Nλ - 1]
+    # slice valid region (signal occupies pad_left+1 : pad_left+Nλ in 1-indexed)
+    out = cmem.conv_gpu[:, cmem.pad_left+1:cmem.pad_left + cmem.Nλ]
     CUDA.synchronize()
     return out
 end
@@ -193,7 +194,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     Δλ = median(diff(xs_h))
     μ_h = Array(μ_v_d)
     σ_h = Array(σ_v_d)
-    copyto!(cmem.λc_gpu,    CuArray(T.(μ_h .* (λ0 / (c_ms * Δλ)))))
+    s_max = T(cmem.pad_left - 1)
+    copyto!(cmem.λc_gpu,    CuArray(clamp.(T.(μ_h .* (λ0 / (c_ms * Δλ))), -s_max, s_max)))
     copyto!(cmem.σ_fac_gpu, CuArray(T.(σ_h .* (λ0 / (c_ms * Δλ)))))
 
     # pad the signal (edge-value extension)
@@ -219,8 +221,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
-    # slice valid region
-    out = cmem.conv_gpu[:, cmem.pad_left:cmem.pad_left + cmem.Nλ - 1]
+    # slice valid region (signal occupies pad_left+1 : pad_left+Nλ in 1-indexed)
+    out = cmem.conv_gpu[:, cmem.pad_left+1:cmem.pad_left + cmem.Nλ]
     CUDA.synchronize()
     return out
 end
