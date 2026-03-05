@@ -68,12 +68,17 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
     sdy = gridDim().y * blockDim().y
 
     # Gauss-Legendre two-point abscissa constant
-    one_over_sqrt3 = 1.0 / sqrt(3.0)
+    one_over_sqrt3 = one(T) / sqrt(T(3))
+    frac1 = T(0.5) * (one(T) - one_over_sqrt3)
+    frac2 = T(0.5) * (one(T) + one_over_sqrt3)
 
     # loop over lambda
     for j in idx:sdx:length(λs)
         # convert to cm
-        λ_cm = λs[j] * 1e-8
+        λ_cm = λs[j] * T(1e-8)
+        λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
+        bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
+        bb_x = T(h) * T(c) / (λ_cm * T(kB))
 
         # loop over atmosphere
         for k in idy:sdy:length(Ts)-1
@@ -87,18 +92,19 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
-            # linear T interp wrt τ
+            # linear T interp at fixed 2-point Gauss nodes
             dT = Ts[k+1] - Ts[k]
-            inv_dτ = 1.0 / Δτ
-            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
-            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
+            T1 = Ts[k] + dT * frac1
+            T2 = Ts[k] + dT * frac2
 
             # evaluate integrand f = B(T,λ) * exp(-τ) 
-            f1 = blackbody_gpu(T1, λ_cm) * exp(-τp1)
-            f2 = blackbody_gpu(T2, λ_cm) * exp(-τp2)
+            B1 = bb_num / (exp(bb_x / T1) - one(T))
+            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            f1 = B1 * exp(-τp1)
+            f2 = B2 * exp(-τp2)
 
             # store contribution
-            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * 1e-8
+            @inbounds cfunc[k, j] = T(0.5) * (f1 + f2) * T(1e-8)
         end
     end
     return nothing
@@ -112,11 +118,17 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
     sdy = gridDim().y * blockDim().y
 
     # Gauss-Legendre two-point abscissa constant
-    one_over_sqrt3 = 1.0 / sqrt(3.0)
+    T = eltype(Ts)
+    one_over_sqrt3 = one(T) / sqrt(T(3))
+    frac1 = T(0.5) * (one(T) - one_over_sqrt3)
+    frac2 = T(0.5) * (one(T) + one_over_sqrt3)
 
     # loop over lambda
     for j in idx:sdx:length(λs)
-        λ_cm = λs[j] * 1e-8
+        λ_cm = λs[j] * T(1e-8)
+        λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
+        bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
+        bb_x = T(h) * T(c) / (λ_cm * T(kB))
 
         # loop over atmosphere
         for k in idy:sdy:length(Ts)-1
@@ -130,18 +142,19 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
-            # linear T interp wrt τ
+            # linear T interp at fixed 2-point Gauss nodes
             dT = Ts[k+1] - Ts[k]
-            inv_dτ = 1.0 / Δτ
-            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
-            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
+            T1 = Ts[k] + dT * frac1
+            T2 = Ts[k] + dT * frac2
 
             # evaluate integrand f = B(T,λ) * E_2(τ)  
-            f1 = blackbody_gpu(T1, λ_cm) * E_2(τp1)
-            f2 = blackbody_gpu(T2, λ_cm) * E_2(τp2)
+            B1 = bb_num / (exp(bb_x / T1) - one(T))
+            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            f1 = B1 * E_2(τp1)
+            f2 = B2 * E_2(τp2)
 
             # store contribution
-            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * 1e-8
+            @inbounds cfunc[k, j] = T(0.5) * (f1 + f2) * T(1e-8)
         end
     end
     return nothing
