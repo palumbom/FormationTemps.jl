@@ -130,6 +130,16 @@ function build_doppler_filter!(filter, s, σ_pix, L, nfreq)
     return nothing
 end
 
+function set_doppler_params!(shift_pix, sigma_pix, μ_v, σ_v, scale, s_max)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= length(shift_pix)
+        s = μ_v[i] * scale
+        @inbounds shift_pix[i] = clamp(s, -s_max, s_max)
+        @inbounds sigma_pix[i] = σ_v[i] * scale
+    end
+    return nothing
+end
+
 function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, μ_v::CA{T,1}, σ_v::CA{T,1}) where {T<:AF}
     # copy to device
@@ -142,18 +152,19 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     Δλ = median(diff(xs))
-    μ_h = Array(μ_v)
-    σ_h = Array(σ_v)
+    cmem.doppler_scale = T(λ0 / (c_ms * Δλ))
+    cmem.doppler_ready = true
     s_max = T(cmem.pad_left - 1)
-    copyto!(cmem.λc_gpu,    CuArray(clamp.(T.(μ_h .* (λ0 / (c_ms * Δλ))), -s_max, s_max)))
-    copyto!(cmem.σ_fac_gpu, CuArray(T.(σ_h .* (λ0 / (c_ms * Δλ)))))
+    ts0 = 256
+    bs0 = cld(cmem.Natm, ts0)
+    @cuda threads=ts0 blocks=bs0 set_doppler_params!(cmem.λc_gpu, cmem.σ_fac_gpu,
+                                                      μ_v, σ_v, cmem.doppler_scale, s_max)
 
     # pad the signal (edge-value extension)
     ts = (32, 32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
-    CUDA.synchronize()
 
     # FFT the padded signal
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
@@ -165,16 +176,13 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
                                                        cmem.λc_gpu, cmem.σ_fac_gpu,
                                                        cmem.L, nfreq)
-    CUDA.synchronize()
 
     # convolution theorem + inverse FFT
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region (signal occupies pad_left+1 : pad_left+Nλ in 1-indexed)
-    out = cmem.conv_gpu[:, cmem.pad_left+1:cmem.pad_left + cmem.Nλ]
-    CUDA.synchronize()
-    return out
+    return @view cmem.conv_gpu[:, cmem.pad_left+1:cmem.pad_left + cmem.Nλ]
 end
 
 # device-native overload: accepts CuArray inputs and avoids GPU scalar indexing
@@ -187,23 +195,28 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     copyto!(cmem.xs_gpu, xs_d)
     copyto!(cmem.ys_gpu, ys_d)
 
-    # compute per-row shift (pixels) and Gaussian width (pixels) on host
-    xs_h = Array(xs_d)
-    i0 = length(xs_h) ÷ 2 + 1
-    λ0 = xs_h[i0]
-    Δλ = median(diff(xs_h))
-    μ_h = Array(μ_v_d)
-    σ_h = Array(σ_v_d)
+    # initialize wavelength-to-pixel conversion once per memory object
+    if !cmem.doppler_ready
+        xs_h = Array(xs_d)
+        i0 = length(xs_h) ÷ 2 + 1
+        λ0 = xs_h[i0]
+        Δλ = median(diff(xs_h))
+        cmem.doppler_scale = T(λ0 / (c_ms * Δλ))
+        cmem.doppler_ready = true
+    end
+
+    # compute per-row shift (pixels) and Gaussian width (pixels) on device
     s_max = T(cmem.pad_left - 1)
-    copyto!(cmem.λc_gpu,    CuArray(clamp.(T.(μ_h .* (λ0 / (c_ms * Δλ))), -s_max, s_max)))
-    copyto!(cmem.σ_fac_gpu, CuArray(T.(σ_h .* (λ0 / (c_ms * Δλ)))))
+    ts0 = 256
+    bs0 = cld(cmem.Natm, ts0)
+    @cuda threads=ts0 blocks=bs0 set_doppler_params!(cmem.λc_gpu, cmem.σ_fac_gpu,
+                                                      μ_v_d, σ_v_d, cmem.doppler_scale, s_max)
 
     # pad the signal (edge-value extension)
     ts = (32, 32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
-    CUDA.synchronize()
 
     # FFT the padded signal
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
@@ -215,14 +228,11 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
                                                        cmem.λc_gpu, cmem.σ_fac_gpu,
                                                        cmem.L, nfreq)
-    CUDA.synchronize()
 
     # convolution theorem + inverse FFT
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region (signal occupies pad_left+1 : pad_left+Nλ in 1-indexed)
-    out = cmem.conv_gpu[:, cmem.pad_left+1:cmem.pad_left + cmem.Nλ]
-    CUDA.synchronize()
-    return out
+    return @view cmem.conv_gpu[:, cmem.pad_left+1:cmem.pad_left + cmem.Nλ]
 end

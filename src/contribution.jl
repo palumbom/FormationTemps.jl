@@ -25,40 +25,38 @@ end
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
                                cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, 
                                σ_v::CA{T,1}) where T<:AF
-    # perturb the alphas
-    αs_gpu = CuArray{Float64}(αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, αs_gpu, μ_v, σ_v)
-    CUDA.synchronize()
+    # perturb opacities in-place using preallocated memory
+    copyto!(mem.αs, αs_init)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
 
-    # compute taus
-    ts = 512 
-    bs = cld(cmem.Nλ, ts)
-    @cusync @cuda threads=ts blocks=bs calc_tau!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs)
+    # compute taus (32 threads/block → cld(Nλ,32) blocks, spreads across SMs)
+    ts_τ = 32
+    bs_τ = cld(cmem.Nλ, ts_τ)
+    @cuda threads=ts_τ blocks=bs_τ calc_tau!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs)
 
     # compute the contribution function
     ts = (32, 16)
     bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
-    @cusync @cuda threads=ts blocks=bs calc_intensity_cfunc!(μ_tile, atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
+    @cuda threads=ts blocks=bs calc_intensity_cfunc!(μ_tile, atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
     return nothing
 end
 
 function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                          cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
-    # move alphas to GPU
-    μ_v = CUDA.zeros(T, length(σ_v))
-    αs_gpu = CuArray{Float64}(αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, αs_gpu, μ_v, σ_v)
-    CUDA.synchronize()
+                         cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+    # move alphas to reusable buffers and zero mean velocity in-place
+    copyto!(mem.αs, αs_init)
+    fill!(atm.μ_v, zero(T))
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, atm.μ_v, σ_v)
 
-    # compute taus
-    ts = 512 
-    bs = cld(cmem.Nλ, ts)
-    @cusync @cuda threads=ts blocks=bs calc_tau!(1.0, atm.zs_gpu, αs_gpu, mem.τs)
+    # compute taus (32 threads/block → cld(Nλ,32) blocks, spreads across SMs)
+    ts_τ = 32
+    bs_τ = cld(cmem.Nλ, ts_τ)
+    @cuda threads=ts_τ blocks=bs_τ calc_tau!(1.0, atm.zs_gpu, αs_gpu, mem.τs)
 
     # compute the contribution function
     ts = (32, 16)
     bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
-    @cusync @cuda threads=ts blocks=bs calc_flux_cfunc!(atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
+    @cuda threads=ts blocks=bs calc_flux_cfunc!(atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
     return nothing
 end
 

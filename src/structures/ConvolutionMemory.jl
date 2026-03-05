@@ -5,6 +5,8 @@ mutable struct ConvolutionMemory{T<:AF}
     L::Int
     pad_left::Int
     pad_right::Int
+    doppler_scale::T
+    doppler_ready::Bool
 
     # coordinates and spectra
     xs_gpu::CA{T,1}
@@ -41,6 +43,8 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     L = Nλ + Npad
     pad_left = Npad ÷ 2
     pad_right = L - Nλ - pad_left
+    doppler_scale = zero(T)
+    doppler_ready = false
 
     # allocate inputs
     xs_gpu = CUDA.zeros(T, Nλ)
@@ -74,6 +78,7 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     
     # construct and return
     return ConvolutionMemory(Nλ, Natm, Npad, L, pad_left, pad_right,
+                             doppler_scale, doppler_ready,
                              xs_gpu, ys_gpu, λc_gpu, σ_fac_gpu, λc_vec,
                              σ_fac_vec, σ_v_cpu, μ_v_cpu, signal_gpu, 
                              kernel_gpu, padded_kernel_gpu, shift_kernel_gpu,

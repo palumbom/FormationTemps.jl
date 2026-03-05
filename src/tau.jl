@@ -24,8 +24,7 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         αv = @view αs[:,j]
         τv = @view τs[:,j]
 
-        # bounds for clamping — opacity is non-negative, so lo = 0 prevents negative
-        # τ increments even when FFT ringing produces tiny negative α values
+        # bounds for clamping — opacity is non-negative
         αmax = αv[1]
         for p in 2:N
             v = αv[p]
