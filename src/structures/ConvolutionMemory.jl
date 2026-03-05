@@ -38,11 +38,43 @@ mutable struct ConvolutionMemory{T<:AF}
     plan_bwd::AbstractFFTs.ScaledPlan
 end
 
+function is_fft_friendly_len(L::Int)
+    n = L
+    for p in (2, 3, 5, 7)
+        while n % p == 0
+            n ÷= p
+        end
+    end
+    return n == 1
+end
+
+function next_fft_friendly_len(L::Int)
+    L_candidate = L
+    while !is_fft_friendly_len(L_candidate)
+        L_candidate += 1
+    end
+    return L_candidate
+end
+
 function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
-    # get dims
-    L = Nλ + Npad
-    pad_left = Npad ÷ 2
-    pad_right = L - Nλ - pad_left
+    Nλ > 0 || error("Nλ must be positive")
+    Natm > 0 || error("Natm must be positive")
+    Npad >= 0 || error("Npad must be non-negative")
+
+    # choose an FFT-friendly padded length
+    requested_L = Nλ + Npad
+    requested_L > Nλ || error("requested padded length must exceed Nλ")
+    L = next_fft_friendly_len(requested_L)
+    Npad_eff = L - Nλ
+    Npad_eff >= 2 || error("effective Npad must be >= 2, got $Npad_eff")
+
+    # split padding
+    pad_left = Npad_eff ÷ 2
+    pad_right = Npad_eff - pad_left
+    (pad_left + Nλ + pad_right == L) || error("padding split inconsistent with L")
+
+    # this is used for shift clamping in the Doppler filter kernel
+    (pad_left - 1) >= 0 || error("pad_left must be >= 1")
     doppler_scale = zero(T)
     doppler_ready = false
 
@@ -77,7 +109,7 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     plan_bwd = CUDA.CUFFT.plan_irfft(conv_ft_gpu, L, 2)
     
     # construct and return
-    return ConvolutionMemory(Nλ, Natm, Npad, L, pad_left, pad_right,
+    return ConvolutionMemory(Nλ, Natm, Npad_eff, L, pad_left, pad_right,
                              doppler_scale, doppler_ready,
                              xs_gpu, ys_gpu, λc_gpu, σ_fac_gpu, λc_vec,
                              σ_fac_vec, σ_v_cpu, μ_v_cpu, signal_gpu, 
