@@ -20,74 +20,69 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
 
     # loop over wavelengths
     @inbounds for j in idx:sdx:size(αs,2)
-            # views of arrays
-        αv = @view αs[:,j]
-        τv = @view τs[:,j]
-
         # bounds for clamping — opacity is non-negative
-        αmax = αv[1]
+        αmax = αs[1, j]
         for p in 2:N
-            v = αv[p]
+            v = αs[p, j]
             αmax = v > αmax ? v : αmax
         end
         lo = 0.0
         hi = max(2.0 * αmax, 0.0)
 
         # init
-        τv[1] = 1e-5
+        τs[1, j] = 1e-5
 
         # first iteration handle outside loop
-        ds0 = (zs[2] * inv_μ - zs[1] * inv_μ)
-        ds1 = (zs[3] * inv_μ - zs[2] * inv_μ)
+        s_prev = zs[1] * inv_μ
+        s_t = zs[2] * inv_μ
+        s_next = zs[3] * inv_μ
+        ds0 = s_t - s_prev
+        ds1 = s_next - s_t
         αC = one_third * (1.0 + ds1 / (ds0 + ds1))
-        prev_dC = (αv[2] - αv[1]) / ds0
-        dC = (αv[3] - αv[2]) / ds1
+        prev_dC = (αs[2, j] - αs[1, j]) / ds0
+        dC = (αs[3, j] - αs[2, j]) / ds1
 
         # monotone limiter: zero derivative at local extrema to prevent denominator
         # blow-up (αC*dC + (1-αC)*prev_dC → 0) and Cf overshoot
         ybar = ifelse(prev_dC * dC <= 0.0, 0.0,
                       (prev_dC * dC) / (αC * dC + (1.0 - αC) * prev_dC))
-        C0 = αv[2] + 0.5 * ds0 * ybar
-        C1 = αv[2] - 0.5 * ds1 * ybar
+        C0 = αs[2, j] + 0.5 * ds0 * ybar
+        C1 = αs[2, j] - 0.5 * ds1 * ybar
         Cf = C0
         Cf = Cf < lo ? lo : (Cf > hi ? hi : Cf)
 
         # update tau
-        s_prev = zs[1] * inv_μ
-        s_t = zs[2] * inv_μ
-        τv[2] = τv[1] + (s_prev - s_t) * one_third * (αv[1] + αv[2] + Cf)
+        τs[2, j] = τs[1, j] + (s_prev - s_t) * one_third * (αs[1, j] + αs[2, j] + Cf)
 
         # for next iteration
         prev_dC = dC
-        prev_C0 = C0
         prev_C1 = C1
         s_prev = s_t
 
         # loop until final step
         @inbounds for t in 2:N-2
-            s_t = zs[t+1] * inv_μ
+            s_prev = s_t
+            s_t = s_next
             s_next = zs[t+2] * inv_μ
             ds0 = s_t - s_prev 
             ds1 = s_next - s_t
 
             αC = one_third * (1.0 + ds1 / (ds0 + ds1))
-            dC = (αv[t+2] - αv[t+1]) / ds1
+            dC = (αs[t+2, j] - αs[t+1, j]) / ds1
 
             ybar = ifelse(prev_dC * dC <= 0.0, 0.0,
                           (prev_dC * dC) / (αC * dC + (1.0 - αC) * prev_dC))
-            C0 = αv[t+1] + 0.5 * ds0 * ybar
-            C1 = αv[t+1] - 0.5 * ds1 * ybar
+            C0 = αs[t+1, j] + 0.5 * ds0 * ybar
+            C1 = αs[t+1, j] - 0.5 * ds1 * ybar
             Cf = 0.5 * (C0 + prev_C1)
             Cf = Cf < lo ? lo : (Cf > hi ? hi : Cf)
 
             # update tau
-            τv[t+1] = τv[t] + (s_prev - s_t) * one_third * (αv[t] + αv[t+1] + Cf)
+            τs[t+1, j] = τs[t, j] + (s_prev - s_t) * one_third * (αs[t, j] + αs[t+1, j] + Cf)
 
             # for next iteration
             prev_dC = dC
-            prev_C0 = C0
             prev_C1 = C1
-            s_prev = s_t
         end
 
         # handle last step outside loop
@@ -95,7 +90,7 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         ds0 = s_prev - s_t
         Cf = prev_C1
         Cf = Cf < lo ? lo : (Cf > hi ? hi : Cf)
-        @inbounds τv[N] = τv[N-1] + (one_third * ds0) * (αv[N-1] + αv[N] + Cf)
+        @inbounds τs[N, j] = τs[N-1, j] + (one_third * ds0) * (αs[N-1, j] + αs[N, j] + Cf)
     end
     return nothing
 end
