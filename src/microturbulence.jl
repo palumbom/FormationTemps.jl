@@ -83,14 +83,12 @@ function pad_signal!(signal, ys, Nλ, pad_left, pad_right)
     Natm, L = size(signal)
 
     if row <= Natm && col <= L
-        y = @view ys[row, :]
-
         if col <= pad_left
-            @inbounds signal[row, col] = y[1]
+            @inbounds signal[row, col] = ys[row, 1]
         elseif col <= pad_left + Nλ
-            @inbounds signal[row, col] = y[col - pad_left]
+            @inbounds signal[row, col] = ys[row, col - pad_left]
         elseif col <= L
-            @inbounds signal[row, col] = y[end]
+            @inbounds signal[row, col] = ys[row, Nλ]
         end
     end
     return nothing
@@ -113,21 +111,30 @@ function roll_rows_2d!(dst, src, r, L)
     return nothing
 end
 
-# Build per-row Fourier-domain filter for a Doppler shift + optional Gaussian broadening.
-# H[i, f] = exp(-2πi · f · s[i] / L) · exp(-(π · σ_pix[i] · f / L)²)
-# where s[i] and σ_pix[i] are derived directly from μ_v and σ_v.
+# Precompute row-wise Doppler shift/broadening in pixel units.
+function precompute_doppler_params!(shift_pix, sigma_pix, μ_v, σ_v, scale, s_max)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= length(shift_pix)
+        @inbounds shift_pix[i] = clamp(μ_v[i] * scale, -s_max, s_max)
+        @inbounds sigma_pix[i] = σ_v[i] * scale
+    end
+    return nothing
+end
+
+# Build per-row Fourier-domain filter for a Doppler shift + Gaussian broadening.
+# H[i, f] = exp(-2πi · f · shift_pix[i] / L) · exp(-(π · sigma_pix[i] · f / L)^2)
 # f is a 1-indexed column mapped to the 0-indexed frequency bin f-1.
-function build_doppler_filter!(filter, μ_v, σ_v, scale, s_max, L, nfreq)
+function build_doppler_filter!(filter, shift_pix, sigma_pix, invL, nfreq)
     i    = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     f_idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if i <= size(filter, 1) && f_idx <= nfreq
         # frequency bin in [0, nfreq-1]
-        f0 = eltype(μ_v)(f_idx - 1)
-        invL = inv(eltype(μ_v)(L))
-        shift_pix = clamp(μ_v[i] * scale, -s_max, s_max)
-        sigma_pix = σ_v[i] * scale
-        θ = -eltype(μ_v)(2π) * f0 * shift_pix * invL
-        gauss = exp(-(eltype(μ_v)(π) * sigma_pix * f0 * invL)^2)
+        T = eltype(shift_pix)
+        f0 = T(f_idx - 1)
+        s = @inbounds shift_pix[i]
+        σ = @inbounds sigma_pix[i]
+        θ = -T(2π) * f0 * s * invL
+        gauss = exp(-(T(π) * σ * f0 * invL)^2)
         sθ, cθ = sincos(θ)
         @inbounds filter[i, f_idx] = complex(gauss * cθ, gauss * sθ)
     end
@@ -148,6 +155,13 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     cmem.doppler_scale = T(λ0 / (c_ms * Δλ))
     cmem.doppler_ready = true
     s_max = T(cmem.pad_left - 1)
+    invL = inv(T(cmem.L))
+
+    # precompute per-row Doppler parameters (reuse existing row buffers)
+    ts_params = 256
+    bs_params = cld(cmem.Natm, ts_params)
+    @cuda threads=ts_params blocks=bs_params precompute_doppler_params!(
+        cmem.λc_gpu, cmem.σ_fac_gpu, μ_v, σ_v, cmem.doppler_scale, s_max)
 
     # pad the signal (edge-value extension)
     ts = (32, 32)
@@ -163,8 +177,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     ts2 = (32, 32)
     bs2 = (cld(nfreq, ts2[1]), cld(cmem.Natm, ts2[2]))
     @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
-                                                       μ_v, σ_v, cmem.doppler_scale, s_max,
-                                                       cmem.L, nfreq)
+                                                       cmem.λc_gpu, cmem.σ_fac_gpu,
+                                                       invL, nfreq)
 
     # convolution theorem + inverse FFT
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
@@ -192,6 +206,13 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
 
     # maximum shift clamp in pixel units
     s_max = T(cmem.pad_left - 1)
+    invL = inv(T(cmem.L))
+
+    # precompute per-row Doppler parameters (reuse existing row buffers)
+    ts_params = 256
+    bs_params = cld(cmem.Natm, ts_params)
+    @cuda threads=ts_params blocks=bs_params precompute_doppler_params!(
+        cmem.λc_gpu, cmem.σ_fac_gpu, μ_v_d, σ_v_d, cmem.doppler_scale, s_max)
 
     # pad the signal (edge-value extension)
     ts = (32, 32)
@@ -208,9 +229,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     ts2 = (32, 32)
     bs2 = (cld(nfreq, ts2[1]), cld(cmem.Natm, ts2[2]))
     @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
-                                                       μ_v_d, σ_v_d, 
-                                                       cmem.doppler_scale, 
-                                                       s_max, cmem.L, nfreq)
+                                                       cmem.λc_gpu, cmem.σ_fac_gpu,
+                                                       invL, nfreq)
 
     # convolution theorem + inverse FFT
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
