@@ -8,6 +8,113 @@ function calc_tau_cpu!(μ_i, zs, αs, τs)
     end
 end 
 
+function precompute_bezier_geometry!(μ_i::T, zs::CDV{T}, ds::CDV{T},
+                                     alphaC::CDV{T}) where T<:AF
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    sdx = gridDim().x * blockDim().x
+    N = length(zs)
+    inv_μ = one(T) / μ_i
+    one_third = inv(T(3))
+
+    @inbounds for p in idx:sdx:N
+        if p <= (N - 1)
+            ds[p] = (zs[p+1] - zs[p]) * inv_μ
+        end
+        if p >= 2 && p <= (N - 1)
+            ds_left = (zs[p] - zs[p-1]) * inv_μ
+            ds_right = (zs[p+1] - zs[p]) * inv_μ
+            alphaC[p] = one_third * (one(T) + ds_right / (ds_left + ds_right))
+        elseif p == 1 || p == N
+            alphaC[p] = zero(T)
+        end
+    end
+    return nothing
+end
+
+function calc_tau_bezier_cached_kernel!(αs::CDM{T}, τs::CDM{T},
+                                        ds::CDV{T}, alphaC::CDV{T}) where T<:AF
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    sdx = gridDim().x * blockDim().x
+    N = size(αs, 1)
+    one_third = inv(T(3))
+    half = T(0.5)
+    zeroT = zero(T)
+    oneT = one(T)
+
+    @inbounds for j in idx:sdx:size(αs,2)
+        αmax = αs[1, j]
+        for p in 2:N
+            αmax = max(αmax, αs[p, j])
+        end
+        lo = zeroT
+        hi = max(T(2) * αmax, zeroT)
+        τs[1, j] = T(1e-5)
+
+        ds0 = ds[1]
+        ds1 = ds[2]
+        αC = alphaC[2]
+        α1 = αs[1, j]
+        α2 = αs[2, j]
+        α3 = αs[3, j]
+        prev_dC = (α2 - α1) / ds0
+        dC = (α3 - α2) / ds1
+
+        ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                      (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+        C0 = α2 + half * ds0 * ybar
+        C1 = α2 - half * ds1 * ybar
+        Cf = min(max(C0, lo), hi)
+        τs[2, j] = τs[1, j] - ds0 * one_third * (α1 + α2 + Cf)
+
+        prev_dC = dC
+        prev_C1 = C1
+
+        for c in 3:(N - 1)
+            ds0 = ds[c - 1]
+            ds1 = ds[c]
+            αC = alphaC[c]
+            α_prev = αs[c-1, j]
+            α_t = αs[c, j]
+            α_next = αs[c+1, j]
+            dC = (α_next - α_t) / ds1
+
+            ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                          (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+            C0 = α_t + half * ds0 * ybar
+            C1 = α_t - half * ds1 * ybar
+            Cf = min(max(half * (C0 + prev_C1), lo), hi)
+            τs[c, j] = τs[c-1, j] - ds0 * one_third * (α_prev + α_t + Cf)
+
+            prev_dC = dC
+            prev_C1 = C1
+        end
+
+        Cf = min(max(prev_C1, lo), hi)
+        ds_last = ds[N - 1]
+        τs[N, j] = τs[N-1, j] - ds_last * one_third * (αs[N-1, j] + αs[N, j] + Cf)
+    end
+    return nothing
+end
+
+function calc_tau_bezier_cached!(μ_i::T, zs::CA{T,1}, αs::CA{T,2}, τs::CA{T,2},
+                                 ds::CA{T,1}, alphaC::CA{T,1};
+                                 threads::Int=32,
+                                 blocks::Int=cld(size(αs,2), threads)) where T<:AF
+    N = length(zs)
+    N >= 3 || error("calc_tau_bezier_cached! requires Natm >= 3")
+    length(ds) == N - 1 || error("ds must have length Natm - 1")
+    length(alphaC) == N || error("alphaC must have length Natm")
+    size(τs, 1) == N || error("τs atmosphere dimension mismatch")
+    size(αs, 1) == N || error("αs atmosphere dimension mismatch")
+    size(αs, 2) == size(τs, 2) || error("αs/τs wavelength dimension mismatch")
+
+    t_geom = 128
+    b_geom = cld(N, t_geom)
+    @cuda threads=t_geom blocks=b_geom precompute_bezier_geometry!(μ_i, zs, ds, alphaC)
+    @cuda threads=threads blocks=blocks calc_tau_bezier_cached_kernel!(αs, τs, ds, alphaC)
+    return nothing
+end
+
 function calc_tau_bezier!(μ_i, zs, αs, τs)
     # get indices
     idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
@@ -15,8 +122,12 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
 
     # length and precompute constants
     N = length(zs)
-    inv_μ = 1.0 / μ_i
-    one_third = 1.0 / 3.0
+    T = eltype(τs)
+    inv_μ = one(T) / T(μ_i)
+    one_third = inv(T(3))
+    half = T(0.5)
+    zeroT = zero(T)
+    oneT = one(T)
 
     # loop over wavelengths
     @inbounds for j in idx:sdx:size(αs,2)
@@ -24,13 +135,13 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         αmax = αs[1, j]
         for p in 2:N
             v = αs[p, j]
-            αmax = v > αmax ? v : αmax
+            αmax = max(αmax, v)
         end
-        lo = 0.0
-        hi = max(2.0 * αmax, 0.0)
+        lo = zeroT
+        hi = max(T(2) * αmax, zeroT)
 
         # init
-        τs[1, j] = 1e-5
+        τs[1, j] = T(1e-5)
 
         # first iteration handle outside loop
         s_prev = zs[1] * inv_μ
@@ -38,18 +149,18 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         s_next = zs[3] * inv_μ
         ds0 = s_t - s_prev
         ds1 = s_next - s_t
-        αC = one_third * (1.0 + ds1 / (ds0 + ds1))
+        αC = one_third * (oneT + ds1 / (ds0 + ds1))
         prev_dC = (αs[2, j] - αs[1, j]) / ds0
         dC = (αs[3, j] - αs[2, j]) / ds1
 
         # monotone limiter: zero derivative at local extrema to prevent denominator
         # blow-up (αC*dC + (1-αC)*prev_dC → 0) and Cf overshoot
-        ybar = ifelse(prev_dC * dC <= 0.0, 0.0,
-                      (prev_dC * dC) / (αC * dC + (1.0 - αC) * prev_dC))
-        C0 = αs[2, j] + 0.5 * ds0 * ybar
-        C1 = αs[2, j] - 0.5 * ds1 * ybar
-        Cf = C0
-        Cf = Cf < lo ? lo : (Cf > hi ? hi : Cf)
+        ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                      (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+        α2 = αs[2, j]
+        C0 = α2 + half * ds0 * ybar
+        C1 = α2 - half * ds1 * ybar
+        Cf = min(max(C0, lo), hi)
 
         # update tau
         τs[2, j] = τs[1, j] + (s_prev - s_t) * one_third * (αs[1, j] + αs[2, j] + Cf)
@@ -57,7 +168,6 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         # for next iteration
         prev_dC = dC
         prev_C1 = C1
-        s_prev = s_t
 
         # loop until final step
         @inbounds for t in 2:N-2
@@ -67,18 +177,18 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
             ds0 = s_t - s_prev 
             ds1 = s_next - s_t
 
-            αC = one_third * (1.0 + ds1 / (ds0 + ds1))
-            dC = (αs[t+2, j] - αs[t+1, j]) / ds1
+            αC = one_third * (oneT + ds1 / (ds0 + ds1))
+            α_t = αs[t+1, j]
+            dC = (αs[t+2, j] - α_t) / ds1
 
-            ybar = ifelse(prev_dC * dC <= 0.0, 0.0,
-                          (prev_dC * dC) / (αC * dC + (1.0 - αC) * prev_dC))
-            C0 = αs[t+1, j] + 0.5 * ds0 * ybar
-            C1 = αs[t+1, j] - 0.5 * ds1 * ybar
-            Cf = 0.5 * (C0 + prev_C1)
-            Cf = Cf < lo ? lo : (Cf > hi ? hi : Cf)
+            ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                          (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+            C0 = α_t + half * ds0 * ybar
+            C1 = α_t - half * ds1 * ybar
+            Cf = min(max(half * (C0 + prev_C1), lo), hi)
 
             # update tau
-            τs[t+1, j] = τs[t, j] + (s_prev - s_t) * one_third * (αs[t, j] + αs[t+1, j] + Cf)
+            τs[t+1, j] = τs[t, j] + (s_prev - s_t) * one_third * (αs[t, j] + α_t + Cf)
 
             # for next iteration
             prev_dC = dC
@@ -88,8 +198,7 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         # handle last step outside loop
         s_t = zs[N] * inv_μ
         ds0 = s_prev - s_t
-        Cf = prev_C1
-        Cf = Cf < lo ? lo : (Cf > hi ? hi : Cf)
+        Cf = min(max(prev_C1, lo), hi)
         @inbounds τs[N, j] = τs[N-1, j] + (one_third * ds0) * (αs[N-1, j] + αs[N, j] + Cf)
     end
     return nothing

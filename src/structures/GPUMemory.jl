@@ -4,6 +4,8 @@ struct GPUMemory{T<:AF}
     τs::CA{T,2}
     cfunc::CA{T,2}
     flux::CA{T,2}
+    tau_ds::CA{T,1}
+    tau_alphaC::CA{T,1}
 end
 
 function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU) where T
@@ -17,10 +19,12 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU) where T
     τs = CUDA.zeros(T, Natm, Nλ)
     cfunc = CUDA.zeros(T, Natm - 1, Nλ)
     flux = CUDA.zeros(T, Natm - 1, Nλ)
+    tau_ds = CUDA.zeros(T, Natm - 1)
+    tau_alphaC = CUDA.zeros(T, Natm)
 
     # synchronize and return 
     CUDA.synchronize()
-    return GPUMemory(λs, αs, τs, cfunc, flux)
+    return GPUMemory(λs, αs, τs, cfunc, flux, tau_ds, tau_alphaC)
 end
 
 function GPUMemory(λs_cpu::AA{T,1}, Natm::Int) where T
@@ -33,8 +37,10 @@ function GPUMemory(λs_cpu::AA{T,1}, Natm::Int) where T
     τs = CUDA.zeros(T, Natm, Nλ)
     cfunc = CUDA.zeros(T, Natm - 1, Nλ)
     flux = CUDA.zeros(T, Natm - 1, Nλ)
+    tau_ds = CUDA.zeros(T, Natm - 1)
+    tau_alphaC = CUDA.zeros(T, Natm)
 
     # synchronize and return 
     CUDA.synchronize()
-    return GPUMemory(λs, αs, τs, cfunc, flux)
+    return GPUMemory(λs, αs, τs, cfunc, flux, tau_ds, tau_alphaC)
 end

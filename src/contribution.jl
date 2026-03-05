@@ -32,7 +32,9 @@ function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GP
     # compute taus (32 threads/block → cld(Nλ,32) blocks, spreads across SMs)
     ts_τ = 32
     bs_τ = cld(cmem.Nλ, ts_τ)
-    @cuda threads=ts_τ blocks=bs_τ calc_tau!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs)
+    calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs,
+                            mem.tau_ds, mem.tau_alphaC;
+                            threads=ts_τ, blocks=bs_τ)
 
     # compute the contribution function
     ts = (32, 16)
@@ -51,7 +53,9 @@ function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemo
     # compute taus (32 threads/block → cld(Nλ,32) blocks, spreads across SMs)
     ts_τ = 32
     bs_τ = cld(cmem.Nλ, ts_τ)
-    @cuda threads=ts_τ blocks=bs_τ calc_tau!(1.0, atm.zs_gpu, αs_gpu, mem.τs)
+    calc_tau_bezier_cached!(1.0, atm.zs_gpu, αs_gpu, mem.τs,
+                            mem.tau_ds, mem.tau_alphaC;
+                            threads=ts_τ, blocks=bs_τ)
 
     # compute the contribution function
     ts = (32, 16)
