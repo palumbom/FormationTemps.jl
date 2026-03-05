@@ -197,7 +197,8 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     ts = (32, 32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, ys_d,
-                                           cmem.Nλ, cmem.pad_left, cmem.pad_right)
+                                           cmem.Nλ, cmem.pad_left, 
+                                           cmem.pad_right)
 
     # FFT the padded signal
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
@@ -207,8 +208,9 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     ts2 = (32, 32)
     bs2 = (cld(nfreq, ts2[1]), cld(cmem.Natm, ts2[2]))
     @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
-                                                       μ_v_d, σ_v_d, cmem.doppler_scale, s_max,
-                                                       cmem.L, nfreq)
+                                                       μ_v_d, σ_v_d, 
+                                                       cmem.doppler_scale, 
+                                                       s_max, cmem.L, nfreq)
 
     # convolution theorem + inverse FFT
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
