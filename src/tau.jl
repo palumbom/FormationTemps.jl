@@ -32,67 +32,75 @@ function precompute_bezier_geometry!(μ_i::T, zs::CDV{T}, ds::CDV{T},
 end
 
 function calc_tau_bezier_cached_kernel!(αs::CDM{T}, τs::CDM{T},
-                                        ds::CDV{T}, alphaC::CDV{T}) where T<:AF
-    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
-    sdx = gridDim().x * blockDim().x
-    N = size(αs, 1)
+                                        ds::CDV{T}, alphaC::CDV{T},
+                                        Nλ::Int32) where T<:AF
+    j = Int32(threadIdx().x) + Int32(blockDim().x) * (Int32(blockIdx().x) - Int32(1))
+    j > Nλ && return nothing
+
+    N = Int32(size(αs, 1))
     one_third = inv(T(3))
     half = T(0.5)
     zeroT = zero(T)
     oneT = one(T)
 
-    @inbounds for j in idx:sdx:size(αs,2)
-        αmax = αs[1, j]
-        for p in 2:N
-            αmax = max(αmax, αs[p, j])
-        end
-        lo = zeroT
-        hi = max(T(2) * αmax, zeroT)
-        τs[1, j] = T(1e-5)
+    # αmax scan — needed for Bézier overshoot clamping
+    @inbounds α_prev = αs[1, j]
+    αmax = α_prev
+    @inbounds for p in Int32(2):N
+        v = αs[p, j]
+        αmax = max(αmax, v)
+    end
+    hi = max(T(2) * αmax, zeroT)
+    @inbounds τs[1, j] = T(1e-5)
 
-        ds0 = ds[1]
-        ds1 = ds[2]
-        αC = alphaC[2]
-        α1 = αs[1, j]
-        α2 = αs[2, j]
-        α3 = αs[3, j]
-        prev_dC = (α2 - α1) / ds0
-        dC = (α3 - α2) / ds1
+    # first iteration (c=2): load α1, α2, α3 fresh
+    @inbounds ds_prev = ds[1]
+    @inbounds ds_curr = ds[2]
+    @inbounds α_curr = αs[2, j]
+    @inbounds α_next = αs[3, j]
+    prev_dC = (α_curr - α_prev) / ds_prev
+    dC = (α_next - α_curr) / ds_curr
+
+    @inbounds αC = alphaC[2]
+    ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                  (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+    C0 = α_curr + half * ds_prev * ybar
+    C1 = α_curr - half * ds_curr * ybar
+    Cf = min(max(C0, zeroT), hi)
+    @inbounds τs[2, j] = τs[1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
+
+    prev_dC = dC
+    prev_C1 = C1
+
+    # carry forward registers: α_prev ← α_curr, α_curr ← α_next, ds_prev ← ds_curr
+    α_prev = α_curr
+    α_curr = α_next
+    ds_prev = ds_curr
+
+    # main loop (c=3..N-1): only 3 new global loads per iteration (α_next, ds_curr, αC)
+    @inbounds for c in Int32(3):(N - Int32(1))
+        ds_curr = ds[c]
+        αC = alphaC[c]
+        α_next = αs[c + Int32(1), j]
+        dC = (α_next - α_curr) / ds_curr
 
         ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
                       (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-        C0 = α2 + half * ds0 * ybar
-        C1 = α2 - half * ds1 * ybar
-        Cf = min(max(C0, lo), hi)
-        τs[2, j] = τs[1, j] - ds0 * one_third * (α1 + α2 + Cf)
+        C0 = α_curr + half * ds_prev * ybar
+        C1 = α_curr - half * ds_curr * ybar
+        Cf = min(max(half * (C0 + prev_C1), zeroT), hi)
+        τs[c, j] = τs[c - Int32(1), j] - ds_prev * one_third * (α_prev + α_curr + Cf)
 
         prev_dC = dC
         prev_C1 = C1
-
-        for c in 3:(N - 1)
-            ds0 = ds[c - 1]
-            ds1 = ds[c]
-            αC = alphaC[c]
-            α_prev = αs[c-1, j]
-            α_t = αs[c, j]
-            α_next = αs[c+1, j]
-            dC = (α_next - α_t) / ds1
-
-            ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
-                          (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-            C0 = α_t + half * ds0 * ybar
-            C1 = α_t - half * ds1 * ybar
-            Cf = min(max(half * (C0 + prev_C1), lo), hi)
-            τs[c, j] = τs[c-1, j] - ds0 * one_third * (α_prev + α_t + Cf)
-
-            prev_dC = dC
-            prev_C1 = C1
-        end
-
-        Cf = min(max(prev_C1, lo), hi)
-        ds_last = ds[N - 1]
-        τs[N, j] = τs[N-1, j] - ds_last * one_third * (αs[N-1, j] + αs[N, j] + Cf)
+        α_prev = α_curr
+        α_curr = α_next
+        ds_prev = ds_curr
     end
+
+    # last step (c=N)
+    Cf = min(max(prev_C1, zeroT), hi)
+    @inbounds τs[N, j] = τs[N - Int32(1), j] - ds_prev * one_third * (α_prev + α_curr + Cf)
     return nothing
 end
 
@@ -108,10 +116,11 @@ function calc_tau_bezier_cached!(μ_i::T, zs::CA{T,1}, αs::CA{T,2}, τs::CA{T,2
     size(αs, 1) == N || error("αs atmosphere dimension mismatch")
     size(αs, 2) == size(τs, 2) || error("αs/τs wavelength dimension mismatch")
 
+    Nλ = Int32(size(αs, 2))
     t_geom = 128
     b_geom = cld(N, t_geom)
     @cuda threads=t_geom blocks=b_geom precompute_bezier_geometry!(μ_i, zs, ds, alphaC)
-    @cuda threads=threads blocks=blocks calc_tau_bezier_cached_kernel!(αs, τs, ds, alphaC)
+    @cuda threads=threads blocks=blocks calc_tau_bezier_cached_kernel!(αs, τs, ds, alphaC, Nλ)
     return nothing
 end
 

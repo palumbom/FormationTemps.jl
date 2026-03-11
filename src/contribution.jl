@@ -29,12 +29,9 @@ function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GP
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
 
-    # compute taus (32 threads/block → cld(Nλ,32) blocks, spreads across SMs)
-    ts_τ = 32
-    bs_τ = cld(cmem.Nλ, ts_τ)
+    # compute taus
     calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs,
-                            mem.tau_ds, mem.tau_alphaC;
-                            threads=ts_τ, blocks=bs_τ)
+                            mem.tau_ds, mem.tau_alphaC)
 
     # compute the contribution function
     ts = (32, 16)
@@ -43,19 +40,16 @@ function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GP
     return nothing
 end
 
-function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
+function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
                          cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
     # move alphas to reusable buffers and zero mean velocity in-place
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     fill!(atm.μ_v, zero(T))
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, atm.μ_v, σ_v)
 
-    # compute taus (32 threads/block → cld(Nλ,32) blocks, spreads across SMs)
-    ts_τ = 32
-    bs_τ = cld(cmem.Nλ, ts_τ)
+    # compute taus
     calc_tau_bezier_cached!(1.0, atm.zs_gpu, αs_gpu, mem.τs,
-                            mem.tau_ds, mem.tau_alphaC;
-                            threads=ts_τ, blocks=bs_τ)
+                            mem.tau_ds, mem.tau_alphaC)
 
     # compute the contribution function
     ts = (32, 16)
