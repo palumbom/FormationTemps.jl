@@ -143,9 +143,6 @@ end
 
 function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, μ_v::CA{T,1}, σ_v::CA{T,1}) where {T<:AF}
-    # copy to device
-    copyto!(cmem.ys_gpu, ys)
-
     # compute per-row shift (pixels) and Gaussian width (pixels)
     # s[i]     = μ_v[i] * λ0 / (c * Δλ)  — shift of row i in pixels
     # σ_pix[i] = σ_v[i] * λ0 / (c * Δλ)  — Gaussian broadening width in pixels
@@ -163,14 +160,15 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     @cuda threads=ts_params blocks=bs_params precompute_doppler_params!(
         cmem.λc_gpu, cmem.σ_fac_gpu, μ_v, σ_v, cmem.doppler_scale, s_max)
 
-    # pad the signal (edge-value extension)
-    ts = (32, 32)
-    bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
-    @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
-                                           cmem.Nλ, cmem.pad_left, cmem.pad_right)
-
-    # FFT the padded signal
-    mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
+    # pad + FFT the signal (skip if signal_cached — αs unchanged since last call)
+    if !cmem.signal_cached
+        copyto!(cmem.ys_gpu, ys)
+        ts = (32, 32)
+        bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
+        @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
+                                               cmem.Nλ, cmem.pad_left, cmem.pad_right)
+        mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
+    end
 
     # build per-row Fourier filter analytically (no spatial kernel, no normalization)
     nfreq = size(cmem.kernel_ft_gpu, 2)
@@ -214,15 +212,15 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     @cuda threads=ts_params blocks=bs_params precompute_doppler_params!(
         cmem.λc_gpu, cmem.σ_fac_gpu, μ_v_d, σ_v_d, cmem.doppler_scale, s_max)
 
-    # pad the signal (edge-value extension)
-    ts = (32, 32)
-    bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
-    @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, ys_d,
-                                           cmem.Nλ, cmem.pad_left, 
-                                           cmem.pad_right)
-
-    # FFT the padded signal
-    mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
+    # pad + FFT the signal (skip if signal_cached — αs unchanged since last call)
+    if !cmem.signal_cached
+        ts = (32, 32)
+        bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
+        @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, ys_d,
+                                               cmem.Nλ, cmem.pad_left,
+                                               cmem.pad_right)
+        mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
+    end
 
     # build per-row Fourier filter analytically (no spatial kernel, no normalization)
     nfreq = size(cmem.kernel_ft_gpu, 2)
