@@ -43,6 +43,7 @@ mutable struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
 
     zs_gpu::AA{T,1}
     Ts_gpu::AA{T,1}
+    nd_gpu::CA{T,1}
     vx::CA{T,1}
     vy::CA{T,1}
     vz::CA{T,1}
@@ -64,17 +65,18 @@ function AtmosphereGPU(atm_korg)
     ne = Korg.get_electron_number_densities(atm_korg)
     nd = Korg.get_number_densities(atm_korg)
 
-    # allocate on gpu 
+    # allocate on gpu
     Natm = length(zs)
     zs_gpu = CuArray{Float64}(zs)
     Ts_gpu = CuArray{Float64}(Ts)
+    nd_gpu = CuArray{Float64}(nd)
     vx = CUDA.zeros(Float64, Natm)
     vy = CUDA.zeros(Float64, Natm)
     vz = CUDA.zeros(Float64, Natm)
     σ_v = CUDA.zeros(Float64, Natm)
     μ_v = CUDA.zeros(Float64, Natm)
 
-    return AtmosphereGPU(Natm, τs, zs, Ts, ne, nd, zs_gpu, Ts_gpu, vx, vy, vz, σ_v, μ_v)
+    return AtmosphereGPU(Natm, τs, zs, Ts, ne, nd, zs_gpu, Ts_gpu, nd_gpu, vx, vy, vz, σ_v, μ_v)
 end
 
 """
