@@ -4,13 +4,16 @@ using Korg, LsqFit
 using HDF5, Printf, JLD2
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
 using ProgressMeter
-plt.ioff()
+
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
 
 # matplotlib backend
-# mpl.use("Qt5Agg")
-mpl.use("Agg")
+mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 colormaps = pyimport("colormaps")
@@ -19,7 +22,6 @@ colormaps = pyimport("colormaps")
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
-
 
 # astropy stuff
 astropy = pyimport("astropy.io.ascii")

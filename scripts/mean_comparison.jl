@@ -6,24 +6,28 @@ using Random
 using HDF5, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
-plt.ioff()
+using ProgressMeter
+
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
-
-# animation
-using PyCall; animation = pyimport("matplotlib.animation");
-pe = pyimport("matplotlib.patheffects");
+inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
+                               \\usepackage{mathrsfs}")
 
-# python interpolation for matplotlib stuff
-interp1d = pyimport("scipy.interpolate").interp1d
+# animation
+animation = pyimport("matplotlib.animation");
+pe = pyimport("matplotlib.patheffects");
 
 # set colormaps
 img_cmap = "viridis"
@@ -317,7 +321,9 @@ for j in eachindex(ftemps)
     plt.clf(); plt.close()
 
     # now do each contribution slice
-    fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(9.2, 4.8), sharex=true)
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(9.2, 4.8), sharex=true)
+    ax1 = axes[0]
+    ax2 = axes[1]
 
     # get exponent for units
     max_val = maximum(abs.(vcat(cfunc_list...)))

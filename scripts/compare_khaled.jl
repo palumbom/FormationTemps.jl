@@ -4,18 +4,24 @@ using Korg
 using HDF5, NPZ, JLD2, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
 using ProgressMeter
 
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
+
 # matplotlib backend
-plt.ioff()
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
+inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
+                               \\usepackage{mathrsfs}")
 
 # read in khaled's
 kfile = joinpath(FT.datdir, "Sun_SME.npz")

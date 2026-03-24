@@ -292,6 +292,8 @@ function calc_intensity_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
                                    τs::AA{T,2}) where {T<:AF}
     Natm = length(Ts)
     one_over_sqrt3 = one(T) / sqrt(T(3))
+    frac1 = T(0.5) * (one(T) - one_over_sqrt3)
+    frac2 = T(0.5) * (one(T) + one_over_sqrt3)
     @inbounds for j in 1:length(λs)
         λ_cm = λs[j] * T(1e-8)
         for k in 1:Natm-1
@@ -304,9 +306,8 @@ function calc_intensity_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
             dT = Ts[k+1] - Ts[k]
-            inv_dτ = one(T) / Δτ
-            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
-            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
+            T1 = Ts[k] + dT * frac1
+            T2 = Ts[k] + dT * frac2
 
             f1 = Korg.blackbody(T1, λ_cm) * exp(-τp1)
             f2 = Korg.blackbody(T2, λ_cm) * exp(-τp2)
@@ -320,6 +321,8 @@ function calc_flux_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
                               τs::AA{T,2}) where {T<:AF}
     Natm = length(Ts)
     one_over_sqrt3 = one(T) / sqrt(T(3))
+    frac1 = T(0.5) * (one(T) - one_over_sqrt3)
+    frac2 = T(0.5) * (one(T) + one_over_sqrt3)
     E2 = Korg.RadiativeTransfer.exponential_integral_2
     @inbounds for j in 1:length(λs)
         λ_cm = λs[j] * T(1e-8)
@@ -333,9 +336,8 @@ function calc_flux_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
             dT = Ts[k+1] - Ts[k]
-            inv_dτ = one(T) / Δτ
-            T1 = Ts[k] + dT * ((τp1 - τ0) * inv_dτ)
-            T2 = Ts[k] + dT * ((τp2 - τ0) * inv_dτ)
+            T1 = Ts[k] + dT * frac1
+            T2 = Ts[k] + dT * frac2
 
             f1 = Korg.blackbody(T1, λ_cm) * E2(τp1)
             f2 = Korg.blackbody(T2, λ_cm) * E2(τp2)

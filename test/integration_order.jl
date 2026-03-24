@@ -4,7 +4,9 @@ using Korg, LsqFit
 using HDF5, Printf, JLD2
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport
+mpl = plt.matplotlib
 using ProgressMeter
 plt.ioff()
 

@@ -5,7 +5,9 @@ using HDF5, Printf
 using ProgressMeter
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport
+mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
@@ -15,10 +17,7 @@ mpl.style.use(FT.moddir * "fig.mplstyle")
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                             \\usepackage{mathrsfs}")
-
-# python interpolation for matplotlib stuff
-interp1d = pyimport("scipy.interpolate").interp1d
-
+                            
 # set colormaps
 img_cmap = "viridis"
 μ_cmap = "autumn"

@@ -4,18 +4,25 @@ using Korg
 using HDF5, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
-plt.ioff()
+using ProgressMeter
+
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
+inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
-
+                               \\usepackage{mathrsfs}")
+                               
 # python interpolation for matplotlib stuff
 interp1d = pyimport("scipy.interpolate").interp1d
 
@@ -159,7 +166,7 @@ lims_flux = [minimum(flux_disk_integrated), round_to_power(maximum(flux_disk_int
 cmap = plt.get_cmap(μ_cmap)
 # norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
 norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=1.075)
-colors = cmap(norm(μs))
+colors = pyconvert(Array, cmap(norm(μs)))
 
 # without flux
 fig, ax1 = plt.subplots()
@@ -222,7 +229,7 @@ plt.clf(); plt.close()
 
 # make three panels
 fig, axs = plt.subplots(nrows=1, ncols=length(μ_vals_to_plot), sharey=true, figsize=(18.2, 4.2))#, layout="compressed")
-ax1, ax2, ax3 = axs
+ax1 = axs[0]
 
 idx1 = findfirst(x -> x .>= first(wls) - 0.75, λs_korg)
 idx2 = findfirst(x -> x .>= last(wls) + 0.75, λs_korg)
@@ -261,19 +268,19 @@ for i in eachindex(μ_vals_to_plot)
     cfunc_view = view(cfuncs,:,idx1:idx2,μ_idx)  ./ 10^(exponent)
 
     # img = ax3.imshow(cfunc_view, aspect="auto", extent=extent, vmin=vmin, vmax=vmax)
-    img = axs[i].pcolormesh(xedges, yedges2, cfunc_view, 
+    img = axs[i - 1].pcolormesh(xedges, yedges2, cfunc_view, 
                             shading="gouraud", cmap=img_cmap, 
                             edgecolors="none", norm=norm,
                             rasterized=true)
 
     push!(imgs, img)
-    axs[i].axvline(xedges[cont_idx - idx1], c="white", ls=":", lw=2.5)
+    axs[i - 1].axvline(xedges[cont_idx - idx1], c="white", ls=":", lw=2.5)
 
     # axs[i].set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
     # ax3.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
     # ax3.set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
     mu_val = string(μ_vals_to_plot[i])
-    axs[i].set_title(L"\mu = %$mu_val")
+    axs[i - 1].set_title(L"\mu = %$mu_val")
 
     local fwd = interp1d(yedges2, yedges, fill_value="extrapolate")
     local inv = interp1d(yedges, yedges2, fill_value="extrapolate")    
@@ -325,7 +332,7 @@ ax1_b2.set_ylim(ax1.get_ylim()...)
 ax1_b2.grid(false)
 
 fig.supxlabel(L"{\rm Air\ Wavelength\ [\AA]}", y=-0.02, x=0.45)
-axs[1].set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
+axs[0].set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
 fig.subplots_adjust(wspace=0.05)
 
 cb = fig.colorbar(imgs[end], ax=axs, pad=0.01)
@@ -407,8 +414,8 @@ ax1.legend()
 # ax1.set_ylim(cb_lims)
 # ax2.set_ylim(lims_cflux)
 
-derp1 = diff(ax1.get_xticks())
-derp2 = diff(ax1.get_xticks())
+derp1 = diff(pyconvert(Vector{Float64}, ax1.get_yticks()))
+derp2 = diff(pyconvert(Vector{Float64}, ax2.get_yticks()))
 
 # ax1.set_ylim(cb_lims[1], cb_lims[2] + derp2[end])
 # ax2.set_ylim(lims_cflux[1], lims_cflux[2] + derp2[end])
@@ -424,7 +431,7 @@ plt.clf(); plt.close()
 cmap = plt.get_cmap(μ_cmap)
 # norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
 norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=1.075)
-colors = cmap(norm(μs))
+colors = pyconvert(Array, cmap(norm(μs)))
 
 fig, ax1 = plt.subplots()
 ax1.plot(elav(Ts), cum_cfunc_flux_norm[:,cont_idx], c="k", label=L"{\rm Flux}", zorder=length(μs) + 1)
@@ -490,7 +497,11 @@ plt.clf(); plt.close()
 
 
 # do the same with residuals
-fig, (ax1, ax2, ax3, ax4) = plt.subplots(nrows=2, ncols=2, width_ratios=[20,1], height_ratios=[3,1])
+fig, axes = plt.subplots(nrows=2, ncols=2, width_ratios=[20,1], height_ratios=[3,1])
+ax1 = axes[0, 0]
+ax2 = axes[1, 0]
+ax3 = axes[0, 1]
+ax4 = axes[1, 1]
 for i in eachindex(μs)
     mu_val = μs[i]
     ax1.plot(λs_korg, form_temps_intensity[:,i],  c=colors[i,:])#, label=L"\mu = %$mu_val")

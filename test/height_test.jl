@@ -5,7 +5,8 @@ using HDF5, Printf
 using ProgressMeter
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
+import PythonPlot; plt = PythonPlot
+mpl = plt.matplotlib
 plt.ioff()
 
 AF = AbstractFloat

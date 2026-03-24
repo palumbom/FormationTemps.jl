@@ -4,7 +4,8 @@ using Korg
 using HDF5, NPZ, JLD2, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
+import PythonPlot; plt = PythonPlot
+mpl = plt.matplotlib
 plt.ioff()
 
 # matplotlib backend
@@ -116,8 +117,8 @@ flux_cont_gpu = 2π .* Array(CUDA.sum(cfunc_flux_cont_gpu .* diff(τs_gpu, dims=
 
 #= # plot the results
 grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
-ax1 = plt.subplot(grid[1])
-ax2 = plt.subplot(grid[2])
+ax1 = plt.subplot(grid[0])
+ax2 = plt.subplot(grid[1])
 ax1.plot(λs_korg, sol.intensity[μ_idx,:], c="k",label="Korg")
 ax1.plot(λs_korg, intensity_gpu, ls="--", label="mine")
 ax2.scatter(λs_korg, 100 .* (sol.intensity[μ_idx,:] .- intensity_gpu) ./ sol.intensity[μ_idx,:], c="k", s=5)
@@ -132,8 +133,8 @@ ax2.set_xlim(λ0 - 0.25, λ0 + 0.25)
 plt.show() =#
 
 grid = plt.matplotlib.gridspec.GridSpec(2,1 , height_ratios=[2,1])
-ax1 = plt.subplot(grid[1])
-ax2 = plt.subplot(grid[2])
+ax1 = plt.subplot(grid[0])
+ax2 = plt.subplot(grid[1])
 ax1.plot(λs_korg, sol.flux ./ sol.cntm, c="k",label="Korg")
 ax1.plot(λs_korg, flux_gpu ./ flux_cont_gpu, ls="--", label="mine")
 # ax1.plot(λs_korg, sol.cntm, c="k",label="Korg cont")

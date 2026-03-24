@@ -4,18 +4,24 @@ using Korg
 using HDF5, JLD2, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
+using ProgressMeter
+
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
-# mpl.style.use("tableau-colorblind10")
+inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
-
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16100]
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
@@ -103,14 +109,14 @@ zoom_max = zoom_center + half_span
 fig, axes = plt.subplots(nrows=4, ncols=2, sharex="col", figsize=(10.5, 9.0),
                          gridspec_kw=Dict("height_ratios" => [4, 1, 4, 1],
                                           "width_ratios" => [3, 2]))
-ax1 = axes[1, 1]
-ax1r = axes[2, 1]
-ax2 = axes[3, 1]
-ax2r = axes[4, 1]
-ax1z = axes[1, 2]
-ax1rz = axes[2, 2]
-ax2z = axes[3, 2]
-ax2rz = axes[4, 2]
+ax1 = axes[0, 0]
+ax1r = axes[1, 0]
+ax2 = axes[2, 0]
+ax2r = axes[3, 0]
+ax1z = axes[0, 1]
+ax1rz = axes[1, 1]
+ax2z = axes[2, 1]
+ax2rz = axes[3, 1]
 
 ax1.plot(wavs, flux_int, label=L"{\rm Integration}", c="k")
 ax1.plot(wavs, flux_conv, label=L"{\rm Convolution}", c="tab:blue", alpha=0.8)

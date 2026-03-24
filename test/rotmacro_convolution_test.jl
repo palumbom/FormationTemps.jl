@@ -5,7 +5,9 @@ using HDF5, Printf, JLD2
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using ProgressMeter
-using PyPlot, PyCall; mpl = plt.matplotlib
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport
+mpl = plt.matplotlib
 plt.ioff()
 
 # matplotlib backend

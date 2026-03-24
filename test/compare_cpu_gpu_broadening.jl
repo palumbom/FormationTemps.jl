@@ -5,7 +5,9 @@ using HDF5, Printf
 using CUDA, BenchmarkTools
 using FFTW
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport
+mpl = plt.matplotlib
 using ProgressMeter
 plt.ioff()
 
@@ -18,9 +20,6 @@ inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
-
-# python interpolation for matplotlib stuff
-interp1d = pyimport("scipy.interpolate").interp1d
 
 ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
 

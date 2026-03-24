@@ -5,8 +5,13 @@ using JLD2
 using HDF5, Printf, LsqFit
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
-plt.ioff()
+using ProgressMeter
+
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
@@ -152,5 +157,5 @@ jldsave(outfile; u1, u2)
 # plot it 
 plt.scatter(μs, ints[idx1, :], c="k")
 plt.plot(μs, quad_limb_darkening(μs, coef(fit)))
-plt.xlim(reverse(plt.gca().get_xlim()))
+plt.xlim(reverse(pyconvert(Vector{Float64}, plt.gca().get_xlim())))
 plt.show()

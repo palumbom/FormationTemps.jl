@@ -1,13 +1,34 @@
-using HDF5
-using Korg
+Pkg.activate("/mnt/home/mpalumbo/work/FormationTemps")
+using Revise
 using FormationTemps; FT = FormationTemps
-using PyPlot
-using Printf
+using Korg
+using HDF5, JLD2, Printf
+using CUDA, BenchmarkTools
+using CSV, DataFrames, Statistics
 using ProgressMeter
 
-cephdir = abspath("/mnt/home/mpalumbo/ceph/formation_temps")
-h5path_chunks = joinpath(cephdir, "temp_spectrum_chunks_ryan.h5")
-h5path_splice = joinpath(cephdir, "temp_spectrum_1D.h5")
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
+
+# matplotlib backend
+# mpl.use("Qt5Agg")
+mpl.style.use(FT.moddir * "fig.mplstyle")
+inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
+
+# get fancy fonts
+plt.rc("text", usetex=true)
+plt.rc("text.latex", preamble="\\usepackage{amsmath}
+                               \\usepackage{mathrsfs}")
+
+# set directory
+cephdir = abspath("/mnt/home/mpalumbo/ceph/")
+outdir = joinpath(cephdir, "formation_temps")
+h5path_chunks = joinpath(outdir, "temp_spectrum_chunks_debug.h5")
+h5path_splice = joinpath(outdir, "temp_spectrum_1D_debug.h5")
 
 fig1, ax1 = plt.subplots()
 fig2, ax2 = plt.subplots()
@@ -67,6 +88,6 @@ ax2.set_xlabel("Wavelength [Å]")
 ax2.set_ylabel("Formation Temperature [K]")
 ax2.legend()
 fig2.savefig("temp_spectrum.pdf", bbox_inches="tight")
-
-plt.show()
+# plt.show()
+plt.clf(); plt.close()
 plt.clf(); plt.close()

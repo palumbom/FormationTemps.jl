@@ -4,18 +4,25 @@ using Korg
 using HDF5, NPZ, JLD2, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
 using ProgressMeter
 
-# matplotlib config
-plt.ioff()
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
+
+# matplotlib backend
+mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
+inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
-
+                               \\usepackage{mathrsfs}")
+                               
 # alias type 
 AA = AbstractArray
 CA = CuArray
@@ -128,7 +135,9 @@ for i in eachindex(λs_korg)
 end
 
 # overplot the intensity and flux formation temperure spectra 
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[3,1])
+fig, axes = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[3,1])
+ax1 = axes[0]
+ax2 = axes[1]
 ax1.plot(λs_korg, form_temps_flux, c="k", label=L"{\rm Flux}")
 # plt.plot(λs_korg, form_temps_intensity[:,end], c=colors[end,:], label=L"{\rm Disk\ Center\ Intensity}")
 ax1.plot(λs_korg, form_temps_intensity[:,end], c="gold", label=L"{\rm Disk\ Center\ Intensity}")
@@ -138,7 +147,7 @@ ax2.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
 ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
 ax2.set_ylabel(L"{\rm Difference\ [K]}")
 fig.savefig("figures/bin_form_temp_spectra.pdf")
-plt.close()
+plt.clf(); plt.close()
 
 # split the bins 
 x1 = form_temps_flux
@@ -150,7 +159,9 @@ bin_edges_intc = range(floor(Int, minimum(x2)), ceil(Int, maximum(x2)); length=n
 bins_flux = clamp.(searchsortedlast.(Ref(bin_edges_flux), x1), 1, length(bin_edges_flux)-1)
 bins_intc = clamp.(searchsortedlast.(Ref(bin_edges_intc), x2), 1, length(bin_edges_intc)-1)
 
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+fig, axes = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[4,1])
+ax1 = axes[0]
+ax2 = axes[1]
 ax1.plot(λs_korg, bins_flux, c="k", label=L"{\rm Flux}")
 # ax1.plot(λs_korg, bins_intc, c=colors[end,:], label=L"{\rm Disk\ Center\ Intensity}")
 ax1.plot(λs_korg, bins_intc, c="gold", label=L"{\rm Disk\ Center\ Intensity}")
@@ -160,4 +171,4 @@ ax2.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
 ax1.set_ylabel(L"{\rm Bin\ Assignment}")
 ax2.set_ylabel(L"{\rm Difference}")
 fig.savefig("figures/bin_movement.pdf")
-plt.close()
+plt.clf(); plt.close()

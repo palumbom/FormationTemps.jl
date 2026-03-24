@@ -4,20 +4,25 @@ using Korg
 using HDF5, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics, NaNMath
-using PyPlot, PyCall; mpl = plt.matplotlib
+using ProgressMeter
+
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
+inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
-
-# python interpolation for matplotlib stuff
-interp1d = pyimport("scipy.interpolate").interp1d
-
+                               \\usepackage{mathrsfs}")
+                               
 # set colormaps
 img_cmap = "viridis"
 μ_cmap = "autumn"
@@ -110,7 +115,7 @@ for i in eachindex(vmics)
     cfuncs[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_struct))
     intensities[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
 
-    cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+    local cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
     cfuncs_flux[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_flux_struct))
     fluxes[:,i] = Array(FT.get_flux(cfunc_flux_struct))
 end
@@ -136,7 +141,7 @@ end
 cmap = plt.get_cmap(vmic_cmap)
 # norm = mpl.colors.Normalize(vmin=minimum(vmics), vmax=maximum(vmics) + 50.0)
 norm = mpl.colors.Normalize(vmin=0.0, vmax=8000.0)
-colors = cmap(norm(vmics))
+colors = pyconvert(Array, cmap(norm(vmics)))
 
 # do some plotting 
 fig, ax1 = plt.subplots()
@@ -147,7 +152,9 @@ end
 sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 cbar = plt.colorbar(sm, ax=ax1)
 cbar.set_label(L"v_{\rm mic}\ {\rm[km\ s}^{-1}{\rm ]}")
-cbar.set_ticklabels(latexstring.(cbar.get_ticks() ./ 1000.0))
+tickvals = pyconvert(Vector{Float64}, cbar.get_ticks())
+cbar.set_ticks(tickvals)
+cbar.set_ticklabels(string.(tickvals ./ 1000.0))
 
 ax1.set_xlim(first(wls) - 0.75, last(wls) + 0.75)
 ax1.set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")

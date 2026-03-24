@@ -5,8 +5,7 @@ using BenchmarkTools
 using LinearAlgebra
 using NPZ, HDF5
 using EchelleCCFs: λ_air_to_vac, λ_vac_to_air
-using PyPlot;
-plt = PyPlot;
+import PythonPlot; plt = PythonPlot
 
 # alias type 
 AA = AbstractArray

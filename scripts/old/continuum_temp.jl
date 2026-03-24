@@ -1,7 +1,7 @@
 using NPZ
 using Korg
 using GRASS
-using PyPlot
+import PythonPlot; plt = PythonPlot
 using FITSIO
 using Anemoi
 using Statistics

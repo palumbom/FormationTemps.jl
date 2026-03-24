@@ -5,13 +5,19 @@ using ProgressMeter
 using HDF5, Printf, JLD2
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
-using PyPlot, PyCall; mpl = plt.matplotlib
-plt.ioff()
+using ProgressMeter
+
+# plotting
+import PythonPlot; plt = PythonPlot
+using PythonCall: pyimport, pyconvert
+using LaTeXStrings
+mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
+colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
@@ -19,9 +25,6 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
 ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
-
-# python interpolation for matplotlib stuff
-interp1d = pyimport("scipy.interpolate").interp1d
 
 # set colormaps
 img_cmap = "viridis"
@@ -131,7 +134,7 @@ R_grid = vcat([collect(R_grid1), collect(R_grid2)]...)
 cmap = plt.get_cmap("viridis")
 # norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
 norm = mpl.colors.Normalize(vmin=minimum(vsinis)/1e3, vmax=maximum(vsinis)/1e3)
-colors = cmap(norm(vsinis ./ 1e3))
+colors = pyconvert(Array, cmap(norm(vsinis ./ 1e3)))
 
 # loop over vsini
 @showprogress for k in eachindex(vsinis)

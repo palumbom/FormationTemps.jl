@@ -4,6 +4,7 @@ uv.lock
 docs/build
 docs/src/index.md
 .julia_env/
+.claude/*
 
 *.pdf
 *.csv
