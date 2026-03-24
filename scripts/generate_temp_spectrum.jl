@@ -62,7 +62,8 @@ vsini = 2100.0
 star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                           vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
-# write out the temperature, etc.
+# Use the same atmosphere construction as calc_formation_temp so that the
+# saved zs/Ts/τs_ref are consistent with the cfunc layers in every chunk.
 atm_cpu = FT.AtmosphereCPU(Korg.interpolate_marcs(star_props.Teff, star_props.logg, star_props.A_X))
 zs = atm_cpu.zs
 Ts = atm_cpu.Ts
