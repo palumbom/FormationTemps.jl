@@ -58,6 +58,7 @@ Construct an `AtmosphereGPU` with thermodynamic fields from Korg and velocity
 fields allocated on the GPU.
 """
 function AtmosphereGPU(atm_korg)
+    atm_korg = _resample_log_tau(atm_korg)
     # Korg atmosphere parameters
     τs = Korg.get_tau_refs(atm_korg)
     zs = Korg.get_zs(atm_korg)
@@ -105,6 +106,7 @@ end
 Construct an `AtmosphereCPU` with thermodynamic and velocity fields on the CPU.
 """
 function AtmosphereCPU(atm_korg)
+    atm_korg = _resample_log_tau(atm_korg)
     # Korg atmosphere parameters
     τs = Korg.get_tau_refs(atm_korg)
     zs = Korg.get_zs(atm_korg)
@@ -112,7 +114,7 @@ function AtmosphereCPU(atm_korg)
     ne = Korg.get_electron_number_densities(atm_korg)
     nd = Korg.get_number_densities(atm_korg)
 
-    # allocate on gpu 
+    # allocate on gpu
     Natm = length(zs)
     vx = zeros(Float64, Natm)
     vy = zeros(Float64, Natm)
@@ -121,6 +123,61 @@ function AtmosphereCPU(atm_korg)
     μ_v = zeros(Float64, Natm)
 
     return AtmosphereCPU(Natm, τs, zs, Ts, ne, nd, vx, vy, vz, σ_v, μ_v)
+end
+
+"""
+    _resample_log_tau(atm_korg; n_layers=56)
+
+Resample a Korg model atmosphere onto a uniform grid in log(τ_ref), returning a new atmosphere
+of the same type.
+
+`interpolate_marcs` drops layers where the interpolated grid has NaN values (via `nanmask`),
+which produces a non-uniform log-τ spacing that contaminates the anchored τ integration scheme.
+This function detects and removes that discontinuity by re-interpolating all thermodynamic
+quantities onto a uniform log-τ grid.
+"""
+function _resample_log_tau(atm_korg; n_layers::Int=56)
+    τ_ref = Korg.get_tau_refs(atm_korg)
+    zs    = Korg.get_zs(atm_korg)
+    Ts    = Korg.get_temps(atm_korg)
+    ne    = Korg.get_electron_number_densities(atm_korg)
+    nd    = Korg.get_number_densities(atm_korg)
+
+    log_τ      = log.(τ_ref)
+    Δlog_τ     = diff(log_τ)
+    step_ratio = maximum(Δlog_τ) / minimum(Δlog_τ)
+    if step_ratio > 1.1
+        n_in = length(τ_ref)
+        # @warn "_resample_log_tau: non-uniform log-τ spacing (max/min step = " *
+        #       "$(round(step_ratio, digits=2))×, $n_in layers → $n_layers). " *
+        #       "Resampling to uniform grid. Expected for MARCS grid-interpolated atmospheres " *
+        #       "(nanmask drops outer layers)."
+    end
+
+    log_τ_new = collect(range(first(log_τ), last(log_τ), length=n_layers))
+
+    itp_z  = Korg.CubicSplines.CubicSpline(log_τ, zs)
+    itp_T  = Korg.CubicSplines.CubicSpline(log_τ, Ts)
+    itp_ne = Korg.CubicSplines.CubicSpline(log_τ, ne)
+    itp_nd = Korg.CubicSplines.CubicSpline(log_τ, nd)
+
+    τs_new = exp.(log_τ_new)
+    zs_new = itp_z.(log_τ_new)
+    Ts_new = itp_T.(log_τ_new)
+    ne_new = itp_ne.(log_τ_new)
+    nd_new = itp_nd.(log_τ_new)
+
+    ref_wl = atm_korg.reference_wavelength
+    if atm_korg isa Korg.PlanarAtmosphere
+        ls = [Korg.PlanarAtmosphereLayer(τs_new[i], zs_new[i], Ts_new[i], ne_new[i], nd_new[i])
+              for i in eachindex(τs_new)]
+        return Korg.PlanarAtmosphere(ls, ref_wl)
+    else
+        R  = atm_korg.R
+        ls = [Korg.ShellAtmosphereLayer(τs_new[i], zs_new[i], Ts_new[i], ne_new[i], nd_new[i])
+              for i in eachindex(τs_new)]
+        return Korg.ShellAtmosphere(ls, R, ref_wl)
+    end
 end
 
 """
@@ -137,7 +194,7 @@ function get_marcs_atm(Teff::T, logg::T, A_X::AA{T,1}; n_layers::Int=56) where T
     ne = Korg.get_electron_number_densities(marcs_atm)
     nd = Korg.get_number_densities(marcs_atm)
 
-    # interpolate in zs 
+    # interpolate in zs
     itp_τs = Korg.CubicSplines.CubicSpline(reverse(zs), reverse(τ_500))
     itp_Ts = Korg.CubicSplines.CubicSpline(reverse(zs), reverse(Ts))
     itp_ne = Korg.CubicSplines.CubicSpline(reverse(zs), reverse(ne))

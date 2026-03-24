@@ -2,11 +2,82 @@
 calc_tau!(μ_i, zs, αs, τs) = calc_tau_bezier!(μ_i, zs, αs, τs)
 # calc_tau_cpu!(μ_i, zs, αs, τs) = Korg.RadiativeTransfer.compute_tau_bezier!(τs, zs ./ μ_i, αs)
 
-function calc_tau_cpu!(μ_i, zs, αs, τs) 
+function calc_tau_bezier_cpu!(μ_i, zs, αs, τs)
     for i in axes(τs,2)
         Korg.RadiativeTransfer.compute_tau_bezier!(view(τs,:,i), zs ./ μ_i, view(αs,:,i))
     end
-end 
+end
+
+"""
+    calc_tau_anchored_cpu!(μ_i, τ_ref, α_ref, αs, τs)
+
+Compute optical depth by integrating in d(log τ_ref) rather than ds, following the
+"anchored" scheme of Korg (Wheeler et al. 2022, Appendix A.1).
+
+The change of variables τ = ∫ α ds = ∫ (α/α_ref) dτ_ref eliminates the sensitivity
+to non-uniform geometric layer spacing in the model atmosphere.
+
+α_ref must be the physical continuum absorption coefficient at the MARCS reference
+wavelength for each layer, computed from chemistry (not estimated from layer geometry).
+This is what makes the integration independent of Δz.
+"""
+function calc_tau_anchored_cpu!(μ_i::T, τ_ref::AA{T,1}, α_ref::AA{T,1},
+                                αs::AA{T,2}, τs::AA{T,2}) where T<:AF
+    N = length(τ_ref)
+
+    # scale factor: τ_ref / α_ref / μ  (same for all wavelengths)
+    integrand_factor = τ_ref ./ α_ref ./ μ_i
+
+    log_τ_ref = log.(τ_ref)
+
+    @inbounds for j in axes(τs, 2)
+        τs[1, j] = zero(T)
+        for i in 2:N
+            f_prev = αs[i-1, j] * integrand_factor[i-1]
+            f_curr = αs[i,   j] * integrand_factor[i]
+            τs[i, j] = τs[i-1, j] + T(0.5) * (f_prev + f_curr) * (log_τ_ref[i] - log_τ_ref[i-1])
+        end
+    end
+    return nothing
+end
+
+"""
+    calc_tau_anchored_kernel!(αs, τs, log_τ_ref, ifactor_base, inv_μ, Nλ)
+
+GPU kernel for anchored τ integration.  One thread per wavelength; serial loop over N layers.
+
+Integrates τ[i] = τ[i-1] + 0.5*(f[i-1]+f[i]) * Δ(log τ_ref)[i]
+where f[k] = αs[k,j] * ifactor_base[k] * inv_μ  and  ifactor_base[k] = τ_ref[k] / α_ref[k].
+"""
+function calc_tau_anchored_kernel!(αs::CDM{T}, τs::CDM{T},
+                                    log_τ_ref::CDV{T}, ifactor_base::CDV{T},
+                                    inv_μ::T, Nλ::Int32) where T<:AF
+    j = Int32(threadIdx().x) + Int32(blockDim().x) * (Int32(blockIdx().x) - Int32(1))
+    j > Nλ && return nothing
+
+    N    = Int32(size(αs, 1))
+    half = T(0.5)
+
+    @inbounds τs[1, j] = zero(T)
+    @inbounds for i in Int32(2):N
+        f_prev = αs[i - Int32(1), j] * ifactor_base[i - Int32(1)] * inv_μ
+        f_curr = αs[i,             j] * ifactor_base[i]             * inv_μ
+        dlog   = log_τ_ref[i] - log_τ_ref[i - Int32(1)]
+        τs[i, j] = τs[i - Int32(1), j] + half * (f_prev + f_curr) * dlog
+    end
+    return nothing
+end
+
+function calc_tau_anchored_gpu!(μ_i::T, log_τ_ref::CA{T,1}, ifactor_base::CA{T,1},
+                                 αs::CA{T,2}, τs::CA{T,2};
+                                 threads::Int=1024,
+                                 blocks::Int=cld(size(αs, 2), threads)) where T<:AF
+    Nλ    = Int32(size(αs, 2))
+    inv_μ = one(T) / μ_i
+    @cuda threads=threads blocks=blocks calc_tau_anchored_kernel!(
+        αs, τs, log_τ_ref, ifactor_base, inv_μ, Nλ)
+    return nothing
+end
 
 function precompute_bezier_geometry!(μ_i::T, zs::CDV{T}, ds::CDV{T},
                                      alphaC::CDV{T}) where T<:AF
@@ -183,7 +254,7 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
             s_prev = s_t
             s_t = s_next
             s_next = zs[t+2] * inv_μ
-            ds0 = s_t - s_prev 
+            ds0 = s_t - s_prev
             ds1 = s_next - s_t
 
             αC = one_third * (oneT + ds1 / (ds0 + ds1))
@@ -209,119 +280,6 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         ds0 = s_prev - s_t
         Cf = min(max(prev_C1, lo), hi)
         @inbounds τs[N, j] = τs[N-1, j] + (one_third * ds0) * (αs[N-1, j] + αs[N, j] + Cf)
-    end
-    return nothing
-end
-
-function calc_tau_trapezoid!(μ_i, zs, αs, τs)
-    # get indices
-    idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
-    sdx = gridDim().x * blockDim().x
-
-    # length and precompute constants
-    N = length(zs)
-    inv_μ = 1.0 / μ_i
-    one_third = 1.0 / 3.0
-
-    # loop over wavelength
-    @inbounds for j in idx:sdx:size(αs,2)
-        τs[1,j] = 1e-5
-        @inbounds for p in 2:N
-            ds = inv_μ * (zs[p-1,j] - zs[p,j])
-            τs[p,j] = τs[p-1,j] + 0.5 * (αs[p-1,j] + αs[p,j]) * ds
-        end
-    end 
-    return nothing
-end
-
-function calc_tau_trap_cpu!(μ_i::T, zs::AA{T,1}, αs::AA{T,2}, τs::AA{T,2}) where T<:AF
-    N = length(zs)
-    inv_μ = one(T) / μ_i
-    @inbounds for j in 1:size(αs, 2)
-        τs[1, j] = T(1e-5)
-        for p in 2:N
-            ds = inv_μ * (zs[p-1] - zs[p])
-            τs[p, j] = τs[p-1, j] + 0.5 * (αs[p-1, j] + αs[p, j]) * ds
-        end
-    end
-    return nothing
-end
-
-function calc_tau_simpson!(μ_i, zs, αs, τs)
-    # get indices
-    idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
-    sdx = gridDim().x * blockDim().x
-
-    # length and precompute constants
-    N = length(zs)
-    inv_μ = 1.0 / μ_i
-    one_third = 1.0 / 3.0
-
-    # loop over wavelength
-    @inbounds for j in idx:sdx:size(αs,2)
-        τs[1,j] = 1e-5
-        τs[2,j] = 1e-5 + 0.5 * inv_μ * (αs[1,j]+αs[2,j]) * (zs[1]-zs[2])
-        @inbounds for p in 3:2:N
-            h = zs[p-2] - zs[p]
-            τs[p,j] = τs[p-2,j] + (h/(6.0 * μ_i))*(αs[p-2,j] + 4.0 * αs[p-1,j] + αs[p,j])
-            τs[p-1,j] = τs[p-2,j] + (0.5 * inv_μ * (zs[p-2] - zs[p-1])) * (αs[p-2,j] + αs[p-1,j])
-        end
-
-        # final trapezoid step
-        if iseven(N)
-            @inbounds τs[N,j] = τs[N-1,j] + 0.5 * (αs[N-1,j] + αs[N,j]) * ((zs[N-1] - zs[N]) * inv_μ)
-        end
-    end
-    return nothing
-end
-
-function calc_tau_gauss_legendre!(μ_i, zs, αs, τs)
-    # get indices
-    idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
-    sdx = gridDim().x * blockDim().x
-
-    # length and precompute constants
-    N = length(zs)
-    inv_μ = 1.0 / μ_i
-
-    # standard 3-point nodes & weights on [-1,1]
-    ξ = sqrt(3.0/5.0)
-    w1 = 5.0/9.0
-    w2 = 8.0/9.0
-    w3 = 5.0/9.0
-
-    # loop over wavelength
-    @inbounds for j in idx:sdx:size(αs,2)
-        # initialize
-        τs[1,j] = 1e-5
-
-        # loop over atmosphere layers
-        @inbounds for p in 2:N
-            # endpoints of this slab
-            z0 = zs[p]
-            z1 = zs[p-1]
-            h = z1 - z0
-            m = 0.5 * (z0 + z1)
-
-            # real-space GL nodes
-            zgl1 = m - 0.5 * ξ * h
-            zgl2 = m
-            zgl3 = m + 0.5 * ξ * h
-
-            # linear interpolation slope
-            α0 = αs[p-1,j]
-            α1 = αs[p,j]
-            slope = (α1 - α0) / h
-
-            # α at the three nodes
-            αg1 = α0 + slope * (zgl1 - z0)
-            αg2 = α0 + slope * (zgl2 - z0)
-            αg3 = α0 + slope * (zgl3 - z0)
-
-            # 6th-order increment
-            slab = (0.5 * h * inv_μ) * (w1 * αg1 + w2 * αg2 + w3 * αg3)
-            τs[p,j] = τs[p-1,j] + slab
-        end
     end
     return nothing
 end

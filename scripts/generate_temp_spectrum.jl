@@ -29,15 +29,15 @@ cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
-outfile = joinpath(outdir, "temp_spectrum_chunks_debug.h5")
-outfile_1d = joinpath(outdir, "temp_spectrum_1D_debug.h5")
+outfile = joinpath(outdir, "temp_spectrum_chunks.h5")
+outfile_1d = joinpath(outdir, "temp_spectrum_1D.h5")
 
 # get the linelist
 linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
-wls = [l.wl * 1e8 for l in linelist]
-idx1 = findfirst(wls .>= 5000.0)
-idx2 = findfirst(wls .>= 5050.0)
-linelist = linelist[idx1:idx2]
+# wls = [l.wl * 1e8 for l in linelist]
+# idx1 = findfirst(wls .>= 5000.0)
+# idx2 = findfirst(wls .>= 5050.0)
+# linelist = linelist[idx1:idx2]
 # linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 

@@ -72,10 +72,14 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     αs_broad = convolve_wavelength_axis(λs_korg, αs, μ_v, σ_v)
     αs_cont_broad = convolve_wavelength_axis(λs_korg, αs_cont, μ_v, σ_v)
 
+    # α_ref: physical continuum opacity at reference wavelength, independent of layer geometry.
+    # Use the last wavelength (edge of window, continuum-dominated) from pre-broadening αs_cont.
+    α_ref = αs_cont[:, end]
+
     τs = zeros(T, Natm, Nλ)
     τs_cont = zeros(T, Natm, Nλ)
-    calc_tau_cpu!(one(T), zs, αs_broad, τs)
-    calc_tau_cpu!(one(T), zs, αs_cont_broad, τs_cont)
+    calc_tau_anchored_cpu!(one(T), atm_cpu.τs, α_ref, αs_broad, τs)
+    calc_tau_anchored_cpu!(one(T), atm_cpu.τs, α_ref, αs_cont_broad, τs_cont)
 
     cfunc_flux = zeros(T, Natm - 1, Nλ)
     cfunc_flux_cont = zeros(T, Natm - 1, Nλ)
@@ -122,13 +126,13 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
             μ_v_rot .= z_rot_cpu[i] .* c_ms
 
             αs_broad_i = convolve_wavelength_axis(λs_korg, αs, μ_v_rot, σ_v)
-            calc_tau_cpu!(μ_tile, zs, αs_broad_i, τs_int)
+            calc_tau_anchored_cpu!(μ_tile, atm_cpu.τs, α_ref, αs_broad_i, τs_int)
             calc_intensity_cfunc_cpu!(cfunc_int, Ts, λs_korg, τs_int)
             cfunc_dt_int = cfunc_int .* diff(τs_int, dims=1)
             cfunc_int_i_mac = convolve_rt_macro(λs_korg, cfunc_dt_int, star.ζ, μ_tile)
 
             αs_cont_broad_i = convolve_wavelength_axis(λs_korg, αs_cont, μ_v_rot, σ_v)
-            calc_tau_cpu!(μ_tile, zs, αs_cont_broad_i, τs_int_cont)
+            calc_tau_anchored_cpu!(μ_tile, atm_cpu.τs, α_ref, αs_cont_broad_i, τs_int_cont)
             calc_intensity_cfunc_cpu!(cfunc_int_cont, Ts, λs_korg, τs_int_cont)
             cfunc_dt_int_cont = cfunc_int_cont .* diff(τs_int_cont, dims=1)
             cfunc_int_cont_i_mac = convolve_rt_macro(λs_korg, cfunc_dt_int_cont, star.ζ, μ_tile)
@@ -178,8 +182,11 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
     compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, star.A_X; kwargs...)
 
-    # allocate on device
-    gpu_mem = GPUMemory(λs_korg, atm_gpu)
+    # α_ref: continuum opacity at the MARCS reference wavelength, used for anchored τ
+    α_ref = αs_cont[:, end]
+
+    # allocate on device (anchored τ scheme — uses α_ref to eliminate Δz sensitivity)
+    gpu_mem = GPUMemory(λs_korg, atm_gpu, α_ref)
 
     # allocate memory for convolutions
     Nλ = length(λs_korg)

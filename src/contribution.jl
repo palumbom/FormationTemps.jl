@@ -30,8 +30,12 @@ function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GP
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
 
     # compute taus
-    calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs,
-                            mem.tau_ds, mem.tau_alphaC)
+    if mem.use_anchored
+        calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
+    else
+        calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs,
+                                mem.tau_ds, mem.tau_alphaC)
+    end
 
     # compute the contribution function
     ts = (32, 16)
@@ -47,8 +51,12 @@ function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::Atmosphere
                                 μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
-    calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs,
-                            mem.tau_ds, mem.tau_alphaC)
+    if mem.use_anchored
+        calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
+    else
+        calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs,
+                                mem.tau_ds, mem.tau_alphaC)
+    end
     cfunc_reduce_intensity!(out, μ_tile, atm.Ts_gpu, mem.λs, mem.τs)
     return nothing
 end
@@ -61,8 +69,12 @@ function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemo
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, atm.μ_v, σ_v)
 
     # compute taus
-    calc_tau_bezier_cached!(1.0, atm.zs_gpu, αs_gpu, mem.τs,
-                            mem.tau_ds, mem.tau_alphaC)
+    if mem.use_anchored
+        calc_tau_anchored_gpu!(one(T), mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
+    else
+        calc_tau_bezier_cached!(one(T), atm.zs_gpu, αs_gpu, mem.τs,
+                                mem.tau_ds, mem.tau_alphaC)
+    end
 
     # compute the contribution function
     ts = (32, 16)

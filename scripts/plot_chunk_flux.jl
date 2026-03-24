@@ -28,8 +28,8 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
 # set directory
 cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
-h5path_chunks = joinpath(outdir, "temp_spectrum_chunks_debug.h5")
-h5path_splice = joinpath(outdir, "temp_spectrum_1D_debug.h5")
+h5path_chunks = joinpath(outdir, "temp_spectrum_chunks.h5")
+h5path_splice = joinpath(outdir, "temp_spectrum_1D.h5")
 
 fig1, ax1 = plt.subplots()
 fig2, ax2 = plt.subplots()
