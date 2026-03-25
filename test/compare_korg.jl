@@ -25,8 +25,7 @@ linelist = [Korg.Line(wl, log_gf, species, E_lower, gamma_rad, gamma_stark, gamm
 
 # wavelength grid
 λ0 = linelist[1].wl * 1e8
-λs_korg  = collect(range(λ0 - 0.25, λ0 + 0.25, step=0.001))
-vels_korg = FT.c_ms .* (λs_korg .- λ0) ./ λ0
+λs_korg = collect(range(λ0 - 0.25, λ0 + 0.25, step=0.001))
 
 # abundances and atmosphere
 A_X = Korg.asplund_2009_solar_abundances
@@ -54,12 +53,12 @@ val = 2400.0
 sol = synthesize(atm_resampled, linelist, A_X, λs_korg;
                  vmic=val/1e3, tau_scheme="anchored",
                  mu_values=μ_vals, hydrogen_lines=false)
-αs_korg = sol.alpha
-
-# absorption coefficients
+# absorption coefficients; α_ref filled inline — no extra solver calls
 αs      = zeros(Natm, length(λs_korg))
 αs_cont = zeros(Natm, length(λs_korg))
-FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+α_ref   = zeros(Natm)
+FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X;
+                  α_ref_out=α_ref, vmic_ref_cms=val * 100.0)
 
 # convolve with microturbulence
 Nλ   = length(λs_korg)
@@ -70,7 +69,7 @@ cmem        = FT.ConvolutionMemory(Nλ, Natm, Npad)
 αs_cont_gpu = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs_cont, μ_v, σ_v)
 
 # anchored τ precomputed arrays
-α_ref            = αs_cont[:, end]
+# α_ref filled inline during the chemistry loop above — no extra solver calls
 log_τ_ref_gpu    = CuArray(log.(atm_gpu.τs))
 ifactor_base_gpu = CuArray(atm_gpu.τs ./ α_ref)
 
@@ -104,7 +103,21 @@ FT.calc_tau_anchored_gpu!(1.0, log_τ_ref_gpu, ifactor_base_gpu, αs_cont_gpu, �
 CUDA.synchronize()
 flux_cont_gpu = 2π .* Array(CUDA.sum(cfunc_flux_cont_gpu .* diff(τs_gpu, dims=1), dims=1))'
 
+# sanity checks
+flux_norm_korg = sol.flux ./ sol.cntm
+flux_norm_gpu = flux_gpu ./ flux_cont_gpu
+pct_err_flux = 100 .* (sol.flux .- flux_gpu) ./ sol.flux
+pct_err_norm = 100 .* (flux_norm_korg .- flux_norm_gpu) ./ flux_norm_korg
+
+@assert all(α_ref .> 0)
+i_core = argmin(flux_norm_gpu)
+@printf "α_ref range: %.3e – %.3e cm^-1\n" minimum(α_ref) maximum(α_ref)
+@printf "max |%%err| continuum: %.4f%%\n" maximum(abs.(pct_err_flux[flux_norm_korg .> 0.99]))
+@printf "max |%%err| norm flux: %.4f%%\n" maximum(abs.(pct_err_norm))
+@printf "line core: Korg %.6f  mine %.6f\n" flux_norm_korg[i_core] flux_norm_gpu[i_core]
+
 # plot intensity
+#=
 grid = plt.matplotlib.gridspec.GridSpec(2, 1, height_ratios=[2, 1])
 ax1 = plt.subplot(grid[0])
 ax2 = plt.subplot(grid[1])
@@ -120,6 +133,7 @@ ax1.legend()
 ax1.set_xlim(λ0 - 0.25, λ0 + 0.25)
 ax2.set_xlim(λ0 - 0.25, λ0 + 0.25)
 plt.show()
+=#
 
 # plot normalized flux
 grid = plt.matplotlib.gridspec.GridSpec(2, 1, height_ratios=[2, 1])

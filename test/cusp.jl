@@ -26,7 +26,7 @@ ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#C
 img_cmap = "viridis"
 μ_cmap = "autumn"
 
-# alias type 
+# alias type
 AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
@@ -44,7 +44,7 @@ specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 
 # get the Fe I 6301 & 6302 lines (just cuz)
-wls = [l.wl for l in linelist] 
+wls = [l.wl for l in linelist]
 idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
 idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
@@ -58,7 +58,7 @@ gamma_rad =  [l.gamma_rad for l in linelist]
 gamma_stark =  [l.gamma_stark for l in linelist]
 
 # make the wavelength grid
-buffer = 1.5
+buffer = 2.5
 λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.001)
 cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
@@ -66,15 +66,7 @@ cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 A_X = Korg.asplund_2020_solar_abundances
 
 # get the atmosphere
-marcs_atm = FT.get_marcs_atm(5777.0, 4.44, A_X, n_layers=56)
-τ_500 = Korg.get_tau_refs(marcs_atm)
-zs = Korg.get_zs(marcs_atm)
-Ts = Korg.get_temps(marcs_atm)
-ne = Korg.get_electron_number_densities(marcs_atm)
-nd = Korg.get_number_densities(marcs_atm)
-
-# make my atmosphere 
-atm_gpu = FT.AtmosphereGPU(marcs_atm)
+atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(5777.0, 4.44, A_X))
 zs = atm_gpu.zs
 Ts = atm_gpu.Ts
 τ5000 = atm_gpu.τs
@@ -106,7 +98,7 @@ cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_
 tbc = cfunc_flux_stationary.cfunc_dt
 flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
 
-# set rotational and macroturbulence 
+# set rotational and macroturbulence
 vsini = 2100.0
 ζ_rt = 3400.0
 
@@ -114,7 +106,7 @@ vsini = 2100.0
 u1 = 0.4
 u2 = 0.0
 
-# set some mus 
+# set some mus
 μs = 1.0
 
 # compare RT aniso

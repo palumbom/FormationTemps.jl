@@ -31,22 +31,22 @@ function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEF
                              u1::T=NaN, u2::T=NaN, Nϕ::Int=128,
                              kwargs...) where T<:AF
     if use_gpu
-        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ, 
-                                                   minλ, maxλ, buffer, convolve=convolve, 
+        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ,
+                                                   minλ, maxλ, buffer, convolve=convolve,
                                                    u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
     else
-        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ, 
-                                                   minλ, maxλ, buffer, convolve=convolve, 
+        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ,
+                                                   minλ, maxλ, buffer, convolve=convolve,
                                                    u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
     end
     return form_temps_flux
 end
 
-function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01, 
+function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
                                   minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128, kwargs...) where T<:AF
-    # get linelist 
+    # get linelist
     wls = [l.wl * 1e8 for l in linelist]
     minλ = isnan(minλ) ? first(wls) - buffer : minλ
     maxλ = isnan(maxλ) ? last(wls) + buffer : maxλ
@@ -57,24 +57,20 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     zs = atm_cpu.zs
     Ts = atm_cpu.Ts
 
-    # get the absorption coefficients
+    # get the absorption coefficients; α_ref filled inline during the chemistry loop
+    # (reuses nₑ, n_dict already computed per layer — zero extra solver calls)
     Natm = length(zs)
     Nλ = length(λs_korg)
     αs = zeros(T, Natm, Nλ)
     αs_cont = zeros(T, Natm, Nλ)
-    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_cpu, star.A_X; kwargs...)
+    α_ref = zeros(T, Natm)
+    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg),
+                   linelist, atm_cpu, star.A_X;
+                   α_ref_out=α_ref, vmic_ref_cms=star.ξ * 100.0, kwargs...)
 
     # set microturbulent broadening
     σ_v = fill(star.ξ, Natm)
     μ_v = zeros(T, Natm)
-
-    # get the "stationary" flux
-    αs_broad = convolve_wavelength_axis(λs_korg, αs, μ_v, σ_v)
-    αs_cont_broad = convolve_wavelength_axis(λs_korg, αs_cont, μ_v, σ_v)
-
-    # α_ref: physical continuum opacity at reference wavelength, independent of layer geometry.
-    # Use the last wavelength (edge of window, continuum-dominated) from pre-broadening αs_cont.
-    α_ref = αs_cont[:, end]
 
     τs = zeros(T, Natm, Nλ)
     τs_cont = zeros(T, Natm, Nλ)
@@ -164,26 +160,28 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     return FormTempResult(λs_korg, flux_norm, form_temps, cont_func, atm_cpu)
 end
 
-function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01, 
+function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                                   minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128, kwargs...) where T<:AF
-    # get linelist 
+    # get linelist
     wls = [l.wl * 1e8 for l in linelist]
     minλ = isnan(minλ) ? first(wls) - buffer : minλ
     maxλ = isnan(maxλ) ? last(wls) + buffer : maxλ
     λs_korg = range(minλ, maxλ, step=Δλ)
-    
+
     # get model atmosphere and move to GPU
     atm_gpu = AtmosphereGPU(Korg.interpolate_marcs(star.Teff, star.logg, star.A_X))
 
-    # get the absorption coefficients
-    αs = zeros(length(atm_gpu.zs), length(λs_korg))
-    αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, star.A_X; kwargs...)
-
-    # α_ref: continuum opacity at the MARCS reference wavelength, used for anchored τ
-    α_ref = αs_cont[:, end]
+    # get the absorption coefficients; α_ref filled inline during the chemistry loop
+    # (reuses nₑ, n_dict already computed per layer — zero extra solver calls)
+    Natm = length(atm_gpu.zs)
+    αs = zeros(Natm, length(λs_korg))
+    αs_cont = zeros(Natm, length(λs_korg))
+    α_ref = zeros(Natm)
+    compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg),
+                   linelist, atm_gpu, star.A_X;
+                   α_ref_out=α_ref, vmic_ref_cms=star.ξ * 100.0, kwargs...)
 
     # allocate on device (anchored τ scheme — uses α_ref to eliminate Δz sensitivity)
     gpu_mem = GPUMemory(λs_korg, atm_gpu, α_ref)
@@ -227,7 +225,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             z_rot_cpu .= 0.0
         end
 
-        # allocate on gpu 
+        # allocate on gpu
         μ_v_rot = CUDA.zeros(T, Natm)
         flux_integration = CUDA.zeros(T, length(λs_korg))
         flux_cont_integration = CUDA.zeros(T, length(λs_korg))

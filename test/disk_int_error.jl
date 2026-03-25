@@ -61,15 +61,7 @@ cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 A_X = Korg.asplund_2020_solar_abundances
 
 # get the atmosphere
-marcs_atm = FT.get_marcs_atm(5777.0, 4.44, A_X, n_layers=56)
-τ_500 = Korg.get_tau_refs(marcs_atm)
-zs = Korg.get_zs(marcs_atm)
-Ts = Korg.get_temps(marcs_atm)
-ne = Korg.get_electron_number_densities(marcs_atm)
-nd = Korg.get_number_densities(marcs_atm)
-
-# make my atmosphere 
-atm_gpu = FT.AtmosphereGPU(marcs_atm)
+atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(5777.0, 4.44, A_X))
 zs = atm_gpu.zs
 Ts = atm_gpu.Ts
 τ5000 = atm_gpu.τs

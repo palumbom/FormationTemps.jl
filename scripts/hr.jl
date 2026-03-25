@@ -148,15 +148,7 @@ for i in eachindex(T_effs)
     A_X = Korg.format_A_X(mohs[i])
  
     # get the atmosphere
-    marcs_atm = FT.get_marcs_atm(T_effs[i], loggs[i], A_X, n_layers=Natm)
-    τ_500 = Korg.get_tau_refs(marcs_atm)
-    zs = Korg.get_zs(marcs_atm)
-    Ts = Korg.get_temps(marcs_atm)
-    ne = Korg.get_electron_number_densities(marcs_atm)
-    nd = Korg.get_number_densities(marcs_atm)
-
-    # make my atmosphere 
-    atm_gpu = FT.AtmosphereGPU(marcs_atm)
+    atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(T_effs[i], loggs[i], A_X))
     zs = atm_gpu.zs
     Ts = atm_gpu.Ts
     τ5000 = atm_gpu.τs

@@ -19,13 +19,15 @@ Returns:
 Notes:
 - Adapted from `Korg.line_absorption!`.
 """
-function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, 
-                        atm::Atmosphere{T}, A_X::AA{T,1}; 
-                        partition_funcs=Korg.default_partition_funcs, 
+function compute_alpha!(αs, wls::Korg.Wavelengths, linelist,
+                        atm::Atmosphere{T}, A_X::AA{T,1};
+                        α_ref_out=nothing, vmic_ref_cms::Float64=0.0,
+                        partition_funcs=Korg.default_partition_funcs,
                         ne_warn_thresh=0.1) where T<:AF
-    compute_alpha!(αs, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ, 
-                   A_X; partition_funcs=Korg.default_partition_funcs,
-                   ne_warn_thresh=ne_warn_thresh)
+    compute_alpha!(αs, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ,
+                   A_X; α_ref_out=α_ref_out, ref_wl_cm=atm.reference_wavelength,
+                   vmic_ref_cms=vmic_ref_cms,
+                   partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh)
     return nothing
 end
 
@@ -49,9 +51,11 @@ Returns:
 - `nothing`: `αs` and `αs_cont` are filled in-place.
 """
 
-function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X; 
+function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X;
+                        α_ref_out=nothing, ref_wl_cm::Float64=5000.0/1e8,
+                        vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
-    # deal with abundances 
+    # deal with abundances
     abs_abundances = @. 10^(A_X - 12) # n(X) / n_tot
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
 
@@ -67,6 +71,9 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
     N = length(zs)
     triples = Vector{Tuple{Float64, Dict, typeof(Korg.linear_interpolation(cntm_wls, zeros(length(cntm_wls))))}}(undef, N)
 
+    # reference frequency for α_ref (c_cgs in cm/s, ref_wl_cm in cm → Hz)
+    ref_freq = Korg.c_cgs / ref_wl_cm
+
     # loop over layers and do chemical equilibrium
     Threads.@threads for i in 1:N
     # for i in 1:N
@@ -76,11 +83,16 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
         ne = nes[i]
 
         # compute equilibrium
-        nₑ, n_dict = Korg.chemical_equilibrium(temp, nd, ne, abs_abundances, 
-                                               Korg.ionization_energies, 
-                                               partition_funcs, 
+        nₑ, n_dict = Korg.chemical_equilibrium(temp, nd, ne, abs_abundances,
+                                               Korg.ionization_energies,
+                                               partition_funcs,
                                                Korg.default_log_equilibrium_constants,
                                                electron_number_density_warn_threshold=ne_warn_thresh)
+
+        # continuum absorption at reference wavelength — reuses (nₑ, n_dict), no extra solver call
+        if !isnothing(α_ref_out)
+            α_ref_out[i] = Korg.total_continuum_absorption([ref_freq], temp, nₑ, n_dict, partition_funcs)[1]
+        end
 
         # continuum absorption
         α_cntm_vals = reverse(Korg.total_continuum_absorption(Korg.eachfreq(cntm_wls),
@@ -107,23 +119,41 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
     α_cntm = last.(triples)
 
     # now do the line absorption
-    vmic = 0.0
-    Korg.line_absorption!(αs, linelist, wls, Ts, nₑs, nds, partition_funcs, 
-                          vmic, α_cntm; cutoff_threshold=3e-4)#, verbose=false)
+    Korg.line_absorption!(αs, linelist, wls, Ts, nₑs, nds, partition_funcs,
+                          0.0, α_cntm; cutoff_threshold=3e-4)
+
+    # mirror Korg synthesize.jl lines 253-265: add line opacity at the reference wavelength.
+    # Korg filters the user linelist to lines near ref_wl then merges with its internal
+    # _alpha_5000_default_linelist; for MARCS (ref_wl = 5000 Å) that internal list is always used.
+    # Korg also calls interpolate_molecular_cross_sections! here, which is a no-op when no
+    # molecular cross-sections are loaded (the common case).
+    if !isnothing(α_ref_out)
+        linelist5 = Korg._alpha_5000_default_linelist  # synthesize.jl:195-198
+        α_cntm_ref = [_ -> a for a in copy(α_ref_out)]  # synthesize.jl:255
+        Korg.line_absorption!(reshape(α_ref_out, :, 1), linelist5,
+                              Korg.Wavelengths([ref_wl_cm * 1e8]),
+                              Ts, nₑs, nds, partition_funcs,
+                              vmic_ref_cms, α_cntm_ref; cutoff_threshold=3e-4)
+    end
 
     return nothing
 end
 
-function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, atm, A_X; partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
-    compute_alpha!(αs, αs_cont, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ, 
-                   A_X; partition_funcs=Korg.default_partition_funcs,
-                   ne_warn_thresh=ne_warn_thresh)
-    return nothing
-end
-
-function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X; 
+function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, atm, A_X;
+                        α_ref_out=nothing, vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
-    # deal with abundances 
+    compute_alpha!(αs, αs_cont, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ,
+                   A_X; α_ref_out=α_ref_out, ref_wl_cm=atm.reference_wavelength,
+                   vmic_ref_cms=vmic_ref_cms,
+                   partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh)
+    return nothing
+end
+
+function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X;
+                        α_ref_out=nothing, ref_wl_cm::Float64=5000.0/1e8,
+                        vmic_ref_cms::Float64=0.0,
+                        partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+    # deal with abundances
     abs_abundances = @. 10^(A_X - 12) # n(X) / n_tot
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
 
@@ -139,6 +169,9 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
     N = length(zs)
     triples = Vector{Tuple{Float64, Dict, typeof(Korg.linear_interpolation(cntm_wls, zeros(length(cntm_wls))))}}(undef, N)
 
+    # reference frequency for α_ref (c_cgs in cm/s, ref_wl_cm in cm → Hz)
+    ref_freq = Korg.c_cgs / ref_wl_cm
+
     # loop over layers and do chemical equilibrium
     Threads.@threads for i in 1:N
     # for i in 1:N
@@ -148,11 +181,16 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
         ne = nes[i]
 
         # compute equilibrium
-        nₑ, n_dict = Korg.chemical_equilibrium(temp, nd, ne, abs_abundances, 
-                                               Korg.ionization_energies, 
-                                               partition_funcs, 
+        nₑ, n_dict = Korg.chemical_equilibrium(temp, nd, ne, abs_abundances,
+                                               Korg.ionization_energies,
+                                               partition_funcs,
                                                Korg.default_log_equilibrium_constants,
                                                electron_number_density_warn_threshold=ne_warn_thresh)
+
+        # continuum absorption at reference wavelength — reuses (nₑ, n_dict), no extra solver call
+        if !isnothing(α_ref_out)
+            α_ref_out[i] = Korg.total_continuum_absorption([ref_freq], temp, nₑ, n_dict, partition_funcs)[1]
+        end
 
         # continuum absorption
         α_cntm_vals = reverse(Korg.total_continuum_absorption(Korg.eachfreq(cntm_wls),
@@ -177,12 +215,24 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
 
     #vector of continuum-absorption interpolators
     α_cntm = last.(triples)
-    # @show α_cntm
     αs_cont .= αs
 
     # now do the line absorption
-    vmic = 0.0
-    Korg.line_absorption!(αs, linelist, wls, Ts, nₑs, nds, partition_funcs, 
-                          vmic, α_cntm; cutoff_threshold=3e-4)#, verbose=false)
+    Korg.line_absorption!(αs, linelist, wls, Ts, nₑs, nds, partition_funcs,
+                          0.0, α_cntm; cutoff_threshold=3e-4)
+
+    # mirror Korg synthesize.jl lines 253-265: add line opacity at the reference wavelength.
+    # Korg filters the user linelist to lines near ref_wl then merges with its internal
+    # _alpha_5000_default_linelist; for MARCS (ref_wl = 5000 Å) that internal list is always used.
+    # Korg also calls interpolate_molecular_cross_sections! here, which is a no-op when no
+    # molecular cross-sections are loaded (the common case).
+    if !isnothing(α_ref_out)
+        linelist5 = Korg._alpha_5000_default_linelist  # synthesize.jl:195-198
+        α_cntm_ref = [_ -> a for a in copy(α_ref_out)]  # synthesize.jl:255
+        Korg.line_absorption!(reshape(α_ref_out, :, 1), linelist5,
+                              Korg.Wavelengths([ref_wl_cm * 1e8]),
+                              Ts, nₑs, nds, partition_funcs,
+                              vmic_ref_cms, α_cntm_ref; cutoff_threshold=3e-4)
+    end
     return nothing
 end
