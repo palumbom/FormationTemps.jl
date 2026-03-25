@@ -7,8 +7,8 @@ const h = 6.62607015e-27
 
 # constants in other units
 const c_cms = 2.99792458e10
-const c_ms = 2.99782458e8    # m s^-1
-const c_kms = 2.99782458e5   # km s^-1
+const c_ms = 2.99792458e8    # m s^-1
+const c_kms = 2.99792458e5   # km s^-1
 const c_Rsun_day = 37230.42169210867
 
 # for unit conversions

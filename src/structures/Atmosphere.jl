@@ -10,7 +10,9 @@ abstract type Atmosphere{T<:AF} end
 """
     get_τs(atm)
 
-Return the optical depth grid as a standard `Array`.
+Return the optical depth reference grid as a standard `Array`. Returns an empty vector
+when the atmosphere was constructed from a model that does not supply `tau_ref` (in
+that case the Bézier τ integrator is used and `atm.τs` is empty).
 """
 get_τs(atm::Atmosphere) = Array(atm.τs)
 
@@ -29,9 +31,21 @@ Return the temperature grid as a standard `Array`.
 get_Ts(atm::Atmosphere) = Array(atm.Ts)
 
 """
-    AtmosphereGPU(atm_korg)
+    AtmosphereGPU{T<:AbstractFloat} <: Atmosphere{T}
 
-Build a GPU-backed atmosphere from a Korg atmosphere object.
+GPU-backed atmosphere wrapping a Korg MARCS model.
+
+Fields:
+- `Natm`: Number of atmosphere layers.
+- `τs`: Reference optical depth grid (length `Natm`); empty if `tau_ref` is unavailable.
+- `zs`, `Ts`: Height (cm) and temperature (K) grids on the CPU.
+- `nₑ`, `nd`: Electron and total number density grids on the CPU.
+- `reference_wavelength`: MARCS reference wavelength for `τ_ref` (cm; typically 5000 Å).
+- `zs_gpu`, `Ts_gpu`, `nd_gpu`: Height, temperature, and number density on the device.
+- `vx`, `vy`, `vz`: Per-layer velocity components on the device (m/s).
+- `σ_v`, `μ_v`: Per-layer microturbulent speed and mean line-of-sight velocity on the device (m/s).
+
+See also: [`AtmosphereGPU(atm_korg)`](@ref)
 """
 mutable struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
     Natm::Int
@@ -57,13 +71,23 @@ end
 
 Construct an `AtmosphereGPU` with thermodynamic fields from Korg and velocity
 fields allocated on the GPU.
+
+The input atmosphere is first resampled onto a uniform log-τ grid to remove
+non-uniform layer spacing introduced by `Korg.interpolate_marcs`. If the model
+does not supply `tau_ref` (e.g., some non-MARCS grids), resampling is skipped and
+`atm.τs` is set to an empty vector — the Bézier τ integrator is used automatically
+downstream in that case.
 """
 function AtmosphereGPU(atm_korg)
-    # resample onto uniform log τ grid
+    # resample onto uniform log τ grid (no-op if tau_ref unavailable)
     atm_korg = _resample_log_tau(atm_korg)
 
-    # Korg atmosphere parameters
-    τs  = Korg.get_tau_refs(atm_korg)
+    # Korg atmosphere parameters; empty τs signals Bezier fallback
+    τs = try
+        Korg.get_tau_refs(atm_korg)
+    catch
+        Float64[]
+    end
     zs  = Korg.get_zs(atm_korg)
     Ts  = Korg.get_temps(atm_korg)
     ne  = Korg.get_electron_number_densities(atm_korg)
@@ -85,9 +109,20 @@ function AtmosphereGPU(atm_korg)
 end
 
 """
-    AtmosphereCPU(atm_korg)
+    AtmosphereCPU{T<:AbstractFloat} <: Atmosphere{T}
 
-Build a CPU-backed atmosphere from a Korg atmosphere object.
+CPU-backed atmosphere wrapping a Korg MARCS model.
+
+Fields:
+- `Natm`: Number of atmosphere layers.
+- `τs`: Reference optical depth grid (length `Natm`); empty if `tau_ref` is unavailable.
+- `zs`, `Ts`: Height (cm) and temperature (K) grids.
+- `nₑ`, `nd`: Electron and total number density grids.
+- `reference_wavelength`: MARCS reference wavelength for `τ_ref` (cm; typically 5000 Å).
+- `vx`, `vy`, `vz`: Per-layer velocity components (m/s).
+- `σ_v`, `μ_v`: Per-layer microturbulent speed and mean line-of-sight velocity (m/s).
+
+See also: [`AtmosphereCPU(atm_korg)`](@ref)
 """
 mutable struct AtmosphereCPU{T<:AF} <: Atmosphere{T}
     Natm::Int
@@ -109,13 +144,23 @@ end
     AtmosphereCPU(atm_korg)
 
 Construct an `AtmosphereCPU` with thermodynamic and velocity fields on the CPU.
+
+The input atmosphere is first resampled onto a uniform log-τ grid to remove
+non-uniform layer spacing introduced by `Korg.interpolate_marcs`. If the model
+does not supply `tau_ref` (e.g., some non-MARCS grids), resampling is skipped and
+`atm.τs` is set to an empty vector — the Bézier τ integrator is used automatically
+downstream in that case.
 """
 function AtmosphereCPU(atm_korg)
-    # resample onto uniform log τ grid
+    # resample onto uniform log τ grid (no-op if tau_ref unavailable)
     atm_korg = _resample_log_tau(atm_korg)
 
-    # Korg atmosphere parameters
-    τs     = Korg.get_tau_refs(atm_korg)
+    # Korg atmosphere parameters; empty τs signals Bezier fallback
+    τs = try
+        Korg.get_tau_refs(atm_korg)
+    catch
+        Float64[]
+    end
     zs     = Korg.get_zs(atm_korg)
     Ts     = Korg.get_temps(atm_korg)
     ne     = Korg.get_electron_number_densities(atm_korg)
@@ -133,10 +178,10 @@ function AtmosphereCPU(atm_korg)
 end
 
 """
-    _resample_log_tau(atm_korg; n_layers=length(get_tau_refs(atm_korg)))
+    _resample_log_tau(atm_korg; n_layers=-1)
 
 Resample a Korg model atmosphere onto a uniform grid in log(τ_ref), returning a new atmosphere
-of the same type.
+of the same type. Returns `atm_korg` unchanged if tau_ref is unavailable.
 
 `interpolate_marcs` drops layers where the interpolated grid has NaN values (via `nanmask`),
 which produces a non-uniform log-τ spacing that contaminates the anchored τ integration scheme.
@@ -146,25 +191,32 @@ quantities onto a uniform log-τ grid.
 By default `n_layers` matches the input layer count, so the function is a pure spacing fix.
 Pass an explicit value to upsample or downsample.
 """
-function _resample_log_tau(atm_korg; n_layers::Int=length(Korg.get_tau_refs(atm_korg)))
-    τ_ref = Korg.get_tau_refs(atm_korg)
+function _resample_log_tau(atm_korg; n_layers::Int=-1)
+    τ_ref = try
+        Korg.get_tau_refs(atm_korg)
+    catch
+        return atm_korg  # no tau_ref available; cannot resample
+    end
+    isempty(τ_ref) && return atm_korg
+
     zs    = Korg.get_zs(atm_korg)
     Ts    = Korg.get_temps(atm_korg)
     ne    = Korg.get_electron_number_densities(atm_korg)
     nd    = Korg.get_number_densities(atm_korg)
 
+    n_layers_eff = n_layers < 0 ? length(τ_ref) : n_layers
     log_τ      = log.(τ_ref)
     Δlog_τ     = diff(log_τ)
     step_ratio = maximum(Δlog_τ) / minimum(Δlog_τ)
     if step_ratio > 1.1
         n_in = length(τ_ref)
-        suffix = n_layers == n_in ? "" : " → $n_layers layers"
+        suffix = n_layers_eff == n_in ? "" : " → $n_layers_eff layers"
         @warn "_resample_log_tau: non-uniform log-τ spacing (max/min step = " *
               "$(round(step_ratio, digits=2))×, $n_in layers$suffix). " *
-              "Resampling atmosphere to uniform grid."
+              "Resampling atmosphere to uniform d log-τ grid."
     end
 
-    log_τ_new = collect(range(first(log_τ), last(log_τ), length=n_layers))
+    log_τ_new = collect(range(first(log_τ), last(log_τ), length=n_layers_eff))
 
     itp_z  = Korg.CubicSplines.CubicSpline(log_τ, zs)
     itp_T  = Korg.CubicSplines.CubicSpline(log_τ, Ts)

@@ -6,10 +6,17 @@ using Statistics
 using ProgressMeter
 using Test
 
-# conditional CUDA useage
+# conditional CUDA usage
 global use_gpu = FT.GPU_DEFAULT
 if use_gpu
     using CUDA
+end
+
+# diagnostic plots: true when running locally, false on any CI runner (CI env var set by GH Actions etc.)
+const make_plots = !haskey(ENV, "CI")
+const test_plotdir = joinpath(@__DIR__, "plots")
+if make_plots
+    mkpath(test_plotdir)
 end
 
 # run tests
@@ -19,4 +26,14 @@ include("test_atmosphere.jl")
 include("test_kernels.jl")
 include("test_convenience.jl")
 
-# TODO finish implementing other tests
+# GPU-required tests
+if use_gpu
+    include("compare_korg.jl")
+    include("integrate_aniso.jl")
+    include("cusp.jl")
+    include("rotmacro_convolution_test.jl")
+    include("height_test.jl")
+    include("compare_cpu_gpu_convenience.jl")
+    include("compare_cpu_gpu_broadening.jl")
+    include("disk_int_error.jl")
+end

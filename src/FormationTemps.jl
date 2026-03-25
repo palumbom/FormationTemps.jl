@@ -17,7 +17,7 @@ import Base: AbstractFloat as AF
 import CUDA: CuArray as CA, CuDeviceMatrix as CDM, CuDeviceVector as CDV
 
 # determine if there is a GPU
-if CUDA.functional() 
+if CUDA.functional()
     const GPU_DEFAULT = true
 else
     const GPU_DEFAULT = false
@@ -73,12 +73,12 @@ include("disk_calculations.jl")
 include("convenience.jl")
 include("turb_fits.jl")
 
-export round_to_power, elav, searchsortednearest, 
-       calc_formation_temp, StellarProps, 
+export round_to_power, elav, searchsortednearest,
+       calc_formation_temp, StellarProps,
        FormTempResult, vmac_fit, vmic_fit, convolve_gray_rotation,
-       convolve_hirano_rotmacro, convolve_iso_rt_macro, 
-       convolve_rt_macro, gray_rot_kernel, hirano_rotmacro_ft_kernel, 
+       convolve_hirano_rotmacro, convolve_iso_rt_macro,
+       convolve_rt_macro, gray_rot_kernel, hirano_rotmacro_ft_kernel,
        gray_iso_rt_macro_kernel, rt_macro_kernel, convolve_instrument_gauss,
-       rebin_spectrum, Atmosphere, get_τs, get_zs, get_Ts
+       rebin_spectrum, Atmosphere, get_τs, get_zs, get_Ts, AlphaCache
 
 end

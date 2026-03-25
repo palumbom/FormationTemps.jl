@@ -1,3 +1,19 @@
+"""
+    GPUMemory{T<:AbstractFloat}
+
+Pre-allocated GPU working arrays for the radiative transfer computation.
+
+Fields:
+- `λs`: Wavelength grid on the device (Å), length `Nλ`.
+- `αs`, `τs`: Absorption coefficient and optical depth arrays, shape `(Natm, Nλ)`.
+- `cfunc`, `flux`: Contribution function and flux arrays, shape `(Natm-1, Nλ)`.
+- `tau_ds`, `tau_alphaC`: Bézier τ-integration geometry work arrays; used when `use_anchored=false`.
+- `log_τ_ref`, `ifactor_base`: Anchored τ-integration constants (`log τ_ref` and `τ_ref / α_ref`);
+  populated and used when `use_anchored=true`.
+- `use_anchored`: `true` for the anchored d(log τ) integrator; `false` for the Bézier integrator.
+
+See also: [`GPUMemory(λs, atm)`](@ref), [`GPUMemory(λs, atm, α_ref)`](@ref)
+"""
 struct GPUMemory{T<:AF}
     λs::CA{T,1}
     αs::CA{T,2}

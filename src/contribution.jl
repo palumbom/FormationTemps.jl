@@ -1,8 +1,34 @@
 E_2(τ) = Korg.RadiativeTransfer.exponential_integral_2(τ)
 # E_2(τ) = exponential_integral_2_gpu(τ)
 
-function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
-                                   cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1}, 
+"""
+    calc_intensity_quantities(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
+
+Compute the specific intensity contribution function and its optical-depth-weighted
+differential for a single disk tile.
+
+Applies microturbulent broadening (with per-layer Doppler shift `μ_v`), integrates the
+optical depth using either the anchored or Bézier scheme (as configured in `mem`), and
+evaluates the Planck-weighted contribution function at each layer boundary.
+
+Arguments:
+- `αs_init::AbstractMatrix{<:Real}`: Absorption coefficients, shape `(Natm, Nλ)`.
+- `atm::AtmosphereGPU`: GPU atmosphere.
+- `mem::GPUMemory`: Pre-allocated GPU working arrays.
+- `cmem::ConvolutionMemory`: Pre-allocated GPU convolution memory.
+- `μ_tile::Real`: Cosine of the local zenith angle for this disk tile.
+- `μ_v::CuArray{<:Real,1}`: Per-layer line-of-sight velocity from rotation (m/s).
+- `σ_v::CuArray{<:Real,1}`: Per-layer microturbulent broadening width (m/s).
+
+Returns:
+- `IntensityContFunc` with fields:
+  - `cfunc`: Intensity contribution function `C_I`, shape `(Natm-1, Nλ)`.
+  - `cfunc_dt`: `cfunc .* Δτ`, the differential contribution.
+
+See also: [`calc_flux_quantities`](@ref)
+"""
+function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
+                                   cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
                                    σ_v::CA{T,1}) where T<:AF
     # get contribution function
     calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
@@ -12,7 +38,31 @@ function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem
     return IntensityContFunc(mem.cfunc, cfunc_dt)
 end
 
-function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory, 
+"""
+    calc_flux_quantities(αs_init, atm, mem, cmem, σ_v)
+
+Compute the disk-center (μ=1, zero rotation) flux contribution function and its
+optical-depth-weighted differential.
+
+Applies microturbulent broadening (zero Doppler shift), integrates the optical depth
+using either the anchored or Bézier scheme (as configured in `mem`), and evaluates the
+Planck-weighted E₂(τ) contribution function at each layer boundary.
+
+Arguments:
+- `αs_init::AbstractMatrix{<:Real}`: Absorption coefficients, shape `(Natm, Nλ)`.
+- `atm::AtmosphereGPU`: GPU atmosphere.
+- `mem::GPUMemory`: Pre-allocated GPU working arrays.
+- `cmem::ConvolutionMemory`: Pre-allocated GPU convolution memory.
+- `σ_v::CuArray{<:Real,1}`: Per-layer microturbulent broadening width (m/s).
+
+Returns:
+- `FluxContFunc` with fields:
+  - `cfunc`: Flux contribution function `C_F`, shape `(Natm-1, Nλ)`.
+  - `cfunc_dt`: `cfunc .* Δτ`, the differential contribution.
+
+See also: [`calc_intensity_quantities`](@ref)
+"""
+function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
                               cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
     # get contribution function
     calc_flux_cfunc!(αs_init, atm, mem, cmem, σ_v)

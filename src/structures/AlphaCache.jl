@@ -10,6 +10,15 @@ This cache implements:
 - warm-started electron density guesses across columns,
 - precomputed abundance normalization and continuum wavelength grid,
 - reusable buffers for chemistry and line-absorption assembly.
+
+Arguments:
+- `wls::Korg.Wavelengths`: Wavelength grid for line and continuum absorption.
+- `A_X::AbstractVector{<:Real}`: Elemental abundances on the usual astronomical scale.
+- `Nlayers::Int` or `atm::Atmosphere`: Number of atmosphere layers, or an atmosphere struct.
+- `cntm_step`: Continuum wavelength step (cm; default 1e-8).
+- `line_buffer`: Buffer around the wavelength range for line wings (cm; default 10e-8).
+
+See also: [`compute_alpha!`](@ref), [`set_abundances!`](@ref), [`reset_alpha_cache!`](@ref)
 """
 mutable struct AlphaCache{T<:AF, TI}
     Nlayers::Int

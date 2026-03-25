@@ -31,6 +31,9 @@ outdir = joinpath(cephdir, "formation_temps")
 h5path_chunks = joinpath(outdir, "temp_spectrum_chunks.h5")
 h5path_splice = joinpath(outdir, "temp_spectrum_1D.h5")
 
+# h5path_chunks = joinpath(outdir, "temp_spectrum_chunks_debug.h5")
+# h5path_splice = joinpath(outdir, "temp_spectrum_1D_debug.h5")
+
 fig1, ax1 = plt.subplots()
 fig2, ax2 = plt.subplots()
 
@@ -142,5 +145,4 @@ ax2.set_ylabel("Formation Temperature [K]")
 ax2.legend()
 fig2.savefig("temp_spectrum.pdf", bbox_inches="tight")
 # plt.show()
-plt.clf(); plt.close()
 plt.clf(); plt.close()

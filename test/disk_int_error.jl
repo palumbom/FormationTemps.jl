@@ -1,141 +1,90 @@
-using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
-using HDF5, Printf
+using CUDA
+using Statistics
 using ProgressMeter
-using CUDA, BenchmarkTools
-using CSV, DataFrames, Statistics
-import PythonPlot; plt = PythonPlot
-using PythonCall: pyimport
-mpl = plt.matplotlib
 
-# matplotlib backend
-mpl.use("Qt5Agg")
-mpl.style.use(FT.moddir * "fig.mplstyle")
-
-# get fancy fonts
-plt.rc("text", usetex=true)
-plt.rc("text.latex", preamble="\\usepackage{amsmath}
-                            \\usepackage{mathrsfs}")
-                            
-# set colormaps
-img_cmap = "viridis"
-μ_cmap = "autumn"
-
-# alias type 
-AA = AbstractArray
-CA = CuArray
-AF = AbstractFloat
-
-# make plotdir
-plotdir = joinpath(pwd(), "figures")
-!isdir(plotdir) && mkdir(plotdir)
-
-# get the linelist
+# load the linelist (Fe I 6301/6302)
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
-specs = [string(l.species) for l in linelist]
-
-# cut on species
+specs    = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
-
-# get the Fe I 6301 & 6302 lines (just cuz)
-wls = [l.wl for l in linelist] 
-idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
-idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
+wls      = [l.wl for l in linelist]
+idx1     = findfirst(x -> x * 1e8 >= 6301, wls)
+idx2     = findfirst(x -> x * 1e8 >= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
+wls      = [l.wl * 1e8 for l in linelist]
 
-# re-get values
-wls = [l.wl * 1e8 for l in linelist]
-log_gf =  [l.log_gf for l in linelist]
-species =  [l.species for l in linelist]
-E_lower =  [l.E_lower for l in linelist]
-gamma_rad =  [l.gamma_rad for l in linelist]
-gamma_stark =  [l.gamma_stark for l in linelist]
-
-# make the wavelength grid
 λs_korg = range(first(wls) - 1.0, last(wls) + 1.0, step=0.01)
-cont_idx = findfirst(x -> x .>= 6301.3, λs_korg)
 
-# get some abundances
-A_X = Korg.asplund_2020_solar_abundances
-
-# get the atmosphere
+A_X     = Korg.asplund_2020_solar_abundances
 atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(5777.0, 4.44, A_X))
-zs = atm_gpu.zs
-Ts = atm_gpu.Ts
-τ5000 = atm_gpu.τs
+zs      = atm_gpu.zs
 
-# synthesis to get the alphas
-αs = zeros(length(atm_gpu.zs), length(λs_korg))
-αs_cont = zeros(length(atm_gpu.zs), length(λs_korg))
-# FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+αs      = zeros(length(zs), length(λs_korg))
+αs_cont = zeros(length(zs), length(λs_korg))
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
-# allocate memory for convolutions
-Nλ = length(λs_korg)
+Nλ   = length(λs_korg)
 Natm = size(αs, 1)
 Npad = 100
-cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-
-# allocate on device
+cmem    = FT.ConvolutionMemory(Nλ, Natm, Npad)
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
-# velocities
 μ_v = CUDA.zeros(Float64, length(zs))
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
-# get the nominal answer
-cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
-cfunc_flux = Array(cfunc_flux_struct.cfunc_dt)
-flux = Array(FT.get_flux(cfunc_flux_struct))
+# reference: direct flux (no disk integration)
+cfunc_flux_ref = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+flux_ref       = Array(FT.get_flux(cfunc_flux_ref))
 
-# get disk stuff 
+# disk integration at two resolutions
+Nϕ_vals = [16, 32]
+
+mean_pct_error = zeros(length(Nϕ_vals))
+max_pct_error  = zeros(length(Nϕ_vals))
+
 ρstar = 1.0
 istar = 90.0
-v0 = 0.0
-Nϕ = 2 .^(range(2, 8, step=1))
-Nϕ = [8, 16, 32, 64, 128, 256, 512]
+v0    = 0.0
 
-# allocate for output
-flux_test = CUDA.zeros(Float64, length(λs_korg))
-mean_pct_error_flux = zeros(length(Nϕ))
-max_pct_error_flux = zeros(length(Nϕ))
-ntiles_real = zeros(length(Nϕ))
+for j in eachindex(Nϕ_vals)
+    μs, dA, z_rot, _ = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ_vals[j])
 
-for j in eachindex(Nϕ)
-    @show Nϕ[j]
+    idx       = findall(x -> x > zero(eltype(μs)), Array(μs))
+    μs_cpu    = view(Array(μs), idx)
+    dA_cpu    = view(Array(dA), idx)
 
-    # do spherical trig
-    μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ[j])
-
-    # flatten, move to cpu
-    idx = findall(x -> x .> zero(eltype(μs)), Array(μs))
-    μs_cpu = view(Array(μs), idx)
-    dA_cpu = view(Array(dA), idx)
-    z_rot_cpu = view(Array(z_rot), idx)
-    ntiles_real[j] = length(μs_cpu)
-
-    @show sum(dA_cpu)
-
-    # re-zero
-    flux_test .= 0.0
+    flux_disk = CUDA.zeros(Float64, length(λs_korg))
     @showprogress for i in eachindex(μs_cpu)
-        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-        flux_test .+= FT.get_intensity(cfunc_intensity_struct) .* dA_cpu[i]
+        cfunc_i = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+        flux_disk .+= FT.get_intensity(cfunc_i) .* dA_cpu[i]
     end
-    println()
 
-    # test the flux
-    mean_pct_error_flux[j] = abs(mean(100 .* (flux .- Array(flux_test)) ./ flux))
-    max_pct_error_flux[j] = maximum(abs.(100 .* (flux .- Array(flux_test)) ./ flux))
+    mean_pct_error[j] = mean(abs.(100.0 .* (flux_ref .- Array(flux_disk)) ./ flux_ref))
+    max_pct_error[j]  = maximum(abs.(100.0 .* (flux_ref .- Array(flux_disk)) ./ flux_ref))
 end
 
-plt.scatter(Nϕ, mean_pct_error_flux, s=20, label="Mean Abs. Error")
-plt.scatter(Nϕ, max_pct_error_flux, s=20, label="Max Abs. Error")
-# plt.xscale("symlog")
-plt.xlabel("Number of latitude tiles")
-plt.ylabel("Mean % Error")
-plt.legend()
-plt.savefig("figures/disk_int_error.pdf", bbox_inches="tight")
-plt.show()
+@testset "Disk integration error vs reference flux" begin
+    # Nϕ = 16: coarse — allow up to 5% max error
+    @test mean_pct_error[1] < 2.0
+    @test max_pct_error[1]  < 5.0
+    # Nϕ = 32: finer — tighter tolerance
+    @test mean_pct_error[2] < 1.0
+    @test max_pct_error[2]  < 2.0
+    # error should decrease with increasing Nϕ
+    @test mean_pct_error[2] < mean_pct_error[1]
+end
+
+if make_plots
+    import PythonPlot; plt = PythonPlot
+    plt.ioff()
+    fig, ax = plt.subplots()
+    ax.scatter(Nϕ_vals, mean_pct_error, s=20, label="Mean abs. error")
+    ax.scatter(Nϕ_vals, max_pct_error,  s=20, label="Max abs. error")
+    ax.set_xlabel("Number of latitude tiles Nϕ")
+    ax.set_ylabel("Percent error vs direct flux")
+    ax.legend()
+    fig.savefig(joinpath(test_plotdir, "disk_int_error.pdf"), bbox_inches="tight")
+    plt.close()
+end

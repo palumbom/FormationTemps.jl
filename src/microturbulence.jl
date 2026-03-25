@@ -1,3 +1,27 @@
+"""
+    convolve_wavelength_axis(xs, ys, μ_v, σ_v)
+
+Convolve each row of `ys` with a Gaussian kernel that models microturbulent broadening
+and a Doppler shift, using FFT convolution. The kernel width is wavelength-dependent
+(constant in velocity units).
+
+Arguments:
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
+- `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
+- `μ_v::Real` or `AbstractVector{<:Real}`: Line-of-sight velocity per row (m/s). A scalar
+  applies the same shift to every row; a vector specifies per-row shifts.
+- `σ_v::Real` or `AbstractVector{<:Real}`: Gaussian broadening width per row (m/s).
+
+Returns:
+- `ys_out::AbstractMatrix{<:Real}`: Broadened matrix with the same shape as `ys`.
+
+Notes:
+- Uses a real-space sampled Gaussian kernel. This differs from the analytical
+  Fourier-domain Gaussian used by [`convolve_wavelength_axis_gpu`](@ref) when σ < ~3 pixels,
+  producing systematic flux differences of ~4×10⁻⁴ at σ ≈ 1.8 px (ξ ≈ 850 m/s, Δλ = 0.01 Å).
+
+See also: [`convolve_wavelength_axis_gpu`](@ref)
+"""
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::T, σ_v::T) where {T<:AF}
     # clamp broadening to prevent div by 0
     Δλ = median(diff(xs))
@@ -141,6 +165,31 @@ function build_doppler_filter!(filter, shift_pix, sigma_pix, invL, nfreq)
     return nothing
 end
 
+"""
+    convolve_wavelength_axis_gpu(cmem, xs, ys, μ_v, σ_v)
+
+GPU implementation of [`convolve_wavelength_axis`](@ref). Applies a per-row Doppler
+shift and Gaussian broadening in the Fourier domain using an analytical filter.
+
+Arguments:
+- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `xs::AbstractVector{<:Real}` or `CuArray{<:Real,1}`: Wavelength grid (Å).
+- `ys::AbstractMatrix{<:Real}` or `CuArray{<:Real,2}`: Input matrix `(Natm, Nλ)`.
+- `μ_v::CuArray{<:Real,1}`: Per-row Doppler velocity shift (m/s).
+- `σ_v::CuArray{<:Real,1}`: Per-row Gaussian broadening width (m/s).
+
+Returns:
+- A view of `cmem.conv_gpu[:, pad_left+1 : pad_left+Nλ]` containing the broadened result.
+
+Notes:
+- Uses an analytical Fourier-domain Gaussian filter (H[f] = exp(−(πσf/L)²) × phase shift),
+  which is more accurate than a sampled real-space kernel when σ < ~3 pixels.
+- When `cmem.signal_cached` is `true`, the signal padding and forward FFT are skipped;
+  set this flag when the absorption coefficients have not changed since the last call
+  (e.g., across rotation tiles in the disk integration loop).
+
+See also: [`convolve_wavelength_axis`](@ref)
+"""
 function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, μ_v::CA{T,1}, σ_v::CA{T,1}) where {T<:AF}
     # compute per-row shift (pixels) and Gaussian width (pixels)

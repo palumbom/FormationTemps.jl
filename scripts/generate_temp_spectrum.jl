@@ -29,19 +29,20 @@ cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
-outfile = joinpath(outdir, "temp_spectrum_chunks_debug.h5")
-outfile_1d = joinpath(outdir, "temp_spectrum_1D_debug.h5")
+outfile = joinpath(outdir, "temp_spectrum_chunks.h5")
+outfile_1d = joinpath(outdir, "temp_spectrum_1D.h5")
 
 # get the linelist
 linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
-wls = [l.wl * 1e8 for l in linelist]
-idx1 = findfirst(wls .>= 5000.0)
-idx2 = findfirst(wls .>= 5050.0)
-linelist = linelist[idx1:idx2]
-# linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
-specs = [string(l.species) for l in linelist]
+# wls = [l.wl * 1e8 for l in linelist]
+# idx1 = findfirst(wls .>= 5000.0)
+# idx2 = findfirst(wls .>= 5050.0)
+# linelist = linelist[idx1:idx2]
 
-# re-get values
+# convert to air wavelengths (if necessary)
+# linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
+
+# parse values values
 wls = [l.wl * 1e8 for l in linelist]
 log_gf =  [l.log_gf for l in linelist]
 species =  [l.species for l in linelist]
@@ -99,6 +100,7 @@ h5open(outfile, "w") do h5
         Δλ = 0.001
         form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=Δλ,
                                                   convolve=false, Nϕ=16,
+                                                  buffer=3.0,
                                                   ne_warn_thresh=Inf)
 
         # parse out results

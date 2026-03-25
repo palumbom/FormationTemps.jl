@@ -1,17 +1,20 @@
 """
     rt_macro_kernel(vs, ζ_r, ζ_t, μ)
 
-Compute the radial-tangential macroturbulence kernel from Gray (2008) (Eq. 17.6)
-assuming A_R = A_T.
+Compute the anisotropic radial-tangential macroturbulence kernel from Gray (2008)
+(Eq. 17.6) with independent radial and tangential velocity scales, assuming equal
+amplitudes (A_R = A_T).
 
 Arguments:
-- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core.
-- `ζ_r::Real`: Radial macroturbulence velocity scale.
-- `ζ_t::Real`: Tangential macroturbulence velocity scale.
+- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core (m/s).
+- `ζ_r::Real`: Radial macroturbulence velocity scale (m/s).
+- `ζ_t::Real`: Tangential macroturbulence velocity scale (m/s).
 - `μ::Real`: Cosine of the angle between the local normal and the line of sight.
 
 Returns:
 - `kernel::Vector{<:Real}`: Normalized macroturbulence kernel evaluated on `vs`.
+
+See also: [`convolve_rt_macro`](@ref)
 """
 function rt_macro_kernel(vs::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
     # constants
@@ -35,19 +38,20 @@ end
 """
     convolve_rt_macro(xs, ys, ζ_r, ζ_t, μ)
 
-Convolve a spectrum with a radial-tangential macroturbulence kernel.
+Convolve a spectrum with the anisotropic radial-tangential macroturbulence kernel,
+allowing independent radial and tangential velocity scales.
 
 Arguments:
-- `xs::AbstractVector{<:Real}`: Wavelength grid.
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractArray{<:Real}`: Spectrum on `xs` (vector or matrix with rows as spectra).
-- `ζ_r::Real`: Radial macroturbulence velocity scale.
-- `ζ_t::Real`: Tangential macroturbulence velocity scale.
+- `ζ_r::Real`: Radial macroturbulence velocity scale (m/s).
+- `ζ_t::Real`: Tangential macroturbulence velocity scale (m/s).
 - `μ::Real`: Cosine of the angle between the local normal and the line of sight.
 
 Returns:
 - `ys_out::AbstractArray{<:Real}`: Convolved spectrum (or `ys` if `ζ_r == 0` and `ζ_t == 0`).
 
-See also: [`rt_macro_kernel`](@ref)
+See also: [`rt_macro_kernel`](@ref), [`convolve_rt_macro_gpu`](@ref)
 """
 
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
@@ -118,16 +122,41 @@ function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_r, ζ_t, μ, Nλ, 
     return nothing
 end
 
+"""
+    convolve_rt_macro_gpu(cmem, xs, ys, ζ_r, ζ_t, μ)
+
+GPU implementation of `convolve_rt_macro(xs, ys, ζ_r, ζ_t, μ)`. Convolves each row
+of `ys` with the anisotropic radial-tangential macroturbulence kernel using padded FFT
+convolution on the device, allowing independent radial and tangential velocity scales.
+
+Arguments:
+- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
+- `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
+- `ζ_r::Real`: Radial macroturbulence velocity scale (m/s).
+- `ζ_t::Real`: Tangential macroturbulence velocity scale (m/s).
+- `μ::Real`: Cosine of the angle between the local normal and the line of sight.
+
+Returns:
+- `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
+
+Notes:
+- Short-circuits (returns `CuArray(ys)`) when both `ζ_r` and `ζ_t` are zero.
+- The GPU evaluates `erfc` in a CUDA kernel; results differ from the CPU `erfc`
+  (Julia standard library) by ~1e-4 relative to peak flux.
+
+See also: [`convolve_rt_macro`](@ref), [`rt_macro_kernel`](@ref)
+"""
 function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                ys::AA{T,2}, ζ_r::T, ζ_t::T, μ::T) where {T<:AF}
+    # short circuit before any copy so the caller's ys is returned unmodified
+    if (iszero(ζ_r) & iszero(ζ_t))
+        return CuArray(ys)
+    end
+
     # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
     copyto!(cmem.ys_gpu, CuArray(ys))
-
-    # short circuit
-    if (iszero(ζ_r) & iszero(ζ_t))
-        return cmem.ys_gpu
-    end
 
     # compute velocity offset from discrete center
     i0 = length(xs) ÷ 2 + 1

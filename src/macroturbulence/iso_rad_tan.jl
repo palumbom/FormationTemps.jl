@@ -2,14 +2,17 @@
     gray_iso_rt_macro_kernel(vs, ζ_rt)
 
 Compute the isotropic radial-tangential macroturbulence kernel from Gray (2008)
-(Eq. 17.8) assuming A_R = A_T and ζ_R = ζ_T.
+(Eq. 17.8), assuming equal amplitudes (A_R = A_T) and equal velocity scales (ζ_R = ζ_T).
+The kernel is the disk-integrated (μ-averaged) form.
 
 Arguments:
-- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core.
-- `ζ_rt::Real`: Isotropic radial-tangential macroturbulence velocity scale.
+- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core (m/s).
+- `ζ_rt::Real`: Isotropic macroturbulence velocity scale (m/s).
 
 Returns:
 - `kernel::Vector{<:Real}`: Normalized macroturbulence kernel evaluated on `vs`.
+
+See also: [`convolve_iso_rt_macro`](@ref), [`rt_macro_kernel`](@ref)
 """
 function gray_iso_rt_macro_kernel(vs::AA{T,1}, ζ_rt::T) where T<:AF
     t1 = 2.0 .* exp.(-1.0 .* (vs ./ ζ_rt).^2.0) ./ (sqrt(π) .* ζ_rt)
@@ -21,17 +24,20 @@ end
 """
     convolve_iso_rt_macro(xs, ys, ζ_rt)
 
-Convolve a spectrum with the isotropic radial-tangential macroturbulence kernel.
+Convolve a spectrum with the isotropic radial-tangential macroturbulence kernel from
+Gray (2008) (Eq. 17.8). This is the disk-integrated (μ-averaged) form appropriate for
+stellar flux spectra.
 
 Arguments:
-- `xs::AbstractVector{<:Real}`: Wavelength grid.
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractArray{<:Real}`: Spectrum on `xs` (vector or matrix with rows as spectra).
-- `ζ_rt::Real`: Isotropic radial-tangential macroturbulence velocity scale.
+- `ζ_rt::Real`: Isotropic macroturbulence velocity scale (m/s).
 
 Returns:
 - `ys_out::AbstractArray{<:Real}`: Convolved spectrum (or `ys` if `ζ_rt == 0`).
 
-See also: [`gray_iso_rt_macro_kernel`](@ref)
+See also: [`gray_iso_rt_macro_kernel`](@ref), [`convolve_iso_rt_macro_gpu`](@ref),
+[`convolve_rt_macro`](@ref)
 """
 function convolve_iso_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T) where T<:AF
     # short circuit
@@ -93,16 +99,39 @@ function compute_padded_iso_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, Nλ, pad_l
     return nothing
 end
 
+"""
+    convolve_iso_rt_macro_gpu(cmem, xs, ys, ζ_rt)
+
+GPU implementation of [`convolve_iso_rt_macro`](@ref). Convolves each row of `ys`
+with the isotropic radial-tangential macroturbulence kernel using padded FFT
+convolution on the device.
+
+Arguments:
+- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
+- `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
+- `ζ_rt::Real`: Isotropic macroturbulence velocity scale (m/s).
+
+Returns:
+- `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
+
+Notes:
+- Short-circuits (returns `CuArray(ys)`) when `ζ_rt` is zero.
+- The GPU evaluates `erfc` in a CUDA kernel; results differ from the CPU `erfc`
+  (Julia standard library) by ~1e-4 relative to peak flux.
+
+See also: [`convolve_iso_rt_macro`](@ref), [`gray_iso_rt_macro_kernel`](@ref)
+"""
 function convolve_iso_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                    ys::AA{T,2}, ζ_rt::T) where {T<:AF}
+    # short circuit before any copy so the caller's ys is returned unmodified
+    if iszero(ζ_rt)
+        return CuArray(ys)
+    end
+
     # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
     copyto!(cmem.ys_gpu, CuArray(ys))
-
-    # short circuit
-    if iszero(ζ_rt)
-        return cmem.ys_gpu
-    end
 
     # compute velocity offset from discrete center
     i0 = length(xs) ÷ 2 + 1
@@ -162,7 +191,6 @@ function convolve_iso_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out

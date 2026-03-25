@@ -1,21 +1,23 @@
-global const intres_glob = 500
+const intres_glob = 1024
 
 """
     hirano_rotmacro_ft_kernel(σs, vsini, ζ_rt; u1=0.43, u2=0.31, intres=intres_glob)
 
 Compute the Fourier transform of the Hirano et al. (2011) rotation+macroturbulence
-kernel (Eq. B12).
+kernel (Eq. B12) by quadrature integration over the visible stellar disk.
 
 Arguments:
-- `σs::AbstractVector{<:Real}`: Frequency grid (inverse velocity units).
-- `vsini::Real`: Projected rotational velocity.
-- `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale.
+- `σs::AbstractVector{<:Real}`: Frequency grid (s/m; inverse of velocity units).
+- `vsini::Real`: Projected rotational velocity (m/s).
+- `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
 - `u1::Real=0.43`: Linear limb-darkening coefficient.
 - `u2::Real=0.31`: Quadratic limb-darkening coefficient.
-- `intres::Int=intres_glob`: Quadrature resolution for the kernel integral.
+- `intres::Int=intres_glob`: Number of quadrature points for the disk integral.
 
 Returns:
-- `Kσ::Vector{<:Real}`: Fourier transform of the rotation+macroturbulence kernel.
+- `Kσ::Vector{<:Real}`: Fourier transform of the combined kernel, same length as `σs`.
+
+See also: [`convolve_hirano_rotmacro`](@ref)
 """
 function hirano_rotmacro_ft_kernel(σs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=intres_glob) where T<:AF
     # quadrature grid in t∈[0,1]
@@ -42,24 +44,25 @@ end
 """
     convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2; intres=intres_glob)
 
-Convolve a spectrum with the Hirano et al. (2011) rotation+macroturbulence kernel.
+Convolve a spectrum with the Hirano et al. (2011) combined rotation+macroturbulence
+kernel. The kernel is computed analytically in the Fourier domain and applied via FFT.
 
 Arguments:
-- `xs::AbstractVector{<:Real}`: Wavelength grid.
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractArray{<:Real}`: Spectrum on `xs` (vector or matrix with rows as spectra).
-- `vsini::Real`: Projected rotational velocity.
-- `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale.
+- `vsini::Real`: Projected rotational velocity (m/s).
+- `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
 - `u1::Real`: Linear limb-darkening coefficient.
 - `u2::Real`: Quadratic limb-darkening coefficient.
-- `intres::Int=intres_glob`: Quadrature resolution for the kernel integral.
+- `intres::Int=intres_glob`: Number of quadrature points for the disk integral.
 
 Returns:
 - `ys_out::AbstractArray{<:Real}`: Convolved spectrum with the same shape as `ys`.
 
-See also: [`hirano_rotmacro_ft_kernel`](@ref)
+See also: [`hirano_rotmacro_ft_kernel`](@ref), [`convolve_hirano_rotmacro_gpu`](@ref)
 """
-function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T, 
-                                  ζ_rt::T, u1::T, u2::T; 
+function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
+                                  ζ_rt::T, u1::T, u2::T;
                                   intres::Int=intres_glob) where T<:AF
     # velocity grid
     N = length(xs)
@@ -82,8 +85,8 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
     return real(ifft(fft(ys) .* fft(k_circ)))
 end
 
-function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T, 
-                                  ζ_rt::T, u1::T, u2::T; 
+function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
+                                  ζ_rt::T, u1::T, u2::T;
                                   intres::Int=intres_glob) where T<:AF
     # velocity grid
     N = length(xs)
@@ -127,17 +130,46 @@ function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0
     return kernel
 end
 
+"""
+    convolve_hirano_rotmacro_gpu(cmem, xs, ys, vsini, ζ_rt, u1, u2; intres=intres_glob)
+
+GPU implementation of [`convolve_hirano_rotmacro`](@ref). Convolves each row of `ys`
+with the Hirano et al. (2011) combined rotation+macroturbulence kernel using padded
+FFT convolution on the device.
+
+Arguments:
+- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
+- `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
+- `vsini::Real`: Projected rotational velocity (m/s).
+- `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
+- `u1::Real`: Linear limb-darkening coefficient.
+- `u2::Real`: Quadratic limb-darkening coefficient.
+- `intres::Int=intres_glob`: Quadrature resolution for the kernel integral.
+
+Returns:
+- `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
+
+Notes:
+- Short-circuits (returns `CuArray(ys)`) when both `vsini` and `ζ_rt` are zero.
+- The kernel is computed on the CPU and transferred to the GPU; the FFT convolution
+  runs on the device.
+- CPU and GPU results differ at the first and last `~vsini/c × λ₀/Δλ` pixels because
+  the CPU uses an unpadded circular FFT while the GPU uses a padded linear convolution.
+
+See also: [`convolve_hirano_rotmacro`](@ref), [`hirano_rotmacro_ft_kernel`](@ref)
+"""
 function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, vsini::T, ζ_rt::T,
                                       u1::T, u2::T; intres::Int=intres_glob) where {T<:AF}
+    # short circuit before any copy so the caller's ys is returned unmodified
+    if iszero(vsini) && iszero(ζ_rt)
+        return CuArray(ys)
+    end
+
     # copy to device
     copyto!(cmem.xs_gpu, CuArray(xs))
     copyto!(cmem.ys_gpu, CuArray(ys))
-
-    # short circuit
-    if iszero(vsini) && iszero(ζ_rt)
-        return cmem.ys_gpu
-    end
 
     # circular kernel centered at v=0 (FFT-shifted) with sum=1
     kernel_N = hirano_rotmacro_kernel_from_xs(xs, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
@@ -175,14 +207,13 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     kr = copy(shifted_kernel_row)                  # contiguous 1-D device vector
     kernel_row_ft = CUDA.CUFFT.rfft(kr)            # shape nf
 
-    # convolution theorem 
+    # convolution theorem
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
     kft = reshape(kernel_row_ft, 1, :)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     return out
 end

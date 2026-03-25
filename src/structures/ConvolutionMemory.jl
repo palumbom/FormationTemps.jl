@@ -1,3 +1,25 @@
+"""
+    ConvolutionMemory{T<:AbstractFloat}
+
+Pre-allocated GPU buffers and CUFFT plans for batched FFT-based spectral convolution.
+
+Caches a padded signal FFT across convolution calls so that repeated convolutions of the
+same underlying absorption coefficients (e.g., across disk integration tiles that vary only
+in μ and velocity) can reuse the signal transform. Set `signal_cached = true` after the
+first call to skip re-padding and re-transforming on subsequent calls.
+
+Fields:
+- `Nλ`: Number of wavelength points in the unpadded signal.
+- `Natm`: Number of atmosphere layers (rows in the signal matrix).
+- `Npad`: Effective number of padding samples added (split symmetrically on each side).
+- `L`: Total padded FFT length (FFT-friendly: factors of 2, 3, 5, 7).
+- `pad_left`, `pad_right`: Number of padding samples on the left and right of the signal.
+- `doppler_scale`: Cached wavelength-to-pixel conversion factor `λ₀ / (c Δλ)`.
+- `doppler_ready`: Whether `doppler_scale` has been computed for the current wavelength grid.
+- `signal_cached`: Whether the padded signal FFT in `signal_ft_gpu` is current.
+
+See also: [`ConvolutionMemory(Nλ, Natm, Npad)`](@ref)
+"""
 mutable struct ConvolutionMemory{T<:AF}
     Nλ::Int
     Natm::Int
@@ -57,6 +79,15 @@ function next_fft_friendly_len(L::Int)
     return L_candidate
 end
 
+"""
+    ConvolutionMemory(Nλ, Natm, Npad; T=Float64)
+
+Allocate GPU buffers and CUFFT plans for batched convolution of `Natm × Nλ` matrices.
+
+`Npad` is the minimum number of padding samples added to the signal on each side; the
+actual total padding is rounded up so that the padded length `L` is FFT-friendly
+(factors of 2, 3, 5, 7 only). The effective `Npad` stored in the struct is `L - Nλ`.
+"""
 function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     Nλ > 0 || error("Nλ must be positive")
     Natm > 0 || error("Natm must be positive")

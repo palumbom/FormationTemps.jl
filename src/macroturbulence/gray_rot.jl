@@ -5,12 +5,14 @@ Compute the Gray (2008) rotation broadening kernel (Eq. 18.14) with linear
 limb darkening.
 
 Arguments:
-- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core.
-- `vsini::Real`: Projected rotational velocity.
+- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core (m/s).
+- `vsini::Real`: Projected rotational velocity (m/s).
 - `u1::Real`: Linear limb-darkening coefficient.
 
 Returns:
 - `kernel::Vector{<:Real}`: Normalized rotation kernel evaluated on `vs`.
+
+See also: [`convolve_gray_rotation`](@ref)
 """
 function gray_rot_kernel(vs::AA{T,1}, vsini::T, u1::T) where T<:AF
     # get LD terms
@@ -32,15 +34,15 @@ end
 Convolve a spectrum with the Gray (2008) rotation kernel using linear limb darkening.
 
 Arguments:
-- `xs::AbstractVector{<:Real}`: Wavelength grid.
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractArray{<:Real}`: Spectrum on `xs` (vector or matrix with rows as spectra).
-- `vsini::Real`: Projected rotational velocity.
+- `vsini::Real`: Projected rotational velocity (m/s).
 - `u1::Real`: Linear limb-darkening coefficient.
 
 Returns:
 - `ys_out::AbstractArray{<:Real}`: Convolved spectrum with the same shape as `ys`.
 
-See also: [`gray_rot_kernel`](@ref)
+See also: [`gray_rot_kernel`](@ref), [`convolve_gray_rotation_gpu`](@ref)
 """
 function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,1}, vsini::T, u1::T) where T<:AF
     # offset the kernel by the velocity
@@ -96,6 +98,28 @@ function compute_padded_gray_kernel_1D!(kernel_row, xs, λc, vsini, u1, Nλ, pad
     return nothing
 end
 
+"""
+    convolve_gray_rotation_gpu(cmem, xs, ys, vsini, u1)
+
+GPU implementation of [`convolve_gray_rotation`](@ref). Convolves each row of `ys`
+with the Gray (2008) rotation kernel using padded FFT convolution on the device.
+
+Arguments:
+- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
+- `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
+- `vsini::Real`: Projected rotational velocity (m/s).
+- `u1::Real`: Linear limb-darkening coefficient.
+
+Returns:
+- `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
+
+Notes:
+- CPU and GPU results differ at the first and last `~vsini/c × λ₀/Δλ` pixels because
+  the CPU uses an unpadded circular FFT while the GPU uses a padded linear convolution.
+
+See also: [`convolve_gray_rotation`](@ref), [`gray_rot_kernel`](@ref)
+"""
 function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                     ys::AA{T,2}, vsini::T, u1::T) where {T<:AF}
     # copy inputs to device
@@ -160,7 +184,6 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
     # slice valid region
-    # out = @view cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
