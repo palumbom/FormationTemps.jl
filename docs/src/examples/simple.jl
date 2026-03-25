@@ -1,5 +1,5 @@
 using Korg
-using PyPlot
+using PythonPlot
 using FormationTemps; FT = FormationTemps
 
 # get the linelist
@@ -8,11 +8,10 @@ linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16100]
 # set stellar parameters
 Teff = 5777.0
 logg = 4.44
-A_X = Korg.asplund_2020_solar_abundances
 Fe_H = 0.0
 vsini = 2100.0
 ζ_RT = 3400.0   # radial-tangential macroturbulent broadening 
-ξ = 850.0       # microturbulent broadenign
+ξ = 850.0       # microturbulent broadening
 
 # create StellarProps composite type to hold everything 
 star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, 

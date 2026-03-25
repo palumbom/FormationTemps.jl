@@ -67,6 +67,15 @@ gray_iso_rt_macro_kernel
 rt_macro_kernel
 ```
 
+## Absorption Cache
+
+`AlphaCache` provides a reusable cache that accelerates repeated `compute_alpha!` calls
+by warm-starting the electron density solver and reusing continuum buffers across calls.
+
+```@docs
+AlphaCache
+```
+
 ## Miscellaneous Utilities
 
 ```@docs

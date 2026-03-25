@@ -1,5 +1,5 @@
 using Korg
-using PyPlot
+using PythonPlot
 using FormationTemps; FT = FormationTemps
 
 # get the linelist
@@ -8,14 +8,13 @@ linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16100]
 # set stellar parameters
 Teff = 5777.0
 logg = 4.44
-A_X = Korg.asplund_2020_solar_abundances
 Fe_H = 0.0
 vsini = 2100.0
-ζ_RT = 3400.0   # radial-tangential macroturbulent broadening 
-ξ = 850.0       # microturbulent broadenign
+ζ_RT = 3400.0   # radial-tangential macroturbulent broadening
+ξ = 850.0       # microturbulent broadening
 
-# create StellarProps composite type to hold everything 
-star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, 
+# create StellarProps composite type to hold everything
+star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                           vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
 # get the flux + formation temperature spectra
@@ -47,10 +46,15 @@ zs = get_zs(atm)
 Ts = get_Ts(atm)
 τs = get_τs(atm)
 
-# plot temperature structure 
+# plot temperature structure vs optical depth (if available) or height
 fig, ax1 = plt.subplots(figsize=(9.6,4.8))
-ax1.plot(τs, Ts, c="k")
-ax1.set_xlabel("Optical Depth at 5000 Å")
+if isempty(τs)
+    ax1.plot(zs ./ 1e5, Ts, c="k")   # fall back to height in km
+    ax1.set_xlabel("Height [km]")
+else
+    ax1.plot(τs, Ts, c="k")
+    ax1.set_xlabel("Optical Depth at 5000 Å")
+end
 ax1.set_ylabel("Atmosphere Temperature [K]")
 fname = joinpath(FT.moddir, "docs", "src", "static", "atmosphere.png")
 fig.savefig(fname, bbox_inches="tight")

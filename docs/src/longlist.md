@@ -4,5 +4,6 @@
 Modules = [FormationTemps]
 Order = [:type, :function]
 Filter = t -> t in (FormationTemps.Atmosphere,
-                    FormationTemps.FormTempResult) ? false : true
+                    FormationTemps.FormTempResult,
+                    FormationTemps.AlphaCache) ? false : true
 ```
