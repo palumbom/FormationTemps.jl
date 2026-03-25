@@ -14,7 +14,7 @@ mpl = plt.matplotlib
 
 # matplotlib backend
 mpl.use("Qt5Agg")
-mpl.style.use(FT.moddir * "fig.mplstyle")
+mpl.style.use(joinpath(FT.moddir, "fig.mplstyle"))
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 colormaps = pyimport("colormaps")
 
@@ -27,7 +27,7 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
 img_cmap = "viridis"
 μ_cmap = "autumn"
 
-# alias type 
+# alias type
 AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
@@ -45,7 +45,7 @@ specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 
 # get the Fe I 6301 & 6302 lines (just cuz)
-wls = [l.wl for l in linelist] 
+wls = [l.wl for l in linelist]
 idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
 idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
@@ -83,8 +83,9 @@ Natm = size(αs, 1)
 Npad = 2400
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
-# allocate on device
-gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
+# allocate on device (anchored τ integrator when tau_ref is available)
+α_ref = αs_cont[:, end]
+gpu_mem = isempty(atm_gpu.τs) ? FT.GPUMemory(λs_korg, atm_gpu) : FT.GPUMemory(λs_korg, atm_gpu, α_ref)
 
 # velocities
 μ_v_rot = CUDA.zeros(Float64, length(zs))
@@ -112,7 +113,7 @@ for i in eachindex(λs_korg)
     form_temp_stationary[i] = itp(0.5)
 end
 
-# set rotational and macroturbulence grids 
+# set rotational and macroturbulence grids
 # vsinis = range(0.00, 10_000.0, step=2_000.0)
 vsinis = range(0.00, 16_000.0, step=2_000.0)
 vmacs = range(0.0, 10_000.0, step=2_000.0)
@@ -122,7 +123,7 @@ vmacs_kms = vmacs ./ 1000
 # set limb darkening
 @load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2
 
-# get a colormap 
+# get a colormap
 cmap = plt.get_cmap("viridis")#colormaps.batlowk
 norm = mpl.colors.Normalize(vmin=0.0, vmax=125.0)
 sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -179,7 +180,7 @@ hstr = "175%"
 
 mtrans = pyimport("matplotlib.transforms")
 sx = 0.1 * (maximum(vsinis ./ 1000) - minimum(vsinis ./ 1000))
-sy = 0.1 * (maximum(vmacs ./ 1000)  - minimum(vmacs ./ 1000)) 
+sy = 0.1 * (maximum(vmacs ./ 1000)  - minimum(vmacs ./ 1000))
 
 # allocate for output
 flux_integration = CUDA.zeros(Float64, length(λs_korg))
@@ -189,9 +190,9 @@ cfunc_flux_cont_integration = CUDA.zeros(Float64, length(zs)-1, length(λs_korg)
 
 # loop over vsini
 for k in eachindex(vsinis)
-    @show k 
+    @show k
 
-    # get disk stuff 
+    # get disk stuff
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
@@ -240,7 +241,7 @@ for k in eachindex(vsinis)
             cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
         end
 
-        # 2pi 
+        # 2pi
         flux_integration .*= 2π
         flux_cont_integration .*= 2π
 
@@ -249,8 +250,8 @@ for k in eachindex(vsinis)
         flux_convolution = dropdims(sum(cfunc_flux_convolution, dims=1), dims=1)
         cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsinis[k], vmacs[j], u1, u2))
         flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
-        
-        # now get cumulative cfuncs   
+
+        # now get cumulative cfuncs
         cum_cfunc_flux_integration = Array(cumsum(cfunc_flux_integration, dims=1))
         cum_cfunc_flux_integration ./= maximum(cum_cfunc_flux_integration, dims=1)
         cum_cfunc_flux_convolution = Array(cumsum(cfunc_flux_convolution, dims=1))
@@ -279,16 +280,16 @@ for k in eachindex(vsinis)
         temp_err_pct = 100 .* (form_temp_integration .- form_temp_convolution) ./ form_temp_integration
         temp_err = form_temp_integration .- form_temp_convolution
 
-        # get rmse error 
+        # get rmse error
         rmse_flux = round(sqrt(sum((Array(flux_integration) .- flux_convolution).^2.0) / length(flux_integration)), digits=3)
         rmse_flux_cont = round(sqrt(sum((100 .* flux_integration_norm .- 100 .* flux_convolution_norm).^2.0) / length(flux_integration_norm)), digits=3)
         rmse_temp = round(sqrt(sum((form_temp_integration .- form_temp_convolution).^2.0) / length(form_temp_integration)), digits=1)
         max_flux_error = round(maximum(abs.(100 .* (flux_integration_norm .- flux_convolution_norm))), digits=1)
 
-        # inset axes 
-        bbox = mtrans[:Bbox][:from_bounds](vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
+        # inset axes
+        bbox = mtrans.Bbox.from_bounds(vsinis[k] / 1000 - sx/2, vmacs[j] / 1000  - sy/2, sx, sy)
         iax1 = inset.inset_axes(ax1, width=wstr, height=hstr, loc="center",
-                               bbox_to_anchor=bbox, 
+                               bbox_to_anchor=bbox,
                                bbox_transform=ax1.transData, borderpad=0)
         # iax1.plot(λs_korg, flux_err_pct, c="tab:blue")
         iax1.plot(λs_korg, flux_err_cont_pct, c="tab:blue")
@@ -298,7 +299,7 @@ for k in eachindex(vsinis)
         iax1.text(0.5, 0.05, L"\mathrm{Max\ Error} \approx %$max_flux_error\mathrm{\%\ Cont.}", transform=iax1.transAxes, fontsize=12, va="bottom", ha="center")
 
         iax2 = inset.inset_axes(ax2, width=wstr, height=hstr, loc="center",
-                               bbox_to_anchor=bbox, 
+                               bbox_to_anchor=bbox,
                                bbox_transform=ax2.transData, borderpad=0)
         # iax2.plot(λs_korg, temp_err_pct, color=cmap(norm(rmse_temp)))#c="tab:blue")
         # iax2.plot(λs_korg, temp_err_pct, c="tab:blue")
@@ -309,7 +310,7 @@ for k in eachindex(vsinis)
         iax2.text(0.5, 0.05, L"\mathrm{RMSE} \approx %$rmse_temp \ \mathrm{K}", transform=iax2.transAxes, fontsize=12, va="bottom", ha="center")
 
         iax3 = inset.inset_axes(ax3, width=wstr, height=hstr, loc="center",
-                               bbox_to_anchor=bbox, 
+                               bbox_to_anchor=bbox,
                                bbox_transform=ax3.transData, borderpad=0)
         iax3.plot(λs_korg, flux_integration_norm, c="k", label=L"{\rm Integration}")
         iax3.plot(λs_korg, flux_convolution_norm, c="tab:blue", label=L"{\rm Convolution}")
@@ -317,9 +318,9 @@ for k in eachindex(vsinis)
         iax3.set_ylim(0.1, 1.1)
         iax3.grid(false)
 
-        # inset axes for temperature 
+        # inset axes for temperature
         iax4 = inset.inset_axes(ax4, width=wstr, height=hstr, loc="center",
-                               bbox_to_anchor=bbox, 
+                               bbox_to_anchor=bbox,
                                bbox_transform=ax4.transData, borderpad=0)
         iax4.plot(λs_korg, form_temp_integration, c="k", label=L"{\rm Integration}")
         iax4.plot(λs_korg, form_temp_convolution, c="tab:blue", label=L"{\rm Convolution}")
@@ -373,7 +374,7 @@ for k in eachindex(vsinis)
             iax4.set_xticklabels([])
             iax4.set_yticklabels([])
         end
-    end 
+    end
 end
 
 #  write them out

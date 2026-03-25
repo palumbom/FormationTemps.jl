@@ -35,7 +35,7 @@ img_cmap = "viridis"
 seq_cmap = "Set3"
 ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#A6761D", "#66A61E"]
 
-# alias type 
+# alias type
 AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
@@ -201,7 +201,7 @@ for i in eachindex(all_idx)
     push!(near_min_idx, min_idx[tmp_idx])
 end
 
-# take random 10 
+# take random 10
 idx = randperm(length(near_min_idx))[1:10]
 idx = sort(near_min_idx[idx])
 
@@ -228,10 +228,10 @@ end
 
 # get views of the lines
 wavs_list = []
-flux_list = [] 
+flux_list = []
 temp_list = []
 cfunc_list = []
-cfunc_cum_list = [] 
+cfunc_cum_list = []
 
 buffer = ceil(Int, 0.3 / mean(diff(λs_korg)))
 offset_scale = 0.725
@@ -239,7 +239,7 @@ for i in eachindex(wls)
     # isolate the lines
     idx_λs = findfirst(x -> x .>= wls[i], λs_korg)
 
-    # get an offset 
+    # get an offset
     offset = offset_scale * (i - 1)
 
     # take views
@@ -249,7 +249,7 @@ for i in eachindex(wls)
     cfunc_view = view(cfunc_flux, :, idx_λs-buffer:idx_λs+buffer)
     cfunc_cum_view = view(cum_cfunc_flux_norm, :, idx_λs-buffer:idx_λs+buffer)
 
-    # push 
+    # push
     push!(wavs_list, collect(λs_view))
     push!(flux_list, collect(flux_view))
     push!(temp_list, collect(temp_view))
@@ -262,7 +262,7 @@ min_temp = maximum(minimum.(temp_list))
 max_temp = minimum(maximum.(temp_list))
 ftemps = range(ceil(min_temp+1), floor(max_temp-1), length=50)
 
-# get colors 
+# get colors
 cmap = plt.get_cmap(seq_cmap)
 norm = mpl.colors.Normalize(vmin=1, vmax=length(wls_interest))
 colors = cmap(norm(1:length(wls_interest)))
@@ -288,7 +288,7 @@ for j in eachindex(ftemps)
         # plot the lines
         ax1.plot(wavs_list[i], temp_list[i], zorder=0, c=ncolors[i])
 
-        # get an offset 
+        # get an offset
         offset = offset_scale * (i - 1)
         the_xticks[i] = offset
 
@@ -321,7 +321,7 @@ for j in eachindex(ftemps)
     max_val = maximum(abs.(vcat(cfunc_list...)))
     exponent = floor(Int, log10(max_val))
     the_ymin = 0.0
-    the_ymax = max_val / 10^exponent + 0.5 
+    the_ymax = max_val / 10^exponent + 0.5
 
     this_ymax = [0.0]
 
@@ -341,7 +341,7 @@ for j in eachindex(ftemps)
             this_ymax[1] = maximum(cfuncs_sim) / 10^exponent
         end
 
-        # get the mean 
+        # get the mean
         # mean_to_plot = sum(cfuncs_sim .* elav(Ts)) ./ sum(cfuncs_sim)
 
         ax1.plot(elav(Ts), cfuncs_sim / 10^exponent, c=ncolors[i])
@@ -362,7 +362,7 @@ for j in eachindex(ftemps)
 
     fig.subplots_adjust(wspace=0.25)
     fig.savefig(joinpath(framedir, "cont_comparison_$j.png"), bbox_inches="tight")
-    if j == 20
+    if j == 11
         @show ftemps[j]
         ax1.set_ylim(the_ymin, this_ymax[1] + 0.25)
         fig.savefig("figures/cont_comparison.pdf", bbox_inches="tight")
