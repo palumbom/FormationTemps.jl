@@ -22,7 +22,7 @@ colormaps = pyimport("colormaps")
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
-                               
+
 # python interpolation for matplotlib stuff
 interp1d = pyimport("scipy.interpolate").interp1d
 
@@ -30,7 +30,7 @@ interp1d = pyimport("scipy.interpolate").interp1d
 img_cmap = "viridis"
 μ_cmap = "autumn"
 
-# alias type 
+# alias type
 AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
@@ -48,7 +48,7 @@ specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 
 # get the Fe I 6301 & 6302 lines (just cuz)
-wls = [l.wl for l in linelist] 
+wls = [l.wl for l in linelist]
 idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
 idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
@@ -90,7 +90,7 @@ Natm = size(αs, 1)
 Npad = 240
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
-# loop over mus 
+# loop over mus
 μs = range(0.1, 1.0, step=0.1)
 μ_v = CUDA.zeros(Float64, length(zs))
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
@@ -108,7 +108,7 @@ for i in eachindex(μs)
     cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
     continuum[:,i] .= Array(FT.get_intensity(cfunc_intensity_cont))
 end
- 
+
 # get flux and flux cfunc
 cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
 flux_disk_integrated = Array(FT.get_flux(cfunc_flux_struct))
@@ -155,7 +155,7 @@ max_val_flux = maximum(abs.(flux_disk_integrated))
 exponent_flux = floor(Int, log10(max_val_flux))
 lims_flux = [minimum(flux_disk_integrated), round_to_power(maximum(flux_disk_integrated))] ./ 10^(exponent_flux)
 
-# now plot em 
+# now plot em
 cmap = plt.get_cmap(μ_cmap)
 # norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
 norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=1.075)
@@ -165,7 +165,7 @@ colors = pyconvert(Array, cmap(norm(μs)))
 fig, ax1 = plt.subplots()
 for i in eachindex(μs)
     ax1.plot(λs_korg, intensities[:,i] ./ 10^exponent_int, c=colors[i,:], lw=1.75)
-end 
+end
 
 sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 cbar = plt.colorbar(sm, ax=ax1)
@@ -183,7 +183,7 @@ fig, ax1 = plt.subplots()
 ax2 = ax1.twinx()
 for i in eachindex(μs)
     ax1.plot(λs_korg, intensities[:,i] ./ 10^exponent_int, c=colors[i,:], lw=1.75)
-end 
+end
 ax2.plot(λs_korg, flux_disk_integrated , c="k", label=L"{\rm Flux}")
 
 sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -202,7 +202,7 @@ fig, ax1 = plt.subplots()
 for i in eachindex(μs)
     i == 1 && continue
     plt.plot(λs_korg, intensities[:,i] ./ continuum[:,i], c=colors[i,:], lw=1.75)
-end 
+end
 
 sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 cbar = plt.colorbar(sm, ax=ax1)
@@ -217,7 +217,7 @@ fig.savefig(joinpath(plotdir, "intensity_continuum_normalized.pdf"), bbox_inches
 plt.clf(); plt.close()
 
 
-# now plot the contribution functions 
+# now plot the contribution functions
 μ_vals_to_plot = [1.0, 0.6, 0.3, 0.1]
 
 # make three panels
@@ -261,8 +261,8 @@ for i in eachindex(μ_vals_to_plot)
     cfunc_view = view(cfuncs,:,idx1:idx2,μ_idx)  ./ 10^(exponent)
 
     # img = ax3.imshow(cfunc_view, aspect="auto", extent=extent, vmin=vmin, vmax=vmax)
-    img = axs[i - 1].pcolormesh(xedges, yedges2, cfunc_view, 
-                            shading="gouraud", cmap=img_cmap, 
+    img = axs[i - 1].pcolormesh(xedges, yedges2, cfunc_view,
+                            shading="gouraud", cmap=img_cmap,
                             edgecolors="none", norm=norm,
                             rasterized=true)
 
@@ -271,15 +271,15 @@ for i in eachindex(μ_vals_to_plot)
 
     # axs[i].set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
     # ax3.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
-    # ax3.set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
+    # ax3.set_ylabel(L"{\rm Physical\ Height\ [Mm]}")
     mu_val = string(μ_vals_to_plot[i])
     axs[i - 1].set_title(L"\mu = %$mu_val")
 
     local fwd = interp1d(yedges2, yedges, fill_value="extrapolate")
-    local inv = interp1d(yedges, yedges2, fill_value="extrapolate")    
+    local inv = interp1d(yedges, yedges2, fill_value="extrapolate")
 
     # ax3_right = ax3.secondary_yaxis("right", functions=(fwd, inv))
-    # ax3_right.set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
+    # ax3_right.set_ylabel(L"{\rm Physical\ Height\ [Mm]}")
     # ax3_right.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
     # ax3_right.yaxis.set_ticks([0, -1, -2, -3, -4])
 end
@@ -325,7 +325,7 @@ ax1_b2.set_ylim(ax1.get_ylim()...)
 ax1_b2.grid(false)
 
 fig.supxlabel(L"{\rm Air\ Wavelength\ [\AA]}", y=-0.02, x=0.45)
-axs[0].set_ylabel(L"{\rm Physical\ Depth\ [Mm]}")
+axs[0].set_ylabel(L"{\rm Physical\ Height\ [Mm]}")
 fig.subplots_adjust(wspace=0.05)
 
 cb = fig.colorbar(imgs[end], ax=axs, pad=0.01)
@@ -336,7 +336,7 @@ fig.savefig(joinpath(plotdir, "cfunc_mus.pdf"), bbox_inches="tight", dpi=100)
 plt.clf(); plt.close()
 
 
-# plot slices through the contribution function at different limb angles 
+# plot slices through the contribution function at different limb angles
 fig, ax1 = plt.subplots(figsize=1.1 .* (7.2, 5.6))
 fig.subplots_adjust(bottom=0.3)
 
@@ -349,7 +349,7 @@ for i in eachindex(μs)
 
     mu_val = μs[i]
     ax1.plot(xs, ys, c=colors[i,:], lw=1.75, label=L"\mu = %$mu_val")
-end 
+end
 
 ax1.set_xticks([-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
 ax1.set_xlim(-1.25, 7.25)
@@ -399,7 +399,7 @@ ax1_b2.set_xlim(ax1.get_xlim()...)
 ax1_b2.grid(false)
 
 wav_val = string(round(λs_korg[cont_idx], digits=1))
-ax1.set_xlabel(L"{\rm Physical\ Depth\ [Mm]}")
+ax1.set_xlabel(L"{\rm Physical\ Height\ [Mm]}")
 ax1.set_ylabel(L"C_{\nu}(t_\nu, \mu)\ d t_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1} \ sr ^{-1} ]}")
 ax2.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ d t_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1}]}")
 ax1.legend()
@@ -420,7 +420,7 @@ fig.savefig(joinpath(plotdir, "cont_at_lambda.pdf"), bbox_inches="tight")
 plt.clf(); plt.close()
 
 
-# plot the cumulative contribution functions 
+# plot the cumulative contribution functions
 cmap = plt.get_cmap(μ_cmap)
 # norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=maximum(μs))
 norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=1.075)
@@ -444,11 +444,11 @@ x_data2 = itp2(0.5)
 
 y0, y1 = ax1.get_ylim()
 y_data = 0.5
-yfrac = (y_data - y0) / (y1 - y0)  
+yfrac = (y_data - y0) / (y1 - y0)
 
 x0, x1 = ax1.get_xlim()
-xfrac1 = (x_data1 - x0) / (x1 - x0)  
-xfrac2 = (x_data2 - x0) / (x1 - x0)  
+xfrac1 = (x_data1 - x0) / (x1 - x0)
+xfrac2 = (x_data2 - x0) / (x1 - x0)
 
 ax1.axvline(x_data1, ls="--", c="k", ymax=yfrac)
 ax1.axvline(x_data2, ls="--", c=colors[end,:], ymax=yfrac)
@@ -529,7 +529,7 @@ plt.clf(); plt.close()
 
 
 
-# make a plot of the errors 
+# make a plot of the errors
 form_temp_errors = form_temps_intensity[:,length(μs)] .- form_temps_flux
 fig, ax1 = plt.subplots()
 ax1.plot(λs_korg, form_temp_errors, c="k")
