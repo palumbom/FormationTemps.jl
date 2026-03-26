@@ -5,7 +5,15 @@ Abstract atmosphere type used by formation temperature calculations.
 """
 abstract type Atmosphere{T<:AF} end
 
-# TODO set up Atmosphere constructor
+"""
+    Atmosphere(::Type{A}, atm_korg) where A<:Atmosphere
+
+Type-dispatched factory constructor. Returns a concrete `A` from a Korg model atmosphere.
+
+    Atmosphere(AtmosphereGPU, atm_korg)   # → AtmosphereGPU
+    Atmosphere(AtmosphereCPU, atm_korg)   # → AtmosphereCPU
+"""
+Atmosphere(::Type{A}, atm_korg) where {A<:Atmosphere} = A(atm_korg)
 
 """
     get_τs(atm)
@@ -29,6 +37,33 @@ get_zs(atm::Atmosphere) = Array(atm.zs)
 Return the temperature grid as a standard `Array`.
 """
 get_Ts(atm::Atmosphere) = Array(atm.Ts)
+
+"""
+    _extract_korg_fields(atm_korg)
+
+Resample a Korg model atmosphere onto a uniform log-τ grid, then extract thermodynamic
+fields into a `NamedTuple`. Shared by both `AtmosphereCPU` and `AtmosphereGPU` constructors.
+"""
+function _extract_korg_fields(atm_korg)
+    atm_korg = _resample_log_tau(atm_korg)
+
+    τs = try
+        Korg.get_tau_refs(atm_korg)
+    catch
+        Float64[]
+    end
+    zs     = Korg.get_zs(atm_korg)
+    Ts     = Korg.get_temps(atm_korg)
+    nₑ     = Korg.get_electron_number_densities(atm_korg)
+    nd     = Korg.get_number_densities(atm_korg)
+    ref_wl = try
+        atm_korg.reference_wavelength  # cm
+    catch
+        5e-5  # default MARCS reference wavelength (5000 Å in cm)
+    end
+
+    return (; τs, zs, Ts, nₑ, nd, ref_wl, Natm=length(zs))
+end
 
 """
     AtmosphereGPU{T<:AbstractFloat} <: Atmosphere{T}
@@ -79,33 +114,19 @@ does not supply `tau_ref` (e.g., some non-MARCS grids), resampling is skipped an
 downstream in that case.
 """
 function AtmosphereGPU(atm_korg)
-    # resample onto uniform log τ grid (no-op if tau_ref unavailable)
-    atm_korg = _resample_log_tau(atm_korg)
+    f = _extract_korg_fields(atm_korg)
 
-    # Korg atmosphere parameters; empty τs signals Bezier fallback
-    τs = try
-        Korg.get_tau_refs(atm_korg)
-    catch
-        Float64[]
-    end
-    zs  = Korg.get_zs(atm_korg)
-    Ts  = Korg.get_temps(atm_korg)
-    ne  = Korg.get_electron_number_densities(atm_korg)
-    nd  = Korg.get_number_densities(atm_korg)
-    ref_wl = atm_korg.reference_wavelength  # cm
+    zs_gpu = CuArray{Float64}(f.zs)
+    Ts_gpu = CuArray{Float64}(f.Ts)
+    nd_gpu = CuArray{Float64}(f.nd)
+    vx     = CUDA.zeros(Float64, f.Natm)
+    vy     = CUDA.zeros(Float64, f.Natm)
+    vz     = CUDA.zeros(Float64, f.Natm)
+    σ_v    = CUDA.zeros(Float64, f.Natm)
+    μ_v    = CUDA.zeros(Float64, f.Natm)
 
-    # allocate on gpu
-    Natm = length(zs)
-    zs_gpu = CuArray{Float64}(zs)
-    Ts_gpu = CuArray{Float64}(Ts)
-    nd_gpu = CuArray{Float64}(nd)
-    vx = CUDA.zeros(Float64, Natm)
-    vy = CUDA.zeros(Float64, Natm)
-    vz = CUDA.zeros(Float64, Natm)
-    σ_v = CUDA.zeros(Float64, Natm)
-    μ_v = CUDA.zeros(Float64, Natm)
-
-    return AtmosphereGPU(Natm, τs, zs, Ts, ne, nd, ref_wl, zs_gpu, Ts_gpu, nd_gpu, vx, vy, vz, σ_v, μ_v)
+    return AtmosphereGPU(f.Natm, f.τs, f.zs, f.Ts, f.nₑ, f.nd, f.ref_wl,
+                         zs_gpu, Ts_gpu, nd_gpu, vx, vy, vz, σ_v, μ_v)
 end
 
 """
@@ -152,29 +173,16 @@ does not supply `tau_ref` (e.g., some non-MARCS grids), resampling is skipped an
 downstream in that case.
 """
 function AtmosphereCPU(atm_korg)
-    # resample onto uniform log τ grid (no-op if tau_ref unavailable)
-    atm_korg = _resample_log_tau(atm_korg)
+    f = _extract_korg_fields(atm_korg)
 
-    # Korg atmosphere parameters; empty τs signals Bezier fallback
-    τs = try
-        Korg.get_tau_refs(atm_korg)
-    catch
-        Float64[]
-    end
-    zs     = Korg.get_zs(atm_korg)
-    Ts     = Korg.get_temps(atm_korg)
-    ne     = Korg.get_electron_number_densities(atm_korg)
-    nd     = Korg.get_number_densities(atm_korg)
-    ref_wl = atm_korg.reference_wavelength  # cm
+    vx  = zeros(Float64, f.Natm)
+    vy  = zeros(Float64, f.Natm)
+    vz  = zeros(Float64, f.Natm)
+    σ_v = zeros(Float64, f.Natm)
+    μ_v = zeros(Float64, f.Natm)
 
-    Natm = length(zs)
-    vx = zeros(Float64, Natm)
-    vy = zeros(Float64, Natm)
-    vz = zeros(Float64, Natm)
-    σ_v = zeros(Float64, Natm)
-    μ_v = zeros(Float64, Natm)
-
-    return AtmosphereCPU(Natm, τs, zs, Ts, ne, nd, ref_wl, vx, vy, vz, σ_v, μ_v)
+    return AtmosphereCPU(f.Natm, f.τs, f.zs, f.Ts, f.nₑ, f.nd, f.ref_wl,
+                         vx, vy, vz, σ_v, μ_v)
 end
 
 """
@@ -198,6 +206,7 @@ function _resample_log_tau(atm_korg; n_layers::Int=-1)
         return atm_korg  # no tau_ref available; cannot resample
     end
     isempty(τ_ref) && return atm_korg
+    any(isnan, τ_ref) && return atm_korg
 
     zs    = Korg.get_zs(atm_korg)
     Ts    = Korg.get_temps(atm_korg)
