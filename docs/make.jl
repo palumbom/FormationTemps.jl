@@ -48,7 +48,7 @@ Index = "Full Index" => "longlist.md"
 Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
                       "Contribution Functions" => "cont_func.md",
                       "Broadening & Convolutions" => "convolutions.md",
-                      "Python Tutorial" => "pycall.md"]
+                      "Python Tutorial" => "python.md"]
 Internals = "Public Functions" => "internals.md"
 
 pages = [Introduction, Guides, Internals, Index, License]

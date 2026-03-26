@@ -10,5 +10,4 @@ dependencies = [
     "juliapkg>=0.1.17",
     "matplotlib>=3.10.8",
     "numpy>=2.4.1",
-    "pathlib>=1.0.1",
 ]

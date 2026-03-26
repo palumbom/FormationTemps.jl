@@ -16,8 +16,9 @@ docs/src/index.md
 *.txt
 *.h5
 *.jld2
-*.gif 
+*.gif
 *.png
 *.python-version
 *.venv
 *.npz
+*.env
