@@ -1,17 +1,36 @@
 """One-time setup for using FormationTemps.jl from Python via juliacall."""
-import os, shutil, tomllib
+import os, sys, shutil, tomllib
 from pathlib import Path
 
-# point juliapkg at the julia on PATH (the juliaup shim) so it does not
-# probe juliaup internals where .app bundles confuse its binary detection.
-# must be set BEFORE importing juliapkg, which reads the env var at import time.
+# --- formatting helpers (ANSI colors, no dependencies) ---
+_bold = "\033[1m"
+_green = "\033[32m"
+_yellow = "\033[33m"
+_cyan = "\033[36m"
+_reset = "\033[0m"
+
+def _info(msg):
+    print(f"{_cyan}{_bold}[setup]{_reset} {msg}", flush=True)
+
+def _warn(msg):
+    print(f"{_yellow}{_bold}[setup]{_reset} {msg}", flush=True)
+
+def _ok(msg):
+    print(f"{_green}{_bold}[setup]{_reset} {msg}", flush=True)
+
+# --- locate julia before importing juliapkg (reads env at import time) ---
+# on macOS with juliaup, Julia 1.12+ installs as .app bundles that juliapkg
+# cannot find. pointing at the juliaup shim on PATH works around this.
 julia_exe = shutil.which("julia")
 if julia_exe is not None:
     os.environ.setdefault("PYTHON_JULIAPKG_EXE", julia_exe)
+else:
+    _warn("julia not found on PATH. Install Julia 1.12+ and ensure it is on your PATH.")
+    sys.exit(1)
 
 import juliapkg
 
-# fallback UUID for registry installs (no Project.toml available)
+# --- detect local clone vs registry install ---
 FALLBACK_UUID = "03bcd87b-2230-4045-a5fa-95a5fcdd1ff8"
 
 def _find_repo_root():
@@ -30,33 +49,35 @@ def _find_repo_root():
 
 repo, uuid = _find_repo_root()
 
+# --- configure juliapkg ---
 # FormationTemps.jl requires Julia 1.12+; override juliacall's default (^1.10.3)
 juliapkg.require_julia("~1.12")
 
 if repo is not None:
-    print(f"Local clone detected at {repo} -- installing as dev package.")
+    _info(f"Local clone detected at {_bold}{repo}{_reset}")
+    _info("Installing FormationTemps.jl as a dev package...")
     juliapkg.add("FormationTemps", uuid, dev=True, path=str(repo))
 else:
-    print("No local clone found -- installing FormationTemps from Julia package registry.")
+    _info("No local clone found -- installing from Julia package registry.")
     juliapkg.add("FormationTemps", FALLBACK_UUID, version="^1")
 
-# install a .pth file into the venv so that PYTHON_JULIAPKG_EXE is set
-# on every Python startup in this environment (before juliapkg is imported).
-# .pth files with `import` lines are executed by site.py at startup.
-# this works around juliapkg not finding Julia inside macOS .app bundles.
-if julia_exe is not None:
-    import site
-    site_dir = Path(site.getsitepackages()[0])
-    pth = site_dir / "juliapkg_exe.pth"
-    pth.write_text(
-        "import os, shutil; "
-        "_jl = shutil.which('julia'); "
-        "os.environ.setdefault('PYTHON_JULIAPKG_EXE', _jl) if _jl else None; "
-        "os.environ.setdefault('JULIA_NUM_THREADS', '1')\n"
-    )
-    print(f"Wrote {pth} (sets PYTHON_JULIAPKG_EXE and JULIA_NUM_THREADS on every Python startup in this venv)")
+# --- write .pth file for persistent env vars ---
+# .pth files with `import` lines are executed by site.py on every Python startup.
+# this sets PYTHON_JULIAPKG_EXE (macOS .app bundle workaround) and
+# JULIA_NUM_THREADS=1 (avoids GC crash in PythonCall bridge).
+import site
+site_dir = Path(site.getsitepackages()[0])
+pth = site_dir / "juliapkg_exe.pth"
+pth.write_text(
+    "import os, shutil; "
+    "_jl = shutil.which('julia'); "
+    "os.environ.setdefault('PYTHON_JULIAPKG_EXE', _jl) if _jl else None; "
+    "os.environ.setdefault('JULIA_NUM_THREADS', '1')\n"
+)
+_info(f"Wrote {pth}")
 
-# resolve triggers the actual Julia Pkg install (this may take several minutes on first run)
-print("Resolving Julia dependencies (this may take a few minutes the first time)...")
+# --- resolve Julia dependencies ---
+_info("Resolving Julia dependencies (this may take a few minutes the first time)...")
 juliapkg.resolve()
-print("Setup complete. You can now use: from juliacall import Main as jl")
+_ok("Setup complete!")
+_ok("Try running: `uv run python docs/src/examples/simple.py`")

@@ -1,5 +1,5 @@
 import matplotlib
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
 
 from juliacall import Main as jl
 import numpy as np
@@ -37,5 +37,10 @@ ax2.plot(wavs, temps, c="k")
 ax2.set_xlabel("Vacuum Wavelength [Ang]")
 ax2.set_ylabel("Formation Temperature [K]")
 fig.tight_layout()
-fig.savefig("formation_temps.png", dpi=150, bbox_inches="tight")
-print("Saved formation_temps.png")
+
+# write out the file
+import os
+outpath = os.path.join(os.getcwd(), "formation_temps.png")
+fig.savefig(outpath, dpi=150, bbox_inches="tight")
+print(f"Saved {outpath}")
+plt.close()
