@@ -9,7 +9,7 @@
 
 - **Julia 1.12+**: install from [julialang.org](https://julialang.org/downloads/) or via
   [juliaup](https://github.com/JuliaLang/juliaup).
-- **Python 3.12+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip.
+- **Python 3.12+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip. We strongly advise against Conda.
 
 ## Installation
 
@@ -40,6 +40,7 @@ Then run the following once in Python to register the Julia dependency:
 ```python
 import os, shutil
 os.environ.setdefault("PYTHON_JULIAPKG_EXE", shutil.which("julia"))
+os.environ.setdefault("JULIA_NUM_THREADS", "1")
 
 import juliapkg
 juliapkg.require_julia("~1.12")
