@@ -206,6 +206,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     Natm = size(αs, 1)
     Npad = 512
     cmem = ConvolutionMemory(Nλ, Natm, Npad)
+    cmem_cont = ConvolutionMemory(Nλ, Natm, Npad)
     cmem_mac = ConvolutionMemory(Nλ, Natm - 1, Npad)
 
     # set microturbulent broadening
@@ -215,15 +216,15 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
     cfunc_dt_flux = cfunc_flux_struct.cfunc_dt
 
-    # same for the continuum
-    cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
+    # same for the continuum (use cmem_cont so each caches its own signal FFT)
+    cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem_cont, σ_v)
     cfunc_dt_flux_cont = cfunc_flux_struct_cont.cfunc_dt
 
     # convolution or numerical integration
     if convolve
         @assert !isnan(u1)
         @assert !isnan(u2)
-        cfunc_dt_flux = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2)
+        cfunc_dt_flux = copy(convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2))
         cfunc_dt_flux_cont = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
     else # numerical disk integration
         if any(map(!isnan, (u1, u2)))
@@ -241,28 +242,59 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         end
 
         # allocate on gpu
+        λs_gpu = CuArray{T}(collect(λs_korg))
         μ_v_rot = CUDA.zeros(T, Natm)
         flux_integration = CUDA.zeros(T, length(λs_korg))
         flux_cont_integration = CUDA.zeros(T, length(λs_korg))
         cfunc_flux_integration = CUDA.zeros(T, Natm - 1, length(λs_korg))
         cfunc_flux_cont_integration = CUDA.zeros(T, Natm - 1, length(λs_korg))
+        flux_tile_buf = CUDA.zeros(T, 1, length(λs_korg))
+
+        # prime the signal FFT cache: first tile computes + caches, rest reuse
+        cmem.signal_cached = false
+        cmem_cont.signal_cached = false
+        μ_v_rot .= z_rot_cpu[1] .* c_ms
+        calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μs_cpu[1], μ_v_rot, σ_v)
+        cmem.signal_cached = true
+        calc_intensity_quantities_inplace!(αs_cont, atm_gpu, gpu_mem, cmem_cont, μs_cpu[1], μ_v_rot, σ_v)
+        cmem_cont.signal_cached = true
+
+        # precompute macro kernel FFTs for unique μ values
+        macro_kernel_cache = Dict{T, CuVector{Complex{T}}}()
+        if !iszero(star.ζ)
+            unique_μ_vals = unique(μs_cpu)
+            for μ_val in unique_μ_vals
+                macro_kernel_cache[μ_val] = precompute_rt_macro_kernel_ft(cmem_mac, λs_korg, star.ζ, μ_val)
+            end
+        end
 
         # loop over cells on grid
         @showprogress for i in eachindex(μs_cpu)
             μ_tile = μs_cpu[i]
             μ_v_rot .= z_rot_cpu[i] .* c_ms
 
-            cfunc_intensity = calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
-            tbc = cfunc_intensity.cfunc_dt
-            cfunc_int_i_mac = convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, star.ζ, μ_tile)
-
-            cfunc_intensity_cont = calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
-            tbc_cont = cfunc_intensity_cont.cfunc_dt
-            cfunc_int_cont_i_mac = convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, star.ζ, μ_tile)
-
-            flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
-            flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
+            # total absorption: inplace variant returns shared buffer — consume before continuum call
+            cfunc_intensity = calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
+            if iszero(star.ζ)
+                cfunc_int_i_mac = copy(cfunc_intensity.cfunc_dt)
+            else
+                cfunc_int_i_mac = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity.cfunc_dt,
+                                                               macro_kernel_cache[μ_tile])
+            end
+            sum!(flux_tile_buf, cfunc_int_i_mac)
+            flux_integration .+= vec(flux_tile_buf) .* dA_cpu[i]
             cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
+
+            # continuum absorption: same inplace pattern, safe because total is fully accumulated above
+            cfunc_intensity_cont = calc_intensity_quantities_inplace!(αs_cont, atm_gpu, gpu_mem, cmem_cont, μ_tile, μ_v_rot, σ_v)
+            if iszero(star.ζ)
+                cfunc_int_cont_i_mac = copy(cfunc_intensity_cont.cfunc_dt)
+            else
+                cfunc_int_cont_i_mac = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity_cont.cfunc_dt,
+                                                                    macro_kernel_cache[μ_tile])
+            end
+            sum!(flux_tile_buf, cfunc_int_cont_i_mac)
+            flux_cont_integration .+= vec(flux_tile_buf) .* dA_cpu[i]
             cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
         end
 

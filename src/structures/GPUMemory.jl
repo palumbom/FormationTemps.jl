@@ -19,6 +19,7 @@ struct GPUMemory{T<:AF}
     αs::CA{T,2}
     τs::CA{T,2}
     cfunc::CA{T,2}
+    cfunc_dt::CA{T,2}      # cfunc .* Δτ, pre-allocated to avoid per-tile allocation
     flux::CA{T,2}
     # Bezier work arrays (used when use_anchored=false)
     tau_ds::CA{T,1}
@@ -42,6 +43,7 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU) where T
     αs         = CUDA.zeros(T, Natm, Nλ)
     τs         = CUDA.zeros(T, Natm, Nλ)
     cfunc      = CUDA.zeros(T, Natm - 1, Nλ)
+    cfunc_dt   = CUDA.zeros(T, Natm - 1, Nλ)
     flux       = CUDA.zeros(T, Natm - 1, Nλ)
     tau_ds     = CUDA.zeros(T, Natm - 1)
     tau_alphaC = CUDA.zeros(T, Natm)
@@ -49,7 +51,7 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU) where T
     ifactor_base = CUDA.zeros(T, Natm)
 
     CUDA.synchronize()
-    return GPUMemory(λs, αs, τs, cfunc, flux, tau_ds, tau_alphaC,
+    return GPUMemory(λs, αs, τs, cfunc, cfunc_dt, flux, tau_ds, tau_alphaC,
                      log_τ_ref, ifactor_base, false)
 end
 
@@ -68,6 +70,7 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU, α_ref_cpu::AA{T,1}) wh
     αs           = CUDA.zeros(T, Natm, Nλ)
     τs           = CUDA.zeros(T, Natm, Nλ)
     cfunc        = CUDA.zeros(T, Natm - 1, Nλ)
+    cfunc_dt     = CUDA.zeros(T, Natm - 1, Nλ)
     flux         = CUDA.zeros(T, Natm - 1, Nλ)
     tau_ds       = CUDA.zeros(T, Natm - 1)
     tau_alphaC   = CUDA.zeros(T, Natm)
@@ -75,6 +78,6 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU, α_ref_cpu::AA{T,1}) wh
     ifactor_base = CuArray{T}(atm.τs ./ α_ref_cpu)
 
     CUDA.synchronize()
-    return GPUMemory(λs, αs, τs, cfunc, flux, tau_ds, tau_alphaC,
+    return GPUMemory(λs, αs, τs, cfunc, cfunc_dt, flux, tau_ds, tau_alphaC,
                      log_τ_ref, ifactor_base, true)
 end

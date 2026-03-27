@@ -118,6 +118,16 @@ function pad_signal!(signal, ys, Nλ, pad_left, pad_right)
     return nothing
 end
 
+# extract valid (unpadded) region from conv_gpu into out_gpu
+function extract_valid!(out, src, pad_left, Nλ)
+    row = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    col = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    if row <= size(out, 1) && col <= Nλ
+        @inbounds out[row, col] = src[row, col + pad_left - 1]
+    end
+    return nothing
+end
+
 # roll each row by integer r[row] so zero-lag aligns with padded center (without removing μ_v)
 function roll_rows_2d!(dst, src, r, L)
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y

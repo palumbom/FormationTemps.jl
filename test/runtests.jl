@@ -36,4 +36,5 @@ if use_gpu
     include("compare_cpu_gpu_convenience.jl")
     include("compare_cpu_gpu_broadening.jl")
     include("disk_int_error.jl")
+    include("test_buffer_safety.jl")
 end

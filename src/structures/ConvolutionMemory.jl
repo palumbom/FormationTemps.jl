@@ -56,9 +56,17 @@ mutable struct ConvolutionMemory{T<:AF}
     conv_ft_gpu::CuMatrix{Complex{T}}
     conv_gpu::CuMatrix{T}
 
-    # FFT plans
+    # FFT plans (2D batched, along dim=2)
     plan_fwd::CUDA.CUFFT.CuFFTPlan
     plan_bwd::AbstractFFTs.ScaledPlan
+
+    # 1D FFT infrastructure for macroturbulence kernel (shared across rows)
+    kr_1d::CA{T,1}                       # real kernel buffer, length L
+    kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D kernel, length nfreq
+    plan_fwd_1d::CUDA.CUFFT.CuFFTPlan    # 1D R2C plan
+
+    # pre-allocated output buffer for convolution result (Natm × Nλ, unpadded)
+    out_gpu::CA{T,2}
 end
 
 function is_fft_friendly_len(L::Int)
@@ -140,13 +148,22 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     # plan FFTs along dim=2 (wavelength axis)
     plan_fwd = CUDA.CUFFT.plan_rfft(signal_gpu, 2)
     plan_bwd = CUDA.CUFFT.plan_irfft(conv_ft_gpu, L, 2)
-    
+
+    # 1D FFT infrastructure for macroturbulence kernel
+    kr_1d = CUDA.zeros(T, L)
+    kernel_row_ft_1d = CuVector{Complex{T}}(undef, nfreq)
+    plan_fwd_1d = CUDA.CUFFT.plan_rfft(kr_1d)
+
+    # pre-allocated output buffer (unpadded dimensions)
+    out_gpu = CUDA.zeros(T, Natm, Nλ)
+
     # construct and return
     return ConvolutionMemory(Nλ, Natm, Npad_eff, L, pad_left, pad_right,
                              doppler_scale, doppler_ready, signal_cached,
                              xs_gpu, ys_gpu, λc_gpu, σ_fac_gpu, λc_vec,
-                             σ_fac_vec, σ_v_cpu, μ_v_cpu, signal_gpu, 
+                             σ_fac_vec, σ_v_cpu, μ_v_cpu, signal_gpu,
                              kernel_gpu, padded_kernel_gpu, shift_kernel_gpu,
-                             norm_buffer, kernel_ft_gpu, signal_ft_gpu, 
-                             conv_ft_gpu, conv_gpu, plan_fwd, plan_bwd)
+                             norm_buffer, kernel_ft_gpu, signal_ft_gpu,
+                             conv_ft_gpu, conv_gpu, plan_fwd, plan_bwd,
+                             kr_1d, kernel_row_ft_1d, plan_fwd_1d, out_gpu)
 end

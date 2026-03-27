@@ -34,8 +34,20 @@ function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem
     calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
 
     # multiply by differential for cum. cont. & intensity
-    cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
-    return IntensityContFunc(mem.cfunc, cfunc_dt)
+    # returns independent copies so callers can hold the result across multiple calls
+    compute_cfunc_dt!(mem.cfunc_dt, mem.cfunc, mem.τs)
+    return IntensityContFunc(copy(mem.cfunc), copy(mem.cfunc_dt))
+end
+
+# Zero-allocation variant for the disk integration hot loop.
+# Returned cfunc and cfunc_dt alias mem.cfunc / mem.cfunc_dt — caller must consume
+# (copy or pass to a function that copies internally) before the next call that shares mem.
+function calc_intensity_quantities_inplace!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
+                                            cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
+                                            σ_v::CA{T,1}) where T<:AF
+    calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
+    compute_cfunc_dt!(mem.cfunc_dt, mem.cfunc, mem.τs)
+    return IntensityContFunc(mem.cfunc, mem.cfunc_dt)
 end
 
 """
@@ -68,8 +80,10 @@ function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPU
     calc_flux_cfunc!(αs_init, atm, mem, cmem, σ_v)
 
     # multiply by differential for cum. cont. & flux
-    cfunc_dt = mem.cfunc .* diff(mem.τs, dims=1)
-    return FluxContFunc(mem.cfunc, cfunc_dt)
+    # copy the result since this is called once (not in hot loop) and the caller
+    # may hold the result across a second call that overwrites mem.cfunc_dt
+    compute_cfunc_dt!(mem.cfunc_dt, mem.cfunc, mem.τs)
+    return FluxContFunc(copy(mem.cfunc), copy(mem.cfunc_dt))
 end
 
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
@@ -130,6 +144,23 @@ function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemo
     ts = (32, 16)
     bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
     @cuda threads=ts blocks=bs calc_flux_cfunc!(atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
+    return nothing
+end
+
+function compute_cfunc_dt_kernel!(out::CDM{T}, cfunc::CDM{T}, τs::CDM{T}) where T<:AF
+    j = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    k = threadIdx().y + blockDim().y * (blockIdx().y - 1)
+    if j <= size(out, 2) && k <= size(out, 1)
+        @inbounds out[k, j] = cfunc[k, j] * (τs[k + 1, j] - τs[k, j])
+    end
+    return nothing
+end
+
+function compute_cfunc_dt!(out::CA{T,2}, cfunc::CA{T,2}, τs::CA{T,2}) where T<:AF
+    Natm1, Nλ = size(cfunc)
+    ts = (32, 16)
+    bs = (cld(Nλ, ts[1]), cld(Natm1, ts[2]))
+    @cuda threads=ts blocks=bs compute_cfunc_dt_kernel!(out, cfunc, τs)
     return nothing
 end
 

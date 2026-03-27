@@ -122,26 +122,35 @@ See also: [`convolve_gray_rotation`](@ref), [`gray_rot_kernel`](@ref)
 """
 function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                     ys::AA{T,2}, vsini::T, u1::T) where {T<:AF}
-    # copy inputs to device
-    copyto!(cmem.xs_gpu, CuArray(xs))
-    copyto!(cmem.ys_gpu, CuArray(ys))
+    # copy to device — avoid CuArray() wrapper allocations
+    if ys isa CA
+        copyto!(cmem.ys_gpu, ys)
+    else
+        copyto!(cmem.ys_gpu, CuArray(ys))
+    end
+    if xs isa CA
+        copyto!(cmem.xs_gpu, xs)
+        xs_h = Array(xs)
+    else
+        copyto!(cmem.xs_gpu, CuArray(xs))
+        xs_h = xs
+    end
 
     # compute velocity offset from discrete center
-    i0 = length(xs) ÷ 2 + 1
-    λ0 = xs[i0]
+    i0 = length(xs_h) ÷ 2 + 1
+    λ0 = xs_h[i0]
 
     # pad the signal
     ts = (32,32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
-    CUDA.synchronize()
 
     # kernel rows as 1-D views to avoid dim ambiguity
     kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
     shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
     fill!(kernel_row, zero(T))
-    
+
     ts1 = (256,)
     bs1 = (cld(cmem.Nλ, ts1[1]),)
     @cuda threads=ts1 blocks=bs1 compute_padded_gray_kernel_1D!(kernel_row,
@@ -157,7 +166,7 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # ensure zero-lag sits at padded center before FFT layout
     Ltot = length(kernel_row)
     center = Ltot ÷ 2
-    r = center - (cmem.pad_left + i0)  # integer roll needed if pads not perfectly symmetric
+    r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
         CUDA.synchronize()
@@ -166,25 +175,25 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         shifted_kernel_row = tmp
     end
 
-    # center -> FFT indexing
+    # center -> FFT indexing, then R2C FFT of padded kernel (no allocation)
     CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
+    copyto!(cmem.kr_1d, shifted_kernel_row)
+    mul!(cmem.kernel_row_ft_1d, cmem.plan_fwd_1d, cmem.kr_1d)
 
-    # contiguous 1-D vector for rfft
-    kr = copy(shifted_kernel_row)
-
-    # forward fourier transforms (R2C on device; length = floor(Int, L/2)+1)
-    kernel_row_ft = CUDA.CUFFT.rfft(kr)
+    # forward FFT of padded signal
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
 
     # convolution theorem
-    kft = reshape(kernel_row_ft, 1, :)
+    kft = reshape(cmem.kernel_row_ft_1d, 1, :)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
 
     # inverse fourier transform
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
-    # slice valid region
-    out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
-    CUDA.synchronize()
-    return out
+    # extract valid region into pre-allocated output buffer
+    ts2 = (32, 32)
+    bs2 = (cld(cmem.Natm, ts2[1]), cld(cmem.Nλ, ts2[2]))
+    @cuda threads=ts2 blocks=bs2 extract_valid!(cmem.out_gpu, cmem.conv_gpu,
+                                                 cmem.pad_left, cmem.Nλ)
+    return cmem.out_gpu
 end

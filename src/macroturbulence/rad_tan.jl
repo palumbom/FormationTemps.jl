@@ -149,22 +149,33 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         return CuArray(ys)
     end
 
-    # copy to device
-    copyto!(cmem.xs_gpu, CuArray(xs))
-    copyto!(cmem.ys_gpu, CuArray(ys))
+    # copy signal to device — avoid CuArray() wrapper allocations
+    if ys isa CA
+        copyto!(cmem.ys_gpu, ys)
+    else
+        copyto!(cmem.ys_gpu, CuArray(ys))
+    end
+
+    # populate wavelength grid on device and get center wavelength without scalar indexing
+    if xs isa CA
+        copyto!(cmem.xs_gpu, xs)
+        xs_h = Array(xs)
+    else
+        copyto!(cmem.xs_gpu, CuArray(xs))
+        xs_h = xs
+    end
 
     # compute velocity offset from discrete center
-    i0 = length(xs) ÷ 2 + 1
-    λ0 = xs[i0]
+    i0 = length(xs_h) ÷ 2 + 1
+    λ0 = xs_h[i0]
 
     # pad the signal
     ts = (32,32)
     bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
-    CUDA.synchronize()
 
-    # compute the padded kernel once
+    # compute the padded kernel once (reuse pre-allocated row buffers)
     kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
     shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
     fill!(kernel_row, zero(T))
@@ -193,18 +204,18 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         shifted_kernel_row = tmp
     end
 
-    # center -> FFT indexing
+    # center -> FFT indexing (writes into shifted_kernel_row)
     CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
 
-    # make a contiguous 1-D device vector
-    kr = copy(shifted_kernel_row)
+    # copy into contiguous 1D buffer and FFT (no allocation)
+    copyto!(cmem.kr_1d, shifted_kernel_row)
+    mul!(cmem.kernel_row_ft_1d, cmem.plan_fwd_1d, cmem.kr_1d)
 
-    # forward fourier transforms (R2C on device)
-    kernel_row_ft = CUDA.CUFFT.rfft(kr)
+    # forward FFT of padded signal
     mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
 
-    # convolution theorem
-    kft = reshape(kernel_row_ft, 1, :)
+    # convolution theorem (broadcast 1D kernel across all rows)
+    kft = reshape(cmem.kernel_row_ft_1d, 1, :)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
 
     # inverse fourier transform
@@ -214,4 +225,98 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
     CUDA.synchronize()
     return out
+end
+
+"""
+    precompute_rt_macro_kernel_ft(cmem, xs, ζ_rt, μ)
+
+Precompute the Fourier transform of the RT macroturbulence kernel for a given `μ`.
+Returns a `CuVector{Complex{T}}` that can be passed to [`convolve_rt_macro_gpu_cached`](@ref).
+"""
+function precompute_rt_macro_kernel_ft(cmem::ConvolutionMemory, xs::AA{T,1},
+                                       ζ_rt::T, μ::T) where {T<:AF}
+    # populate wavelength grid on device and get center wavelength without scalar indexing
+    if xs isa CA
+        copyto!(cmem.xs_gpu, xs)
+        xs_h = Array(xs)
+    else
+        copyto!(cmem.xs_gpu, CuArray(xs))
+        xs_h = xs
+    end
+
+    i0 = length(xs_h) ÷ 2 + 1
+    λ0 = xs_h[i0]
+
+    # compute padded kernel
+    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
+    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
+    fill!(kernel_row, zero(T))
+
+    ts1 = (256,)
+    bs1 = (cld(cmem.Nλ, ts1[1]),)
+    @cuda threads=ts1 blocks=bs1 compute_padded_rt_kernel_1D!(kernel_row,
+                                                              cmem.xs_gpu, λ0,
+                                                              ζ_rt, μ, cmem.Nλ,
+                                                              cmem.pad_left)
+    CUDA.synchronize()
+
+    # normalize
+    normval = CUDA.sum(kernel_row)
+    kernel_row ./= normval
+
+    # roll to align zero-lag
+    Ltot = length(kernel_row)
+    center = Ltot ÷ 2
+    r = center - (cmem.pad_left + i0)
+    if r != 0
+        @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
+        CUDA.synchronize()
+        tmp = kernel_row
+        kernel_row = shifted_kernel_row
+        shifted_kernel_row = tmp
+    end
+
+    # center -> FFT indexing
+    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
+
+    # FFT into pre-allocated buffer and return a copy (caller stores it)
+    copyto!(cmem.kr_1d, shifted_kernel_row)
+    mul!(cmem.kernel_row_ft_1d, cmem.plan_fwd_1d, cmem.kr_1d)
+    return copy(cmem.kernel_row_ft_1d)
+end
+
+"""
+    convolve_rt_macro_gpu_cached(cmem, ys, kernel_ft)
+
+Convolve `ys` with a precomputed RT macroturbulence kernel FFT. Skips kernel
+computation entirely. Use with [`precompute_rt_macro_kernel_ft`](@ref).
+"""
+function convolve_rt_macro_gpu_cached(cmem::ConvolutionMemory,
+                                      ys::CA{T,2},
+                                      kernel_ft::CuVector{Complex{T}}) where {T<:AF}
+    # copy signal to device buffer
+    copyto!(cmem.ys_gpu, ys)
+
+    # pad the signal
+    ts = (32, 32)
+    bs = (cld(cmem.Natm, ts[1]), cld(cmem.L, ts[2]))
+    @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
+                                           cmem.Nλ, cmem.pad_left, cmem.pad_right)
+
+    # forward FFT of padded signal
+    mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
+
+    # convolution theorem (broadcast 1D kernel across all rows)
+    kft = reshape(kernel_ft, 1, :)
+    cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
+
+    # inverse fourier transform
+    mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
+
+    # extract valid region into pre-allocated output buffer (zero allocation)
+    ts2 = (32, 32)
+    bs2 = (cld(cmem.Natm, ts2[1]), cld(cmem.Nλ, ts2[2]))
+    @cuda threads=ts2 blocks=bs2 extract_valid!(cmem.out_gpu, cmem.conv_gpu,
+                                                 cmem.pad_left, cmem.Nλ)
+    return cmem.out_gpu
 end
