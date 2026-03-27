@@ -29,8 +29,8 @@ cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
-outfile = joinpath(outdir, "temp_spectrum_chunks.h5")
-outfile_1d = joinpath(outdir, "temp_spectrum_1D.h5")
+outfile = joinpath(outdir, "temp_spectrum_hires_chunks.h5")
+outfile_1d = joinpath(outdir, "temp_spectrum_hires_1D.h5")
 
 # get the linelist
 linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
