@@ -78,12 +78,13 @@ end
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
     fig, ax = plt.subplots()
-    ax.scatter(Nϕ_vals, mean_pct_error, s=20, label="Mean abs. error")
-    ax.scatter(Nϕ_vals, max_pct_error,  s=20, label="Max abs. error")
-    ax.set_xlabel("Number of latitude tiles Nϕ")
-    ax.set_ylabel("Percent error vs direct flux")
+    ax.scatter(Nϕ_vals, mean_pct_error, s=20, label="{\\rm Mean abs. error}")
+    ax.scatter(Nϕ_vals, max_pct_error,  s=20, label="{\\rm Max abs. error}")
+    ax.set_xlabel(raw"{\rm Number of latitude tiles }$N_\phi$")
+    ax.set_ylabel("{\\rm Percent error vs direct flux}")
     ax.legend()
     fig.savefig(joinpath(test_plotdir, "disk_int_error.pdf"), bbox_inches="tight")
     plt.close()

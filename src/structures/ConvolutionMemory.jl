@@ -17,6 +17,8 @@ Fields:
 - `doppler_scale`: Cached wavelength-to-pixel conversion factor `λ₀ / (c Δλ)`.
 - `doppler_ready`: Whether `doppler_scale` has been computed for the current wavelength grid.
 - `signal_cached`: Whether the padded signal FFT in `signal_ft_gpu` is current.
+- `kc_1d`: Complex buffer of length `Nλ` for Hirano GPU kernel ifft.
+- `plan_bwd_1d`: In-place 1D C2C inverse FFT plan for `kc_1d`.
 
 See also: [`ConvolutionMemory(Nλ, Natm, Npad)`](@ref)
 """
@@ -62,6 +64,10 @@ mutable struct ConvolutionMemory{T<:AF}
     kr_1d::CA{T,1}                       # real kernel buffer, length L
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D kernel, length nfreq
     plan_fwd_1d::CUDA.CUFFT.CuFFTPlan    # 1D R2C plan
+
+    # 1D C2C infrastructure for Hirano kernel (ifft of FT kernel, length Nλ)
+    kc_1d::CuVector{Complex{T}}
+    plan_bwd_1d::AbstractFFTs.ScaledPlan
 
     # pre-allocated output buffer for convolution result (Natm × Nλ, unpadded)
     out_gpu::CA{T,2}
@@ -150,6 +156,10 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     kernel_row_ft_1d = CuVector{Complex{T}}(undef, nfreq)
     plan_fwd_1d = CUDA.CUFFT.plan_rfft(kr_1d)
 
+    # 1D C2C infrastructure for Hirano kernel (in-place)
+    kc_1d = CuVector{Complex{T}}(undef, Nλ)
+    plan_bwd_1d = CUDA.CUFFT.plan_ifft!(kc_1d)
+
     # pre-allocated output buffer (unpadded dimensions)
     out_gpu = CUDA.zeros(T, Natm, Nλ)
 
@@ -161,5 +171,6 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                              padded_kernel_gpu, shift_kernel_gpu,
                              kernel_ft_gpu, signal_ft_gpu,
                              conv_ft_gpu, conv_gpu, plan_fwd, plan_bwd,
-                             kr_1d, kernel_row_ft_1d, plan_fwd_1d, out_gpu)
+                             kr_1d, kernel_row_ft_1d, plan_fwd_1d,
+                             kc_1d, plan_bwd_1d, out_gpu)
 end

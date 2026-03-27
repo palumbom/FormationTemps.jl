@@ -1,6 +1,7 @@
 using Korg
-using PythonPlot
+using PythonPlot; plt = PythonPlot.pyplot
 using FormationTemps; FT = FormationTemps
+plt.style.use(joinpath(FT.moddir, "fig.mplstyle"))
 
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16100]
@@ -36,15 +37,15 @@ u2 = 0.31
 result_conv = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, convolve=true, u1=u1, u2=u2)
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9.6, 7.2), sharex=true)
-ax1.plot(wavs, result_int.flux,  label="integration", lw=2.0, c="k")
-ax1.plot(wavs, result_conv.flux, label="convolution", lw=2.0, ls="--")
-ax1.set_ylabel("Normalized Flux")
+ax1.plot(wavs, result_int.flux,  label="{\\rm integration}", lw=2.0, c="k")
+ax1.plot(wavs, result_conv.flux, label="{\\rm convolution}", lw=2.0, ls="--")
+ax1.set_ylabel("{\\rm Normalized Flux}")
 ax1.legend()
 
 ax2.plot(wavs, result_int.flux .- result_conv.flux, c="k", lw=0.8)
 ax2.axhline(0, ls=":", c="gray")
-ax2.set_xlabel("Vacuum Wavelength [Å]")
-ax2.set_ylabel("Integration − Convolution")
+ax2.set_xlabel("{\\rm Vacuum Wavelength [\\AA]}")
+ax2.set_ylabel("{\\rm Integration} \$-\$ {\\rm Convolution}")
 ax2.set_xlim(5410, 5415)
 
 fig.tight_layout()
@@ -69,13 +70,13 @@ k_iso = FT.gray_iso_rt_macro_kernel(vs, ζ_RT)
 k_rt = FT.rt_macro_kernel(vs, ζ_RT, 1.0)
 
 fig, ax1 = plt.subplots(figsize=(9.6, 4.8))
-ax1.plot(vs ./ 1e3, k_gray_rot, lw=2.0, label="Gray rotation (vsini = $(round(Int, vsini/1e3)) km/s)")
-ax1.plot(vs ./ 1e3, k_iso, lw=2.0, label="Isotropic RT macro (ζ = $(round(Int, ζ_RT/1e3)) km/s)")
-ax1.plot(vs ./ 1e3, k_rt, lw=2.0, label="Anisotropic RT macro at μ=1 (ζ = $(round(Int, ζ_RT/1e3)) km/s)")
-ax1.set_xlabel("Velocity [km/s]")
-ax1.set_ylabel("Kernel Amplitude")
+ax1.plot(vs ./ 1e3, k_gray_rot, lw=2.0, label="{\\rm Gray rotation (vsini = $(round(Int, vsini/1e3)) km/s)}")
+ax1.plot(vs ./ 1e3, k_iso, lw=2.0, label="{\\rm Isotropic RT macro (}\$\\zeta\$ {\\rm = $(round(Int, ζ_RT/1e3)) km/s)}")
+ax1.plot(vs ./ 1e3, k_rt, lw=2.0, label="{\\rm Anisotropic RT macro at }\$\\mu=1\${\\rm  (}\$\\zeta\$ {\\rm = $(round(Int, ζ_RT/1e3)) km/s)}")
+ax1.set_xlabel("{\\rm Velocity [km/s]}")
+ax1.set_ylabel("{\\rm Kernel Amplitude}")
 ax1.set_xlim(-1.5*max(vsini, ζ_RT)/1e3, 1.5*max(vsini, ζ_RT)/1e3)
-ax1.legend()
+ax1.legend(fontsize=12)
 fig.tight_layout()
 fname = joinpath(FT.moddir, "docs", "src", "static", "broadening_kernels.png")
 fig.savefig(fname, bbox_inches="tight")
@@ -91,13 +92,13 @@ flux_iso = FT.convolve_iso_rt_macro(wavs, flux_base, ζ_RT)
 flux_hirano = FT.convolve_hirano_rotmacro(wavs, flux_base, vsini, ζ_RT, u1, u2)
 
 fig, ax1 = plt.subplots(figsize=(9.6, 4.8))
-ax1.plot(wavs, flux_base, label="unbroadened", lw=0.8)
-ax1.plot(wavs, flux_gray_rot, label="Gray rotation only", lw=2.0, ls="--")
-ax1.plot(wavs, flux_iso, label="Isotropic RT macro only", lw=2.0, ls="-.")
-ax1.plot(wavs, flux_hirano, label="Hirano rotation + macro", lw=2.0, ls=":")
+ax1.plot(wavs, flux_base, label="{\\rm Unbroadened}", lw=0.8)
+ax1.plot(wavs, flux_gray_rot, label="{\\rm Gray rotation only}", lw=2.0, ls="--")
+ax1.plot(wavs, flux_iso, label="{\\rm Isotropic RT macro only}", lw=2.0, ls="-.")
+ax1.plot(wavs, flux_hirano, label="{\\rm Hirano rotation + macro}", lw=2.0, ls=":")
 ax1.set_xlim(5410, 5415)
-ax1.set_xlabel("Vacuum Wavelength [Å]")
-ax1.set_ylabel("Normalized Flux")
+ax1.set_xlabel("{\\rm Vacuum Wavelength [\\AA]}")
+ax1.set_ylabel("{\\rm Normalized Flux}")
 ax1.legend()
 fig.tight_layout()
 fname = joinpath(FT.moddir, "docs", "src", "static", "broadened_spectra.png")

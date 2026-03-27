@@ -129,19 +129,10 @@ function convolve_iso_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         return CuArray(ys)
     end
 
-    # copy to device — avoid CuArray() wrapper allocations
-    if ys isa CA
-        copyto!(cmem.ys_gpu, ys)
-    else
-        copyto!(cmem.ys_gpu, CuArray(ys))
-    end
-    if xs isa CA
-        copyto!(cmem.xs_gpu, xs)
-        xs_h = Array(xs)
-    else
-        copyto!(cmem.xs_gpu, CuArray(xs))
-        xs_h = xs
-    end
+    # copy to device
+    xs_h = xs isa CA ? Array(xs) : collect(T, xs)
+    copyto!(cmem.ys_gpu, ys)
+    copyto!(cmem.xs_gpu, xs_h)
 
     # compute velocity offset from discrete center
     i0 = length(xs_h) ÷ 2 + 1

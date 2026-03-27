@@ -26,13 +26,14 @@ result_cpu = FT.calc_formation_temp(star_props, linelist; use_gpu=false, Δλ=Δ
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=true)
     ax1.plot(result_cpu.wavs, result_gpu.form_temps .- result_cpu.form_temps)
-    ax1.set_ylabel("GPU − CPU formation temp [K]")
+    ax1.set_ylabel("{\\rm GPU} \$-\$ {\\rm CPU formation temp [K]}")
     ax2.plot(result_cpu.wavs, result_gpu.flux .- result_cpu.flux)
-    ax2.set_ylabel("GPU − CPU flux")
-    ax2.set_xlabel("Wavelength [Å]")
+    ax2.set_ylabel("{\\rm GPU} \$-\$ {\\rm CPU flux}")
+    ax2.set_xlabel("{\\rm Wavelength [\\AA]}")
     fig.savefig(joinpath(test_plotdir, "compare_cpu_gpu_convenience.pdf"), bbox_inches="tight")
     plt.close()
 end

@@ -1,6 +1,7 @@
 using Korg
-using PythonPlot
+using PythonPlot; plt = PythonPlot.pyplot
 using FormationTemps; FT = FormationTemps
+plt.style.use(joinpath(FT.moddir, "fig.mplstyle"))
 
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16100]
@@ -28,8 +29,8 @@ temp = form_temp_result.form_temps
 # plot the result
 fig, ax1 = plt.subplots(figsize=(9.6,4.8))
 ax1.plot(wavs, temp, c="k")
-ax1.set_xlabel("Vacuum Wavelength [Å]")
-ax1.set_ylabel("Formation Temperature [K]")
+ax1.set_xlabel("{\\rm Vacuum Wavelength [\\AA]}")
+ax1.set_ylabel("{\\rm Formation Temperature [K]}")
 fname = joinpath(FT.moddir, "docs", "src", "static", "temp_example_jl.png")
 fig.savefig(fname, bbox_inches="tight")
 plt.show()

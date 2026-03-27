@@ -36,6 +36,7 @@ gray_rot_kernel = FT.gray_rot_kernel(vs, vsini, u1)
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
 
     fig, axes = plt.subplots(2, 2, figsize=(10, 7))
@@ -43,31 +44,31 @@ if make_plots
     v_range_macro = 4 * ζ_rt
     v_range_rot = 1.5 * vsini
 
-    axes[0, 0].plot(vs, iso_rt_macro_kernel, label="Gray iso RT macro")
-    axes[0, 0].plot(vs, hirano_no_rot_uniform, label="Hirano u1=0 (no rot)", ls="--")
-    axes[0, 0].plot(vs, hirano_no_rot, label="Hirano u1=$(u1) (no rot)", ls=":")
-    axes[0, 0].set_title("Macro only")
-    axes[0, 0].set_xlabel("Velocity [m/s]")
+    axes[0, 0].plot(vs, iso_rt_macro_kernel, label="{\\rm Gray iso RT macro}")
+    axes[0, 0].plot(vs, hirano_no_rot_uniform, label="{\\rm Hirano u1=0 (no rot)}", ls="--")
+    axes[0, 0].plot(vs, hirano_no_rot, label="{\\rm Hirano u1=$(u1) (no rot)}", ls=":")
+    axes[0, 0].set_title("{\\rm Macro only}")
+    axes[0, 0].set_xlabel("{\\rm Velocity [m/s]}")
     axes[0, 0].set_xlim(-v_range_macro, v_range_macro)
     axes[0, 0].legend()
 
-    axes[0, 1].plot(vs, gray_rot_kernel, label="Gray rotation u1=$(u1)")
-    axes[0, 1].plot(vs, hirano_no_macro, label="Hirano u1=$(u1) (no macro)", ls="--")
-    axes[0, 1].set_title("Rotation only")
-    axes[0, 1].set_xlabel("Velocity [m/s]")
+    axes[0, 1].plot(vs, gray_rot_kernel, label="{\\rm Gray rotation u1=$(u1)}")
+    axes[0, 1].plot(vs, hirano_no_macro, label="{\\rm Hirano u1=$(u1) (no macro)}", ls="--")
+    axes[0, 1].set_title("{\\rm Rotation only}")
+    axes[0, 1].set_xlabel("{\\rm Velocity [m/s]}")
     axes[0, 1].set_xlim(-v_range_rot, v_range_rot)
     axes[0, 1].legend()
 
-    axes[1, 0].plot(vs, hirano_no_rot_uniform .- iso_rt_macro_kernel, label="Hirano u1=0 − gray")
-    axes[1, 0].plot(vs, hirano_no_rot .- iso_rt_macro_kernel, label="Hirano u1=$(u1) − gray", ls="--")
-    axes[1, 0].set_title("Hirano − gray (macro)")
-    axes[1, 0].set_xlabel("Velocity [m/s]")
+    axes[1, 0].plot(vs, hirano_no_rot_uniform .- iso_rt_macro_kernel, label="{\\rm Hirano u1=0} \$-\$ {\\rm gray}")
+    axes[1, 0].plot(vs, hirano_no_rot .- iso_rt_macro_kernel, label="{\\rm Hirano u1=$(u1)} \$-\$ {\\rm gray}", ls="--")
+    axes[1, 0].set_title("{\\rm Hirano} \$-\$ {\\rm gray (macro)}")
+    axes[1, 0].set_xlabel("{\\rm Velocity [m/s]}")
     axes[1, 0].set_xlim(-v_range_macro, v_range_macro)
     axes[1, 0].legend()
 
     axes[1, 1].plot(vs, hirano_no_macro .- gray_rot_kernel)
-    axes[1, 1].set_title("Hirano − gray (rotation)")
-    axes[1, 1].set_xlabel("Velocity [m/s]")
+    axes[1, 1].set_title("{\\rm Hirano} \$-\$ {\\rm gray (rotation)}")
+    axes[1, 1].set_xlabel("{\\rm Velocity [m/s]}")
     axes[1, 1].set_xlim(-v_range_rot, v_range_rot)
 
     fig.tight_layout()
@@ -87,21 +88,21 @@ if make_plots
     x_pos = π^2 .* ζ_rt^2 .* σ_pos.^2
     K_anl = (1.0 .- exp.(-x_pos)) ./ x_pos
     K_anl[1] = 1.0
-    axes2[0].plot(σ_pos, Kσ_mac[pos], label="Hirano (u1=0)", lw=2)
-    axes2[0].plot(σ_pos, K_anl, label="Analytical", ls="--")
+    axes2[0].plot(σ_pos, Kσ_mac[pos], label="{\\rm Hirano (u1=0)}", lw=2)
+    axes2[0].plot(σ_pos, K_anl, label="{\\rm Analytical}", ls="--")
     axes2[0].set_xlim(0, 5 / (π * ζ_rt))
-    axes2[0].set_xlabel("Frequency [s/m]")
-    axes2[0].set_title("Macro FT kernel (u1=0)")
+    axes2[0].set_xlabel("{\\rm Frequency [s/m]}")
+    axes2[0].set_title("{\\rm Macro FT kernel (u1=0)}")
     axes2[0].legend()
 
     # rotation: Hirano FT vs DFT of gray rotation kernel
     Kσ_rot = FT.hirano_rotmacro_ft_kernel(σ_all, vsini, 0.0; u1=u1, u2=u2, intres=intres)
     Kσ_gray_rot_pos = real(fft(ifftshift(gray_rot_kernel)))[pos]
-    axes2[1].plot(σ_pos, Kσ_rot[pos], label="Hirano", lw=2)
-    axes2[1].plot(σ_pos, Kσ_gray_rot_pos, label="Gray DFT", ls="--")
+    axes2[1].plot(σ_pos, Kσ_rot[pos], label="{\\rm Hirano}", lw=2)
+    axes2[1].plot(σ_pos, Kσ_gray_rot_pos, label="{\\rm Gray DFT}", ls="--")
     axes2[1].set_xlim(0, 3 / vsini)
-    axes2[1].set_xlabel("Frequency [s/m]")
-    axes2[1].set_title("Rotation FT kernel")
+    axes2[1].set_xlabel("{\\rm Frequency [s/m]}")
+    axes2[1].set_title("{\\rm Rotation FT kernel}")
     axes2[1].legend()
 
     fig2.tight_layout()

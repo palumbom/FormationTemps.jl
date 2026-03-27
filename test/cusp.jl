@@ -57,12 +57,13 @@ end
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
     fig, ax = plt.subplots()
     ax.plot(λs_korg, flux_err)
-    ax.set_xlabel("Wavelength [Å]")
-    ax.set_ylabel("CPU − GPU flux error [%]")
-    ax.set_title("Anisotropic RT macro (mu = $(μ_val))")
+    ax.set_xlabel("{\\rm Wavelength [\\AA]}")
+    ax.set_ylabel("{\\rm CPU} \$-\$ {\\rm GPU flux error [\\%]}")
+    ax.set_title("{\\rm Anisotropic RT macro (mu = $(μ_val))}")
     fig.savefig(joinpath(test_plotdir, "cusp.pdf"), bbox_inches="tight")
     plt.close()
 end

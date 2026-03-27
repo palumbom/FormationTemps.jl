@@ -46,6 +46,7 @@ Introduction = "Quickstart" => "index.md"
 License = "License" => "license.md"
 Index = "Full Index" => "longlist.md"
 Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
+                      "GPU Acceleration" => "gpu.md",
                       "Contribution Functions" => "cont_func.md",
                       "Broadening & Convolutions" => "convolutions.md",
                       "Python Tutorial" => "python.md"]

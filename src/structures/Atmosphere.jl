@@ -39,6 +39,14 @@ Return the temperature grid as a standard `Array`.
 get_Ts(atm::Atmosphere) = Array(atm.Ts)
 
 """
+    get_nd(atm)
+
+Return the number density grid as a standard `Array`.
+"""
+get_nd(atm::Atmosphere) = Array(atm.nd)
+
+
+"""
     _extract_korg_fields(atm_korg)
 
 Resample a Korg model atmosphere onto a uniform log-τ grid, then extract thermodynamic

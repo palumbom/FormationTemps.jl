@@ -37,4 +37,6 @@ if use_gpu
     include("compare_cpu_gpu_broadening.jl")
     include("disk_int_error.jl")
     include("test_buffer_safety.jl")
+    include("test_convolution_alignment.jl")
+    include("test_hirano_gpu_kernel.jl")
 end

@@ -1,6 +1,7 @@
 """
     calc_formation_temp(star, linelist; use_gpu=GPU_DEFAULT, Δλ=0.01, convolve=false,
-                        minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN, Nϕ=128, kwargs...)
+                        minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN, Nϕ=128,
+                        showprogress=true, kwargs...)
 
 Compute flux formation temperatures, normalized flux, and flux contribution function for a given `star` and `linelist`.
 
@@ -17,6 +18,7 @@ Returns a `FormTempResult` with fields:
 If `convolve=true`, applies Hirano rotation + macroturbulent convolution using limb-darkening
 coefficients `u1` and `u2`. Otherwise, performs numerical disk integration using `Nϕ` latitude
 bins. Set `use_gpu=true` to use the GPU implementation when available.
+Set `showprogress=false` to suppress the progress bar during disk integration.
 
 # Examples
 ```julia-repl
@@ -45,7 +47,8 @@ end
 function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
                                   minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
-                                  Nϕ::Int=128, kwargs...) where T<:AF
+                                  Nϕ::Int=128, showprogress::Bool=true,
+                                  kwargs...) where T<:AF
     # get linelist
     wls = [l.wl * 1e8 for l in linelist]
     minλ = isnan(minλ) ? first(wls) - buffer : minλ
@@ -130,7 +133,8 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
         cfunc_dt_int = zeros(T, Natm - 1, Nλ)
         cfunc_dt_int_cont = zeros(T, Natm - 1, Nλ)
 
-        @showprogress for i in eachindex(μs_cpu)
+        prog = Progress(length(μs_cpu); enabled=showprogress)
+        for i in eachindex(μs_cpu)
             μ_tile = μs_cpu[i]
             μ_v_rot .= z_rot_cpu[i] .* c_ms
 
@@ -150,6 +154,7 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
             flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
             cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
             cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
+            next!(prog)
         end
 
         cfunc_dt_flux = cfunc_flux_integration
@@ -176,7 +181,8 @@ end
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                                   minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
-                                  Nϕ::Int=128, kwargs...) where T<:AF
+                                  Nϕ::Int=128, showprogress::Bool=true,
+                                  kwargs...) where T<:AF
     # get linelist
     wls = [l.wl * 1e8 for l in linelist]
     minλ = isnan(minλ) ? first(wls) - buffer : minλ
@@ -271,7 +277,8 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         end
 
         # loop over cells on grid
-        @showprogress for i in eachindex(μs_cpu)
+        prog = Progress(length(μs_cpu); enabled=showprogress)
+        for i in eachindex(μs_cpu)
             μ_tile = μs_cpu[i]
             μ_v_rot .= z_rot_cpu[i] .* c_ms
 
@@ -298,6 +305,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             sum!(flux_tile_buf, cfunc_int_cont_i_mac)
             flux_cont_integration .+= vec(flux_tile_buf) .* dA_cpu[i]
             cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
+            next!(prog)
         end
 
         cfunc_dt_flux = cfunc_flux_integration

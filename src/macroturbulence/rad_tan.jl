@@ -137,8 +137,7 @@ Returns:
 
 Notes:
 - Short-circuits (returns `CuArray(ys)`) when `ζ_rt` is zero.
-- The GPU evaluates `erfc` in a CUDA kernel; results differ from the CPU `erfc`
-  (Julia standard library) by ~1e-4 relative to peak flux.
+- CPU and GPU results differ at the spectrum edges due to circular vs padded FFT convention.
 
 See also: [`convolve_rt_macro`](@ref), [`rt_macro_kernel`](@ref)
 """
@@ -149,21 +148,10 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         return CuArray(ys)
     end
 
-    # copy signal to device — avoid CuArray() wrapper allocations
-    if ys isa CA
-        copyto!(cmem.ys_gpu, ys)
-    else
-        copyto!(cmem.ys_gpu, CuArray(ys))
-    end
-
-    # populate wavelength grid on device and get center wavelength without scalar indexing
-    if xs isa CA
-        copyto!(cmem.xs_gpu, xs)
-        xs_h = Array(xs)
-    else
-        copyto!(cmem.xs_gpu, CuArray(xs))
-        xs_h = xs
-    end
+    # copy to device
+    xs_h = xs isa CA ? Array(xs) : collect(T, xs)
+    copyto!(cmem.ys_gpu, ys)
+    copyto!(cmem.xs_gpu, xs_h)
 
     # compute velocity offset from discrete center
     i0 = length(xs_h) ÷ 2 + 1

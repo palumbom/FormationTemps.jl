@@ -42,6 +42,62 @@ function hirano_rotmacro_ft_kernel(σs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43,
 end
 
 """
+    hirano_rotmacro_ft_kernel_gpu!(Kσ, σs, vsini, ζ_rt, u1, u2, intres, Nσ)
+
+CUDA kernel that computes the Fourier transform of the Hirano et al. (2011)
+rotation+macroturbulence kernel directly on the GPU. One block per frequency bin;
+threads within each block split the `intres` quadrature points and reduce via
+shared memory.
+
+This is the GPU equivalent of [`hirano_rotmacro_ft_kernel`](@ref).
+"""
+function hirano_rotmacro_ft_kernel_gpu!(Kσ, σs, vsini, ζ_rt, u1, u2, intres, Nσ)
+    # one block per frequency bin, threads split quadrature points
+    i = blockIdx().x
+    i > Nσ && return nothing
+    tid = threadIdx().x
+    nthreads = blockDim().x
+
+    dt = 1.0 / (intres - 1)
+    ld_norm = 1.0 - u1 / 3.0 - u2 / 6.0
+    a = π^2 * ζ_rt^2 * σs[i]^2
+    σ_i = σs[i]
+
+    # each thread accumulates a partial sum over its share of quadrature points
+    s = 0.0
+    j = tid
+    while j <= intres
+        t = (j - 1) * dt
+        t2 = t * t
+        μ = sqrt(max(0.0, 1.0 - t2))
+        ld = (1.0 - u1 * (1.0 - μ) - u2 * (1.0 - μ)^2) / ld_norm
+        integrand = ld * (exp(-a * (1.0 - t2)) + exp(-a * t2)) * besselj0(2π * σ_i * vsini * t) * t
+        w = (j == 1 || j == intres) ? 0.5 : 1.0
+        s += w * integrand
+        j += nthreads
+    end
+
+    # shared memory reduction
+    shmem = CuDynamicSharedArray(Float64, nthreads)
+    shmem[tid] = s
+    sync_threads()
+
+    stride = nthreads ÷ 2
+    while stride > 0
+        if tid <= stride
+            shmem[tid] += shmem[tid + stride]
+        end
+        sync_threads()
+        stride ÷= 2
+    end
+
+    if tid == 1
+        Kσ[i] = shmem[1] * dt
+    end
+    return nothing
+end
+
+"""
     convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2; intres=intres_glob)
 
 Convolve a spectrum with the Hirano et al. (2011) combined rotation+macroturbulence
@@ -152,12 +208,13 @@ Returns:
 
 Notes:
 - Short-circuits (returns `CuArray(ys)`) when both `vsini` and `ζ_rt` are zero.
-- The kernel is computed on the CPU and transferred to the GPU; the FFT convolution
-  runs on the device.
+- The Hirano FT kernel is computed entirely on the GPU via
+  [`hirano_rotmacro_ft_kernel_gpu!`](@ref), then converted to the spatial domain
+  and applied via padded FFT convolution on the device.
 - CPU and GPU results differ at the first and last `~vsini/c × λ₀/Δλ` pixels because
   the CPU uses an unpadded circular FFT while the GPU uses a padded linear convolution.
 
-See also: [`convolve_hirano_rotmacro`](@ref), [`hirano_rotmacro_ft_kernel`](@ref)
+See also: [`convolve_hirano_rotmacro`](@ref), [`hirano_rotmacro_ft_kernel_gpu!`](@ref)
 """
 function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, vsini::T, ζ_rt::T,
@@ -167,18 +224,49 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         return CuArray(ys)
     end
 
-    # copy to device — avoid CuArray() wrapper allocations
-    if ys isa CA
-        copyto!(cmem.ys_gpu, ys)
-    else
-        copyto!(cmem.ys_gpu, CuArray(ys))
-    end
+    # copy to device
+    copyto!(cmem.ys_gpu, ys)
 
     # get CPU-side wavelength info (avoid scalar indexing of CuArray)
     xs_h = xs isa CA ? Array(xs) : xs
 
-    # circular kernel centered at v=0 (FFT-shifted) with sum=1
-    kernel_N = hirano_rotmacro_kernel_from_xs(xs_h, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
+    # velocity grid
+    N = length(xs_h)
+    i0 = N ÷ 2 + 1
+    λ0 = xs_h[i0]
+    vs_range = c_ms .* (xs_h .- λ0) ./ λ0
+    Δv = (vs_range[end] - vs_range[1]) / (N - 1)
+
+    # compute FT kernel on GPU; σs stored in xs_gpu (length ≥ N), output in kr_1d
+    σs_cpu = collect(T, FFTW.fftfreq(N) ./ Δv)
+    σs_dev = @view cmem.xs_gpu[1:N]
+    copyto!(σs_dev, σs_cpu)
+    Kσ_view = @view cmem.kr_1d[1:N]
+    fill!(Kσ_view, zero(T))
+    kernel_threads = 256
+    @cuda threads=kernel_threads blocks=N shmem=kernel_threads*sizeof(T) hirano_rotmacro_ft_kernel_gpu!(
+        Kσ_view, σs_dev, vsini, ζ_rt, u1, u2, intres, N)
+
+    # ifft to spatial domain on GPU using pre-allocated complex buffer (in-place)
+    Kσ_view ./= Δv
+    cmem.kc_1d .= complex.(Kσ_view)
+    cmem.plan_bwd_1d * cmem.kc_1d
+    # # CPU fallback (equivalent, for reference):
+    # Kσ_cpu = Array(Kσ_view); Kσ_cpu ./= Δv
+    # k_circ = real(ifft(Kσ_cpu))
+    # kernel_spatial = FFTW.fftshift(k_circ)
+    # kernel_spatial ./= sum(kernel_spatial)
+
+    # fftshift + normalize on GPU, write into padded buffer
+    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
+    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
+    fill!(kernel_row, zero(T))
+    fill!(shifted_kernel_row, zero(T))
+    k_real = @view cmem.kr_1d[1:N]
+    k_real .= real.(cmem.kc_1d)
+    CUDA.CUFFT.fftshift!(@view(shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+N]), k_real, 1)
+    normval = CUDA.sum(@view shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+N])
+    @views kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ] .= shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ] ./ normval
 
     # pad the signal
     ts = (32,32)
@@ -186,16 +274,7 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     @cuda threads=ts blocks=bs pad_signal!(cmem.signal_gpu, cmem.ys_gpu,
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
 
-    # place kernel into padded work buffer on device
-    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
-    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
-
-    fill!(kernel_row, zero(T))
-    kdev = CuArray(kernel_N)
-    @views kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ] .= kdev
-
-    # ensure zero-lag sits at padded center before FFT layout
-    i0 = length(xs_h) ÷ 2 + 1
+    # roll zero-lag to padded center, then ifftshift to DFT convention
     center = length(kernel_row) ÷ 2
     r = center - (cmem.pad_left + i0)
     if r != 0
@@ -206,7 +285,6 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         shifted_kernel_row = tmp
     end
 
-    # center -> FFT indexing, then R2C FFT of padded kernel (no allocation)
     CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
     copyto!(cmem.kr_1d, shifted_kernel_row)
     mul!(cmem.kernel_row_ft_1d, cmem.plan_fwd_1d, cmem.kr_1d)

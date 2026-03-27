@@ -23,12 +23,6 @@ At low spectral resolving power, convolutions can be used to approximate the eff
 
 > `use_gpu=true`
 
-By default, ```calc_formation_temp``` will use an NVIDIA GPU to accelerate the computation of spectra, if one is present and configured. The [CUDA.jl documentation](https://cuda.juliagpu.org/stable/) provides installation instructions, though it is fortunately fairly autonomous. 
+By default, ```calc_formation_temp``` will use an NVIDIA GPU to accelerate the computation of spectra, if one is present and configured. The [CUDA.jl documentation](https://cuda.juliagpu.org/stable/) provides installation instructions, though it is fortunately fairly autonomous. Pass `use_gpu=false` to force the CPU path.
 
-Several steps of the spectral synthesis are parallelized, including:
-* calculation of the stellar grid (if ```convolve=false```)
-* the convolution step in the microturbulent broadening
-* the solving of the radiative transport equation:
-  * solving for the monochromatic optical depth
-  * calculating the monochromatic intensity/flux contribution functions
-  * evaluation of the monochromatic intensity/flux from the contribution function
+For details on what gets accelerated, memory layout, benchmarks, and CPU/GPU numerical differences, see the [GPU Acceleration](@ref) guide.

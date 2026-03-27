@@ -58,13 +58,14 @@ end
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
     fig, ax = plt.subplots()
-    ax.plot(vs, iso_rt_macro_kernel, label="Isotropic")
-    ax.plot(vs, int_kernel, ls="--", label="Disk-integrated aniso")
+    ax.plot(vs, iso_rt_macro_kernel, label="{\\rm Isotropic}")
+    ax.plot(vs, int_kernel, ls="--", label="{\\rm Disk-integrated aniso}")
     ax.set_xlim(-10_000, 10_000)
-    ax.set_xlabel("Velocity [m/s]")
-    ax.set_ylabel("Kernel")
+    ax.set_xlabel("{\\rm Velocity [m/s]}")
+    ax.set_ylabel("{\\rm Kernel}")
     ax.legend()
     fig.savefig(joinpath(test_plotdir, "integrate_aniso.pdf"), bbox_inches="tight")
     plt.close()

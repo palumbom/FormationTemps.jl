@@ -1,6 +1,7 @@
 using Korg
-using PythonPlot
+using PythonPlot; plt = PythonPlot.pyplot
 using FormationTemps; FT = FormationTemps
+plt.style.use(joinpath(FT.moddir, "fig.mplstyle"))
 
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16100]
@@ -33,7 +34,7 @@ ax1.set_xticklabels([])
 ax1.set_yticklabels([])
 fname = joinpath(FT.moddir, "docs", "src", "static", "cont_func_simple_example.png")
 cbar = fig.colorbar(img, ax=ax1)
-cbar.set_label("Normalized Flux Contribution Fn.")
+cbar.set_label("{\\rm Normalized Flux Contribution Fn.}")
 fig.savefig(fname, bbox_inches="tight")
 plt.show()
 plt.clf(); plt.close()
@@ -50,12 +51,12 @@ Ts = get_Ts(atm)
 fig, ax1 = plt.subplots(figsize=(9.6,4.8))
 if isempty(τs)
     ax1.plot(zs ./ 1e5, Ts, c="k")   # fall back to height in km
-    ax1.set_xlabel("Height [km]")
+    ax1.set_xlabel("{\\rm Height [km]}")
 else
     ax1.plot(τs, Ts, c="k")
-    ax1.set_xlabel("Optical Depth at 5000 Å")
+    ax1.set_xlabel("{\\rm Optical Depth at 5000 \\AA}")
 end
-ax1.set_ylabel("Atmosphere Temperature [K]")
+ax1.set_ylabel("{\\rm Atmosphere Temperature [K]}")
 fname = joinpath(FT.moddir, "docs", "src", "static", "atmosphere.png")
 fig.savefig(fname, bbox_inches="tight")
 plt.show()
@@ -79,10 +80,10 @@ cfuncp = view(cont_func, :, idx1:idx2)
 # plot the contribution function
 fig, ax1 = plt.subplots(figsize=(9.6,4.8))
 img = ax1.pcolormesh(xedges, yedges, cfuncp ./ maximum(cfuncp), cmap="viridis")
-ax1.set_xlabel("Vacuum Wavelength [Å]")
-ax1.set_ylabel("Optical Depth at 5000 Å")
+ax1.set_xlabel("{\\rm Vacuum Wavelength [\\AA]}")
+ax1.set_ylabel("{\\rm Optical Depth at 5000 \\AA}")
 cbar = fig.colorbar(img, ax=ax1)
-cbar.set_label("Normalized Flux Contribution Fn.")
+cbar.set_label("{\\rm Normalized Flux Contribution Fn.}")
 fname = joinpath(FT.moddir, "docs", "src", "static", "cont_func_example.png")
 fig.savefig(fname, bbox_inches="tight")
 plt.show()

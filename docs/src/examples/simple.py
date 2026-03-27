@@ -1,3 +1,4 @@
+import os
 import matplotlib
 # matplotlib.use("Agg")
 
@@ -10,6 +11,9 @@ jl.seval("using Korg")
 jl.seval("using FormationTemps")
 FT = jl.FormationTemps
 Korg = jl.Korg
+
+# apply project style
+plt.style.use(os.path.join(str(FT.moddir), "fig.mplstyle"))
 
 # read the linelist (ships with the package)
 # slicing done on Julia side to preserve 1-based indexing
@@ -32,10 +36,10 @@ temps = np.asarray(result.form_temps)
 # plot
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9.6, 6.4), sharex=True)
 ax1.plot(wavs, flux, c="k")
-ax1.set_ylabel("Normalized Flux")
+ax1.set_ylabel(r"{\rm Normalized Flux}")
 ax2.plot(wavs, temps, c="k")
-ax2.set_xlabel("Vacuum Wavelength [Ang]")
-ax2.set_ylabel("Formation Temperature [K]")
+ax2.set_xlabel(r"{\rm Vacuum Wavelength [\AA]}")
+ax2.set_ylabel(r"{\rm Formation Temperature [K]}")
 fig.tight_layout()
 
 # write out the file

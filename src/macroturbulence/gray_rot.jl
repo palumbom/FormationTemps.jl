@@ -122,19 +122,15 @@ See also: [`convolve_gray_rotation`](@ref), [`gray_rot_kernel`](@ref)
 """
 function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                     ys::AA{T,2}, vsini::T, u1::T) where {T<:AF}
-    # copy to device — avoid CuArray() wrapper allocations
-    if ys isa CA
-        copyto!(cmem.ys_gpu, ys)
-    else
-        copyto!(cmem.ys_gpu, CuArray(ys))
+    # short circuit before any copy so the caller's ys is returned unmodified
+    if iszero(vsini)
+        return CuArray(ys)
     end
-    if xs isa CA
-        copyto!(cmem.xs_gpu, xs)
-        xs_h = Array(xs)
-    else
-        copyto!(cmem.xs_gpu, CuArray(xs))
-        xs_h = xs
-    end
+
+    # copy to device
+    xs_h = xs isa CA ? Array(xs) : collect(T, xs)
+    copyto!(cmem.ys_gpu, ys)
+    copyto!(cmem.xs_gpu, xs_h)
 
     # compute velocity offset from discrete center
     i0 = length(xs_h) ÷ 2 + 1

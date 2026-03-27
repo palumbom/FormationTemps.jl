@@ -94,14 +94,15 @@ end
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
     fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, height_ratios=[2, 1])
-    ax1.plot(λs_korg, flux_norm_korg, c="k", label="Korg")
-    ax1.plot(λs_korg, flux_norm_gpu,  ls="--",  label="FormationTemps")
+    ax1.plot(λs_korg, flux_norm_korg, c="k", label="{\\rm Korg}")
+    ax1.plot(λs_korg, flux_norm_gpu,  ls="--",  label="{\\rm FormationTemps}")
     ax2.scatter(λs_korg, pct_err_norm, c="k", s=5)
-    ax2.set_xlabel("Wavelength [A]")
-    ax1.set_ylabel("Normalized flux")
-    ax2.set_ylabel("Percent error")
+    ax2.set_xlabel("{\\rm Wavelength [\\AA]}")
+    ax1.set_ylabel("{\\rm Normalized flux}")
+    ax2.set_ylabel("{\\rm Percent error}")
     ax1.set_xticklabels([])
     ax1.legend()
     ax1.set_xlim(λ0 - 0.25, λ0 + 0.25)

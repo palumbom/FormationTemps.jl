@@ -63,15 +63,16 @@ flux_iso_rt_gpu = dropdims(sum(cfunc_rt_gpu, dims=1), dims=1)
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=true)
-    ax1.plot(λs_korg, flux_norm_cpu, label="CPU")
-    ax1.plot(λs_korg, flux_norm_gpu, ls="--", label="GPU")
-    ax1.set_ylabel("Normalized flux (rotation)")
+    ax1.plot(λs_korg, flux_norm_cpu, label="{\\rm CPU}")
+    ax1.plot(λs_korg, flux_norm_gpu, ls="--", label="{\\rm GPU}")
+    ax1.set_ylabel("{\\rm Normalized flux (rotation)}")
     ax1.legend()
     ax2.plot(λs_korg, flux_norm_gpu .- flux_norm_cpu)
-    ax2.set_ylabel("GPU − CPU")
-    ax2.set_xlabel("Wavelength [Å]")
+    ax2.set_ylabel("{\\rm GPU} \$-\$ {\\rm CPU}")
+    ax2.set_xlabel("{\\rm Wavelength [\\AA]}")
     fig.savefig(joinpath(test_plotdir, "rotmacro_convolution.pdf"), bbox_inches="tight")
     plt.close()
 end

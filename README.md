@@ -76,6 +76,10 @@ More detail on the above example can be found in the [Basic Tutorial](https://mi
 
 FormationTemps.jl can be called from Python. The instructions can be found in the [Python Tutorial](https://michaelpalumbo.me/FormationTemps.jl/stable/python/).
 
+## GPU Acceleration
+
+FormationTemps.jl can offload the convolution operations and disk-integration pipeline to an NVIDIA GPU via [CUDA.jl](https://cuda.juliagpu.org/stable/), providing significant speedups for typical problem sizes. GPU acceleration is enabled automatically when a compatible device is detected; pass `use_gpu=false` to force the CPU path. See the [GPU documentation](https://michaelpalumbo.me/FormationTemps.jl/stable/gpu/) for setup details, memory layout, and benchmarks.
+
 ## Caveats
 
 > [!CAUTION]

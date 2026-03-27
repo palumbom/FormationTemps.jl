@@ -91,15 +91,16 @@ end
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
     fig, ax = plt.subplots()
-    ax.scatter(steps, αs_error,       s=20, label="alpha")
-    ax.scatter(steps, rot_error,      s=20, label="rotation")
-    ax.scatter(steps, rt_error,       s=20, label="iso RT macro")
-    ax.scatter(steps, rt_aniso_error, s=20, label="aniso RT macro")
-    ax.scatter(steps, rotmacro_error, s=20, label="Hirano")
-    ax.set_xlabel("Wavelength spacing [Å]")
-    ax.set_ylabel("Max relative error (CPU vs GPU)")
+    ax.scatter(steps, αs_error,       s=20, label="{\\rm alpha}")
+    ax.scatter(steps, rot_error,      s=20, label="{\\rm rotation}")
+    ax.scatter(steps, rt_error,       s=20, label="{\\rm iso RT macro}")
+    ax.scatter(steps, rt_aniso_error, s=20, label="{\\rm aniso RT macro}")
+    ax.scatter(steps, rotmacro_error, s=20, label="{\\rm Hirano}")
+    ax.set_xlabel("{\\rm Wavelength spacing [\\AA]}")
+    ax.set_ylabel("{\\rm Max relative error (CPU vs GPU)}")
     ax.legend()
     fig.savefig(joinpath(test_plotdir, "compare_cpu_gpu_broadening.pdf"), bbox_inches="tight")
     plt.close()

@@ -2,7 +2,7 @@ Pkg.activate("/mnt/home/mpalumbo/work/FormationTemps")
 using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
-using HDF5, JLD2, Printf
+using HDF5, HDF5_jll, JLD2, Printf
 using CUDA, BenchmarkTools
 using CSV, DataFrames, Statistics
 using ProgressMeter
@@ -29,8 +29,8 @@ cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
-outfile = joinpath(outdir, "temp_spectrum_chunks_hires.h5")
-outfile_1d = joinpath(outdir, "temp_spectrum_hires_1D.h5")
+outfile = joinpath(outdir, "temp_spectrum_chunks.h5")
+outfile_1d = joinpath(outdir, "temp_spectrum_1D.h5")
 
 # get the linelist
 linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
@@ -44,11 +44,11 @@ linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_
 
 # parse values values
 wls = [l.wl * 1e8 for l in linelist]
-log_gf =  [l.log_gf for l in linelist]
-species =  [l.species for l in linelist]
-E_lower =  [l.E_lower for l in linelist]
-gamma_rad =  [l.gamma_rad for l in linelist]
-gamma_stark =  [l.gamma_stark for l in linelist]
+log_gf = [l.log_gf for l in linelist]
+species = [l.species for l in linelist]
+E_lower = [l.E_lower for l in linelist]
+gamma_rad = [l.gamma_rad for l in linelist]
+gamma_stark = [l.gamma_stark for l in linelist]
 
 # set parameters
 Teff = 5777.0
@@ -66,12 +66,14 @@ star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
 # write out the temperature, etc.
 atm_cpu = FT.AtmosphereCPU(Korg.interpolate_marcs(star_props.Teff, star_props.logg, star_props.A_X))
 zs = atm_cpu.zs
+nd = atm_cpu.nd
 Ts = atm_cpu.Ts
 τs_ref = atm_cpu.τs
 
-# set linelist chunk size
+# set linelist chunk size and wavelength resolution
 chunksize = 400
 overlap_lines = 100
+Δλ = 0.001
 @assert 0 <= overlap_lines < chunksize "overlap_lines must satisfy 0 <= overlap_lines < chunksize."
 chunk_step = chunksize - overlap_lines
 
@@ -82,26 +84,35 @@ h5open(outfile, "w") do h5
     HDF5.attributes(h5)["overlap_lines"] = overlap_lines
     HDF5.attributes(h5)["chunk_step"] = chunk_step
     HDF5.attributes(h5)["n_lines"] = length(linelist)
+    HDF5.attributes(h5)["Teff"] = star_props.Teff
+    HDF5.attributes(h5)["logg"] = star_props.logg
+    HDF5.attributes(h5)["Fe_H"] = star_props.Fe_H
+    HDF5.attributes(h5)["vsini"] = star_props.vsini
+    HDF5.attributes(h5)["zeta_RT"] = star_props.ζ
+    HDF5.attributes(h5)["xi"] = star_props.ξ
+    HDF5.attributes(h5)["rho_star"] = star_props.ρstar
+    HDF5.attributes(h5)["i_star"] = star_props.istar
 
     # include atmosphere data in the same output file
     g_atm = create_group(h5, "model_atmosphere")
     g_atm["zs"] = zs
+    g_atm["nd"] = nd
     g_atm["Ts"] = Ts
     g_atm["τs_ref"] = τs_ref
 
     # loop over chunks
-    for (chunk_idx, i) in enumerate(1:chunk_step:length(linelist))
+    @showprogress for (chunk_idx, i) in enumerate(1:chunk_step:length(linelist))
         # get view of linelist
         chunk_end = min(i + chunksize - 1, length(linelist))
         ll = view(linelist, i:chunk_end)
         line_centers = [l.wl * 1e8 for l in ll]
 
         # high-level formation temperature calculation
-        Δλ = 0.0001
         form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=Δλ,
                                                   convolve=false, Nϕ=128,
                                                   buffer=3.0,
-                                                  ne_warn_thresh=Inf)
+                                                  ne_warn_thresh=Inf,
+                                                  showprogress=false)
 
         # parse out results
         wavs = collect(form_temp_result.wavs)
@@ -118,6 +129,16 @@ h5open(outfile, "w") do h5
         g["cfunc"] = cfunc
         HDF5.attributes(g)["start_index"] = i
         HDF5.attributes(g)["end_index"] = chunk_end
+    end
+end
+
+# repack output file
+if isfile(outfile)
+    let tmp = outfile * ".tmp"
+        HDF5_jll.h5repack() do exe
+            run(`$exe $outfile $tmp`)
+        end
+        mv(tmp, outfile; force=true)
     end
 end
 
@@ -152,10 +173,19 @@ h5open(outfile, "r") do h5in
         HDF5.attributes(h5out)["n_lines"] = length(linelist)
         HDF5.attributes(h5out)["n_chunks"] = nchunks
         HDF5.attributes(h5out)["spliced"] = 1
+        HDF5.attributes(h5out)["Teff"] = star_props.Teff
+        HDF5.attributes(h5out)["logg"] = star_props.logg
+        HDF5.attributes(h5out)["Fe_H"] = star_props.Fe_H
+        HDF5.attributes(h5out)["vsini"] = star_props.vsini
+        HDF5.attributes(h5out)["zeta_RT"] = star_props.ζ
+        HDF5.attributes(h5out)["xi"] = star_props.ξ
+        HDF5.attributes(h5out)["rho_star"] = star_props.ρstar
+        HDF5.attributes(h5out)["i_star"] = star_props.istar
 
-        # retain model atmosphere info in the new file
+        # include atmosphere data in the same output file
         g_atm = create_group(h5out, "model_atmosphere")
         g_atm["zs"] = zs
+        g_atm["nd"] = nd
         g_atm["Ts"] = Ts
         g_atm["τs_ref"] = τs_ref
 
@@ -178,5 +208,15 @@ h5open(outfile, "r") do h5in
             g_out["temp"] = temp[keep]
             g_out["cfunc"] = cfunc[:, keep]
         end
+    end
+end
+
+# repack output file
+if isfile(outfile_1d)
+    let tmp = outfile_1d * ".tmp"
+        HDF5_jll.h5repack() do exe
+            run(`$exe $outfile_1d $tmp`)
+        end
+        mv(tmp, outfile_1d; force=true)
     end
 end

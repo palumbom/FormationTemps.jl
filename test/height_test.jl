@@ -47,13 +47,14 @@ end
 
 if make_plots
     import PythonPlot; plt = PythonPlot
+    plt.pyplot.style.use(joinpath(FT.moddir, "fig.mplstyle"))
     plt.ioff()
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=true)
     ax1.plot(λs_korg, form_height)
-    ax1.set_ylabel("Form. Height [cm]")
+    ax1.set_ylabel("{\\rm Form. Height [cm]}")
     ax2.plot(λs_korg, form_temp)
-    ax2.set_ylabel("Form. Temperature [K]")
-    ax2.set_xlabel("Wavelength [Å]")
+    ax2.set_ylabel("{\\rm Form. Temperature [K]}")
+    ax2.set_xlabel("{\\rm Wavelength [\\AA]}")
     fig.savefig(joinpath(test_plotdir, "height_test.pdf"), bbox_inches="tight")
     plt.close()
 end

@@ -144,20 +144,20 @@ end
 @show extrema((form_temp_rotating - form_temp_stationary) ./ form_temp_stationary)
 
 fig, ax1 = plt.subplots()
-ax1.plot(λs_korg, flux_stationary, c="k", ls="--", label="Stationary")
-ax1.plot(λs_korg, flux_rotating, c="tab:blue", label="Solid Body Rotation")
-ax1.set_xlabel("Wavelength")
-ax1.set_ylabel("Flux")
+ax1.plot(λs_korg, flux_stationary, c="k", ls="--", label="{\\rm Stationary}")
+ax1.plot(λs_korg, flux_rotating, c="tab:blue", label="{\\rm Solid Body Rotation}")
+ax1.set_xlabel("{\\rm Wavelength}")
+ax1.set_ylabel("{\\rm Flux}")
 ax1.legend()
 fig.savefig("figures/flux_rotation.pdf", bbox_inches="tight")
 plt.clf(); plt.close();
 
 # overplot the temperature
 fig, ax1 = plt.subplots()
-ax1.plot(λs_korg, form_temp_stationary, c="k", ls="--", label="Stationary")
-ax1.plot(λs_korg, form_temp_rotating, c="tab:blue", label="Solid Body Rotation")
-ax1.set_xlabel("Wavelength")
-ax1.set_ylabel("Formation Temperature")
+ax1.plot(λs_korg, form_temp_stationary, c="k", ls="--", label="{\\rm Stationary}")
+ax1.plot(λs_korg, form_temp_rotating, c="tab:blue", label="{\\rm Solid Body Rotation}")
+ax1.set_xlabel("{\\rm Wavelength}")
+ax1.set_ylabel("{\\rm Formation Temperature}")
 ax1.legend()
 fig.savefig("figures/temp_rotation.pdf", bbox_inches="tight")
 plt.clf(); plt.close();
