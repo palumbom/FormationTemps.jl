@@ -56,7 +56,7 @@ See also: [`rt_macro_kernel`](@ref), [`convolve_rt_macro_gpu`](@ref)
 
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
     # short circuit
-    if (iszero(ζ_r) & iszero(ζ_t))
+    if iszero(ζ_r) && iszero(ζ_t)
         return ys
     end
 
@@ -75,7 +75,7 @@ end
 
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
     # short circuit
-    if (iszero(ζ_r) & iszero(ζ_t))
+    if iszero(ζ_r) && iszero(ζ_t)
         return ys
     end
 
@@ -150,7 +150,7 @@ See also: [`convolve_rt_macro`](@ref), [`rt_macro_kernel`](@ref)
 function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                ys::AA{T,2}, ζ_r::T, ζ_t::T, μ::T) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
-    if (iszero(ζ_r) & iszero(ζ_t))
+    if iszero(ζ_r) && iszero(ζ_t)
         return CuArray(ys)
     end
 
@@ -189,7 +189,6 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                                               cmem.xs_gpu, λ0,
                                                               ζ_r, ζ_t, μ, cmem.Nλ,
                                                               cmem.pad_left)
-    CUDA.synchronize()
 
     # normalize the kernel
     normval = CUDA.sum(kernel_row)
@@ -201,7 +200,6 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
-        CUDA.synchronize()
         tmp = kernel_row
         kernel_row = shifted_kernel_row
         shifted_kernel_row = tmp

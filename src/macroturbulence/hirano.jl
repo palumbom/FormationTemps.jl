@@ -70,7 +70,7 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
     Δv = (vs[end] - vs[1]) / (N - 1)
-    dv = diff(vs)
+
 
     # frequency grid and kernel FT
     σ = FFTW.fftfreq(N) ./ Δv
@@ -94,7 +94,7 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
     Δv = (vs[end] - vs[1]) / (N - 1)
-    dv = diff(vs)
+
 
     # frequency grid and kernel FT
     σ = FFTW.fftfreq(N) ./ Δv
@@ -201,7 +201,6 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     if r != 0
         ts1 = (256,)
         @cuda threads=ts1 blocks=(cld(length(kernel_row), ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, length(kernel_row))
-        CUDA.synchronize()
         tmp = kernel_row
         kernel_row = shifted_kernel_row
         shifted_kernel_row = tmp

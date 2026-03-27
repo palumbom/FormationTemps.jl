@@ -86,20 +86,6 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, σ_v:
     return ys_out
 end
 
-function compute_padded_kernel2D!(kernel, xs, λc, σ_fac, Nλ, pad_left, σ_floor)
-    # get thread indices
-    i = (blockIdx().y-1) * blockDim().y + threadIdx().y
-    j = (blockIdx().x-1) * blockDim().x + threadIdx().x
-
-    # loop over wavelength and atmosphere layer
-    if i <= size(kernel,1) && j <= Nλ
-        xj = xs[j]
-        σi = max(xj * σ_fac[i], σ_floor)
-        @inbounds kernel[i, j + pad_left] = exp(-((xj - λc[i]) / σi)^2.0)
-    end
-    return nothing
-end
-
 function pad_signal!(signal, ys, Nλ, pad_left, pad_right)
     row = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     col = (blockIdx().y - 1) * blockDim().y + threadIdx().y
@@ -124,23 +110,6 @@ function extract_valid!(out, src, pad_left, Nλ)
     col = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     if row <= size(out, 1) && col <= Nλ
         @inbounds out[row, col] = src[row, col + pad_left - 1]
-    end
-    return nothing
-end
-
-# roll each row by integer r[row] so zero-lag aligns with padded center (without removing μ_v)
-function roll_rows_2d!(dst, src, r, L)
-    row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
-    col = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-    if row <= size(src,1) && col <= L
-        rr = r[row]
-        jj = col - rr
-        if jj < 1
-            jj += L
-        elseif jj > L
-            jj -= L
-        end
-        @inbounds dst[row, col] = src[row, jj]
     end
     return nothing
 end

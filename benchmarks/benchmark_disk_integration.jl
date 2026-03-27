@@ -300,12 +300,12 @@ println("─"^40)
 result_warmup = calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=16,
                                     use_gpu=use_gpu, ne_warn_thresh=Inf)
 
-# CPU end-to-end
-t_cpu_e2e = @elapsed begin
-    result_cpu = calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
-                                     use_gpu=false, ne_warn_thresh=Inf)
-end
-@printf("CPU  calc_formation_temp (Nϕ=%d): %.2f s\n", Nϕ, t_cpu_e2e)
+# # CPU end-to-end
+# t_cpu_e2e = @elapsed begin
+#     result_cpu = calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
+#                                      use_gpu=false, ne_warn_thresh=Inf)
+# end
+# @printf("CPU  calc_formation_temp (Nϕ=%d): %.2f s\n", Nϕ, t_cpu_e2e)
 
 # GPU end-to-end
 if use_gpu

@@ -50,7 +50,6 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU) where T
     log_τ_ref    = CUDA.zeros(T, Natm)
     ifactor_base = CUDA.zeros(T, Natm)
 
-    CUDA.synchronize()
     return GPUMemory(λs, αs, τs, cfunc, cfunc_dt, flux, tau_ds, tau_alphaC,
                      log_τ_ref, ifactor_base, false)
 end
@@ -77,7 +76,6 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU, α_ref_cpu::AA{T,1}) wh
     log_τ_ref    = CuArray{T}(log.(atm.τs))
     ifactor_base = CuArray{T}(atm.τs ./ α_ref_cpu)
 
-    CUDA.synchronize()
     return GPUMemory(λs, αs, τs, cfunc, cfunc_dt, flux, tau_ds, tau_alphaC,
                      log_τ_ref, ifactor_base, true)
 end

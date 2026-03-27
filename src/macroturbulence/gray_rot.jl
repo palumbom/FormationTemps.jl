@@ -157,7 +157,6 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                                                 cmem.xs_gpu, λ0,
                                                                 vsini, u1,
                                                                 cmem.Nλ, cmem.pad_left)
-    CUDA.synchronize()
 
     # normalize the kernel
     normval = CUDA.sum(kernel_row)
@@ -169,7 +168,6 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
-        CUDA.synchronize()
         tmp = kernel_row
         kernel_row = shifted_kernel_row
         shifted_kernel_row = tmp

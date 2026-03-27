@@ -186,7 +186,6 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                                               cmem.xs_gpu, λ0,
                                                               ζ_rt, μ, cmem.Nλ,
                                                               cmem.pad_left)
-    CUDA.synchronize()
 
     # normalize the kernel
     normval = CUDA.sum(kernel_row)
@@ -198,7 +197,6 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
-        CUDA.synchronize()
         tmp = kernel_row
         kernel_row = shifted_kernel_row
         shifted_kernel_row = tmp
@@ -221,10 +219,12 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # inverse fourier transform
     mul!(cmem.conv_gpu, cmem.plan_bwd, cmem.conv_ft_gpu)
 
-    # slice valid region
-    out = cmem.conv_gpu[:, cmem.pad_left : cmem.pad_left + cmem.Nλ - 1]
-    CUDA.synchronize()
-    return out
+    # extract valid region into pre-allocated output buffer
+    ts2 = (32, 32)
+    bs2 = (cld(cmem.Natm, ts2[1]), cld(cmem.Nλ, ts2[2]))
+    @cuda threads=ts2 blocks=bs2 extract_valid!(cmem.out_gpu, cmem.conv_gpu,
+                                                 cmem.pad_left, cmem.Nλ)
+    return cmem.out_gpu
 end
 
 """
@@ -258,7 +258,6 @@ function precompute_rt_macro_kernel_ft(cmem::ConvolutionMemory, xs::AA{T,1},
                                                               cmem.xs_gpu, λ0,
                                                               ζ_rt, μ, cmem.Nλ,
                                                               cmem.pad_left)
-    CUDA.synchronize()
 
     # normalize
     normval = CUDA.sum(kernel_row)
@@ -270,7 +269,6 @@ function precompute_rt_macro_kernel_ft(cmem::ConvolutionMemory, xs::AA{T,1},
     r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
-        CUDA.synchronize()
         tmp = kernel_row
         kernel_row = shifted_kernel_row
         shifted_kernel_row = tmp

@@ -1,5 +1,4 @@
 E_2(τ) = Korg.RadiativeTransfer.exponential_integral_2(τ)
-# E_2(τ) = exponential_integral_2_gpu(τ)
 
 """
     calc_intensity_quantities(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)

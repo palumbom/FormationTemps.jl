@@ -45,10 +45,8 @@ mutable struct ConvolutionMemory{T<:AF}
 
     # working buffers
     signal_gpu::CA{T,2}
-    kernel_gpu::CA{T,2}
     padded_kernel_gpu::CA{T,2}
     shift_kernel_gpu::CA{T,2}
-    norm_buffer::CA{T,1}
 
     # Fourier-domain buffers
     kernel_ft_gpu::CuMatrix{Complex{T}}
@@ -131,12 +129,10 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     σ_v_cpu = zeros(Natm)
     μ_v_cpu = zeros(Natm)
 
-    # allocate for padded kernels
+    # allocate for padded signal and kernel work buffers
     signal_gpu = CUDA.zeros(T, Natm, L)
-    kernel_gpu = CUDA.zeros(T, Natm, L)
     padded_kernel_gpu = CUDA.zeros(T, Natm, L)
     shift_kernel_gpu = CUDA.zeros(T, Natm, L)
-    norm_buffer = CUDA.zeros(T, Natm)
 
     # Fourier buffers
     nfreq = fld(L, 2) + 1
@@ -162,8 +158,8 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                              doppler_scale, doppler_ready, signal_cached,
                              xs_gpu, ys_gpu, λc_gpu, σ_fac_gpu, λc_vec,
                              σ_fac_vec, σ_v_cpu, μ_v_cpu, signal_gpu,
-                             kernel_gpu, padded_kernel_gpu, shift_kernel_gpu,
-                             norm_buffer, kernel_ft_gpu, signal_ft_gpu,
+                             padded_kernel_gpu, shift_kernel_gpu,
+                             kernel_ft_gpu, signal_ft_gpu,
                              conv_ft_gpu, conv_gpu, plan_fwd, plan_bwd,
                              kr_1d, kernel_row_ft_1d, plan_fwd_1d, out_gpu)
 end

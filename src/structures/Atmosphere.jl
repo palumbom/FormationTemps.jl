@@ -222,7 +222,7 @@ function _resample_log_tau(atm_korg; n_layers::Int=-1)
         suffix = n_layers_eff == n_in ? "" : " → $n_layers_eff layers"
         @warn "_resample_log_tau: non-uniform log-τ spacing (max/min step = " *
               "$(round(step_ratio, digits=2))×, $n_in layers$suffix). " *
-              "Resampling atmosphere to uniform d log-τ grid."
+              "Resampling atmosphere to uniform d log-τ grid." maxlog=1
     end
 
     log_τ_new = collect(range(first(log_τ), last(log_τ), length=n_layers_eff))

@@ -127,6 +127,8 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
         τs_int_cont = zeros(T, Natm, Nλ)
         cfunc_int = zeros(T, Natm - 1, Nλ)
         cfunc_int_cont = zeros(T, Natm - 1, Nλ)
+        cfunc_dt_int = zeros(T, Natm - 1, Nλ)
+        cfunc_dt_int_cont = zeros(T, Natm - 1, Nλ)
 
         @showprogress for i in eachindex(μs_cpu)
             μ_tile = μs_cpu[i]
@@ -135,13 +137,13 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
             αs_broad_i = convolve_wavelength_axis(λs_korg, αs, μ_v_rot, σ_v)
             _calc_tau_cpu!(μ_tile, αs_broad_i, τs_int)
             calc_intensity_cfunc_cpu!(cfunc_int, Ts, λs_korg, τs_int)
-            cfunc_dt_int = cfunc_int .* diff(τs_int, dims=1)
+            @views cfunc_dt_int .= cfunc_int .* (τs_int[2:end, :] .- τs_int[1:end-1, :])
             cfunc_int_i_mac = convolve_rt_macro(λs_korg, cfunc_dt_int, star.ζ, μ_tile)
 
             αs_cont_broad_i = convolve_wavelength_axis(λs_korg, αs_cont, μ_v_rot, σ_v)
             _calc_tau_cpu!(μ_tile, αs_cont_broad_i, τs_int_cont)
             calc_intensity_cfunc_cpu!(cfunc_int_cont, Ts, λs_korg, τs_int_cont)
-            cfunc_dt_int_cont = cfunc_int_cont .* diff(τs_int_cont, dims=1)
+            @views cfunc_dt_int_cont .= cfunc_int_cont .* (τs_int_cont[2:end, :] .- τs_int_cont[1:end-1, :])
             cfunc_int_cont_i_mac = convolve_rt_macro(λs_korg, cfunc_dt_int_cont, star.ζ, μ_tile)
 
             flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
@@ -225,7 +227,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         @assert !isnan(u1)
         @assert !isnan(u2)
         cfunc_dt_flux = copy(convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2))
-        cfunc_dt_flux_cont = convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
+        cfunc_dt_flux_cont = copy(convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2))
     else # numerical disk integration
         if any(map(!isnan, (u1, u2)))
             @warn "Prescribed limb darkening coefficients are not used in integration method!"
