@@ -25,4 +25,4 @@ At low spectral resolving power, convolutions can be used to approximate the eff
 
 By default, ```calc_formation_temp``` will use an NVIDIA GPU to accelerate the computation of spectra, if one is present and configured. The [CUDA.jl documentation](https://cuda.juliagpu.org/stable/) provides installation instructions, though it is fortunately fairly autonomous. Pass `use_gpu=false` to force the CPU path.
 
-For details on what gets accelerated, memory layout, benchmarks, and CPU/GPU numerical differences, see the [GPU Acceleration](@ref) guide.
+For details on what gets accelerated, memory layout, benchmarks, and CPU/GPU numerical differences, see the [GPU Acceleration](gpu.md) guide.
