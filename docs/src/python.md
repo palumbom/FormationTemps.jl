@@ -57,7 +57,8 @@ This pulls the latest compatible version of FormationTemps.jl from the
 
 !!! warning
     `PYTHON_JULIAPKG_EXE` is required on macOS with juliaup (see Troubleshooting).
-    `JULIA_NUM_THREADS=1` prevents GC crashes in the PythonCall bridge.
+    `JULIA_NUM_THREADS=1` prevents GC crashes in the PythonCall bridge — **CPU
+    multithreading is not available** when calling from Python.
     The local clone setup script (`deps/setup.py`) handles both automatically.
 
 ## Basic Usage
@@ -121,9 +122,12 @@ Markdown.parse("```python\n" * code * "\n```")
     ```bash
     export JULIA_NUM_THREADS=1
     ```
-    This disables Julia's thread parallelism but avoids the GC contention. If you
-    need multi-threaded Julia, consider running the computation in pure Julia and
-    loading the results in Python.
+    This disables Julia's CPU multithreading (the disk integration tile loop will
+    run single-threaded) but avoids the GC contention. **GPU acceleration is
+    unaffected** — pass `use_gpu=True` to benefit from GPU parallelism even with
+    `JULIA_NUM_THREADS=1`. If you need CPU multithreading, run the computation in
+    pure Julia and load the results in Python. See
+    [Parallelization](parallelization.md) for details.
 
 ## Tips
 
@@ -132,7 +136,9 @@ Markdown.parse("```python\n" * code * "\n```")
     Subsequent calls in the same session are fast. Precompilation happens once
     per environment.
 
-!!! tip "GPU support"
+!!! tip "GPU support (recommended for Python)"
+    Since CPU multithreading is unavailable from Python (see above), GPU
+    acceleration is the primary way to speed up disk integration from Python.
     Pass `use_gpu=True` to `calc_formation_temp` if you have a CUDA-capable GPU
     configured with Julia's [CUDA.jl](https://cuda.juliagpu.org/stable/).
 

@@ -76,9 +76,9 @@ More detail on the above example can be found in the [Basic Tutorial](https://mi
 
 FormationTemps.jl can be called from Python. The instructions can be found in the [Python Tutorial](https://michaelpalumbo.me/FormationTemps.jl/stable/python/).
 
-## GPU Acceleration
+## Parallelization
 
-FormationTemps.jl can offload the convolution operations and disk-integration pipeline to an NVIDIA GPU via [CUDA.jl](https://cuda.juliagpu.org/stable/), providing significant speedups for typical problem sizes. GPU acceleration is enabled automatically when a compatible device is detected; pass `use_gpu=false` to force the CPU path. See the [GPU documentation](https://michaelpalumbo.me/FormationTemps.jl/stable/gpu/) for setup details, memory layout, and benchmarks.
+FormationTemps.jl parallelizes the disk integration pipeline in two ways. The CPU path distributes stellar surface tiles across Julia threads (`julia -t auto`); the GPU path offloads the full per-tile radiative transfer to an NVIDIA GPU via [CUDA.jl](https://cuda.juliagpu.org/stable/). GPU acceleration is enabled automatically when a compatible device is detected; pass `use_gpu=false` to force the CPU path. See the [Parallelization documentation](https://michaelpalumbo.me/FormationTemps.jl/stable/parallelization/) for setup, benchmarks, and limitations.
 
 ## Caveats
 

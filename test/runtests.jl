@@ -25,6 +25,8 @@ include("test_definitions.jl")
 include("test_atmosphere.jl")
 include("test_kernels.jl")
 include("test_convenience.jl")
+include("test_threading.jl")
+include("test_inplace_convolutions.jl")
 
 # GPU-required tests
 if use_gpu
@@ -37,6 +39,7 @@ if use_gpu
     include("compare_cpu_gpu_broadening.jl")
     include("disk_int_error.jl")
     include("test_buffer_safety.jl")
+    include("compare_cpu_gpu_disk_integration.jl")
     include("test_convolution_alignment.jl")
     include("test_hirano_gpu_kernel.jl")
 end

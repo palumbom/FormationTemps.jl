@@ -20,6 +20,11 @@ coefficients `u1` and `u2`. Otherwise, performs numerical disk integration using
 bins. Set `use_gpu=true` to use the GPU implementation when available.
 Set `showprogress=false` to suppress the progress bar during disk integration.
 
+The CPU disk integration path (`use_gpu=false, convolve=false`) is parallelized across tiles
+using `Threads.@threads`. Launch Julia with multiple threads (e.g. `julia -t auto`) to benefit.
+FFTW internal threading is disabled during the tile loop to avoid contention. See
+[Parallelization](parallelization.md) for details.
+
 # Examples
 ```julia-repl
 star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0)
@@ -120,45 +125,43 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
             z_rot_cpu .= 0.0
         end
 
-        flux_integration = zeros(T, Nλ)
-        flux_cont_integration = zeros(T, Nλ)
-        cfunc_flux_integration = zeros(T, Natm - 1, Nλ)
-        cfunc_flux_cont_integration = zeros(T, Natm - 1, Nλ)
+        # disable FFTW internal threading; we parallelize at the tile level
+        prev_fftw_threads = FFTW.get_num_threads()
+        FFTW.set_num_threads(1)
 
-        μ_v_rot = zeros(T, Natm)
-        τs_int = zeros(T, Natm, Nλ)
-        τs_int_cont = zeros(T, Natm, Nλ)
-        cfunc_int = zeros(T, Natm - 1, Nλ)
-        cfunc_int_cont = zeros(T, Natm - 1, Nλ)
-        cfunc_dt_int = zeros(T, Natm - 1, Nλ)
-        cfunc_dt_int_cont = zeros(T, Natm - 1, Nλ)
+        # allocate per-thread workspaces with pre-computed FFT plans
+        workspaces = [CPUTileWorkspace(T, Natm, Nλ) for _ in 1:Threads.maxthreadid()]
 
-        prog = Progress(length(μs_cpu); enabled=showprogress)
-        for i in eachindex(μs_cpu)
+        # threaded tile loop (in-place convolutions eliminate per-tile allocations)
+        Threads.@threads :static for i in eachindex(μs_cpu)
+            ws = workspaces[Threads.threadid()]
             μ_tile = μs_cpu[i]
-            μ_v_rot .= z_rot_cpu[i] .* c_ms
+            dA_i = dA_cpu[i]
+            ws.μ_v_buf .= z_rot_cpu[i] * c_ms
 
-            αs_broad_i = convolve_wavelength_axis(λs_korg, αs, μ_v_rot, σ_v)
-            _calc_tau_cpu!(μ_tile, αs_broad_i, τs_int)
-            calc_intensity_cfunc_cpu!(cfunc_int, Ts, λs_korg, τs_int)
-            @views cfunc_dt_int .= cfunc_int .* (τs_int[2:end, :] .- τs_int[1:end-1, :])
-            cfunc_int_i_mac = convolve_rt_macro(λs_korg, cfunc_dt_int, star.ζ, μ_tile)
+            # total absorption → macro_out → accumulate immediately
+            _convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, ws.μ_v_buf, σ_v, ws)
+            _calc_tau_cpu!(μ_tile, ws.αs_broad, ws.τs_int)
+            calc_intensity_cfunc_cpu!(ws.cfunc_int, Ts, λs_korg, ws.τs_int)
+            @views ws.cfunc_dt_int .= ws.cfunc_int .* (ws.τs_int[2:end, :] .- ws.τs_int[1:end-1, :])
+            _convolve_macro_inplace!(ws.macro_out, λs_korg, ws.cfunc_dt_int, star.ζ, μ_tile, ws)
+            ws.cfunc_flux_acc .+= ws.macro_out .* dA_i
 
-            αs_cont_broad_i = convolve_wavelength_axis(λs_korg, αs_cont, μ_v_rot, σ_v)
-            _calc_tau_cpu!(μ_tile, αs_cont_broad_i, τs_int_cont)
-            calc_intensity_cfunc_cpu!(cfunc_int_cont, Ts, λs_korg, τs_int_cont)
-            @views cfunc_dt_int_cont .= cfunc_int_cont .* (τs_int_cont[2:end, :] .- τs_int_cont[1:end-1, :])
-            cfunc_int_cont_i_mac = convolve_rt_macro(λs_korg, cfunc_dt_int_cont, star.ζ, μ_tile)
-
-            flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
-            flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
-            cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
-            cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
-            next!(prog)
+            # continuum absorption → macro_out → accumulate immediately
+            _convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, ws.μ_v_buf, σ_v, ws)
+            _calc_tau_cpu!(μ_tile, ws.αs_cont_broad, ws.τs_int_cont)
+            calc_intensity_cfunc_cpu!(ws.cfunc_int_cont, Ts, λs_korg, ws.τs_int_cont)
+            @views ws.cfunc_dt_int_cont .= ws.cfunc_int_cont .* (ws.τs_int_cont[2:end, :] .- ws.τs_int_cont[1:end-1, :])
+            _convolve_macro_inplace!(ws.macro_out, λs_korg, ws.cfunc_dt_int_cont, star.ζ, μ_tile, ws)
+            ws.cfunc_flux_cont_acc .+= ws.macro_out .* dA_i
         end
 
-        cfunc_dt_flux = cfunc_flux_integration
-        cfunc_dt_flux_cont = cfunc_flux_cont_integration
+        # reduce per-thread accumulators
+        cfunc_dt_flux = sum(ws.cfunc_flux_acc for ws in workspaces)
+        cfunc_dt_flux_cont = sum(ws.cfunc_flux_cont_acc for ws in workspaces)
+
+        # restore FFTW threading state
+        FFTW.set_num_threads(prev_fftw_threads)
     end
 
     cum_cfunc_flux = cumsum(cfunc_dt_flux, dims=1)
@@ -258,6 +261,10 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         cfunc_flux_cont_integration = CUDA.zeros(T, Natm - 1, length(λs_korg))
         flux_tile_buf = CUDA.zeros(T, 1, length(λs_korg))
 
+        # pre-allocate buffers to avoid per-tile CuArray allocations
+        cfunc_total_buf = CUDA.zeros(T, Natm - 1, length(λs_korg))
+        cfunc_cont_buf = CUDA.zeros(T, Natm - 1, length(λs_korg))
+
         # prime the signal FFT cache: first tile computes + caches, rest reuse
         cmem.signal_cached = false
         cmem_cont.signal_cached = false
@@ -285,26 +292,28 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             # total absorption: inplace variant returns shared buffer — consume before continuum call
             cfunc_intensity = calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
             if iszero(star.ζ)
-                cfunc_int_i_mac = copy(cfunc_intensity.cfunc_dt)
+                copyto!(cfunc_total_buf, cfunc_intensity.cfunc_dt)
             else
-                cfunc_int_i_mac = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity.cfunc_dt,
-                                                               macro_kernel_cache[μ_tile])
+                cfunc_mac_result = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity.cfunc_dt,
+                                                                macro_kernel_cache[μ_tile])
+                copyto!(cfunc_total_buf, cfunc_mac_result)
             end
-            sum!(flux_tile_buf, cfunc_int_i_mac)
+            sum!(flux_tile_buf, cfunc_total_buf)
             flux_integration .+= vec(flux_tile_buf) .* dA_cpu[i]
-            cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
+            cfunc_flux_integration .+= cfunc_total_buf .* dA_cpu[i]
 
             # continuum absorption: same inplace pattern, safe because total is fully accumulated above
             cfunc_intensity_cont = calc_intensity_quantities_inplace!(αs_cont, atm_gpu, gpu_mem, cmem_cont, μ_tile, μ_v_rot, σ_v)
             if iszero(star.ζ)
-                cfunc_int_cont_i_mac = copy(cfunc_intensity_cont.cfunc_dt)
+                copyto!(cfunc_cont_buf, cfunc_intensity_cont.cfunc_dt)
             else
-                cfunc_int_cont_i_mac = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity_cont.cfunc_dt,
-                                                                    macro_kernel_cache[μ_tile])
+                cfunc_mac_result_cont = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity_cont.cfunc_dt,
+                                                                     macro_kernel_cache[μ_tile])
+                copyto!(cfunc_cont_buf, cfunc_mac_result_cont)
             end
-            sum!(flux_tile_buf, cfunc_int_cont_i_mac)
+            sum!(flux_tile_buf, cfunc_cont_buf)
             flux_cont_integration .+= vec(flux_tile_buf) .* dA_cpu[i]
-            cfunc_flux_cont_integration .+= cfunc_int_cont_i_mac .* dA_cpu[i]
+            cfunc_flux_cont_integration .+= cfunc_cont_buf .* dA_cpu[i]
             next!(prog)
         end
 

@@ -93,6 +93,47 @@ function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T, μ::T) where T<:A
     return ys_out
 end
 
+"""
+    _convolve_macro_inplace!(out, xs, ys, ζ_rt, μ, ws)
+
+In-place radial-tangential macroturbulence convolution using pre-allocated
+[`CPUTileWorkspace`](@ref) buffers. When `ζ_rt == 0`, copies `ys` into `out`
+directly. Otherwise computes the RT kernel once and applies it to all rows.
+"""
+function _convolve_macro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
+                                  ζ_rt::T, μ::T,
+                                  ws::CPUTileWorkspace) where T<:AF
+    Nrows = size(ys, 1)
+    if iszero(ζ_rt)
+        copyto!(out, ys)
+        return nothing
+    end
+
+    i0 = length(xs) ÷ 2 + 1
+    λ0 = xs[i0]
+
+    ϵ = T(1e-6)
+    cosθ = max(μ, ϵ)
+    s2 = one(T) - μ * μ
+    sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ * ϵ))
+    sqrt_π = sqrt(T(π))
+
+    @inbounds for j in eachindex(ws.kernel_real)
+        v = c_ms * (xs[j] - λ0) / λ0
+        t1 = T(0.5) * exp(-(v / (ζ_rt * cosθ))^2) / (sqrt_π * ζ_rt * cosθ)
+        t2 = T(0.5) * exp(-(v / (ζ_rt * sinθ))^2) / (sqrt_π * ζ_rt * sinθ)
+        ws.kernel_real[j] = t1 + t2
+    end
+    s = sum(ws.kernel_real)
+    ws.kernel_real ./= s
+
+    _ifftshift_complex!(ws.kernel_ft, ws.kernel_real)
+    ws.fft_plan * ws.kernel_ft
+
+    _apply_fft_kernel!(out, ys, ws.kernel_ft, ws, Nrows)
+    return nothing
+end
+
 function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, μ, Nλ, pad_left)
     # get thread index
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x

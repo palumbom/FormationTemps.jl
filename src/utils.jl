@@ -138,3 +138,36 @@ function roll_1d!(dst, src, r, L)
     end
     return nothing
 end
+
+# ── in-place FFT convolution helpers (used by threaded CPU tile loop) ────────
+
+"""
+    _ifftshift_complex!(dst, src)
+
+Copy real vector `src` into complex vector `dst` with ifftshift permutation
+(zero allocation).
+"""
+function _ifftshift_complex!(dst::Vector{Complex{T}}, src::Vector{T}) where T
+    N = length(src)
+    mid = N ÷ 2
+    @inbounds for j in 1:N
+        k = ((j - 1 + mid) % N) + 1
+        dst[j] = complex(src[k])
+    end
+    return nothing
+end
+
+"""
+    _allequal(v)
+
+Check whether all elements of `v` are equal (short-circuits on first mismatch).
+"""
+function _allequal(v::AbstractVector)
+    length(v) <= 1 && return true
+    @inbounds val = v[1]
+    @inbounds for i in 2:length(v)
+        v[i] != val && return false
+    end
+    return true
+end
+

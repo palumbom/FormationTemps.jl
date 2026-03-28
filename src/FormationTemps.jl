@@ -39,6 +39,7 @@ include("structures/GPUMemory.jl")
 include("structures/ContFunc.jl")
 include("structures/StellarProps.jl")
 include("structures/FormTempResult.jl")
+include("structures/CPUTileWorkspace.jl")
 
 # numerical stuff
 include("interpolations.jl")

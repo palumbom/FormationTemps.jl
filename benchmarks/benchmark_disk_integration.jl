@@ -80,6 +80,7 @@ println("  Nλ       = ", Nλ)
 println("  Nϕ       = ", Nϕ)
 println("  N tiles  = ", n_tiles)
 println("  Unique μ = ", unique_μs)
+println("  Threads  = ", Threads.nthreads())
 println()
 
 # ── CPU benchmark ──────────────────────────────────────────────────────────────
@@ -279,10 +280,10 @@ end
 
 # end-to-end timings
 open(joinpath(datadir, "e2e_timings.csv"), "w") do io
-    println(io, "backend,time_s,Nphi,Natm,Nlambda,Ntiles")
-    @printf(io, "cpu,%.4f,%d,%d,%d,%d\n", t_cpu_e2e, Nϕ, Natm, Nλ, n_tiles)
+    println(io, "backend,time_s,Nphi,Natm,Nlambda,Ntiles,threads")
+    @printf(io, "cpu,%.4f,%d,%d,%d,%d,%d\n", t_cpu_e2e, Nϕ, Natm, Nλ, n_tiles, Threads.nthreads())
     if use_gpu
-        @printf(io, "gpu,%.4f,%d,%d,%d,%d\n", t_gpu_e2e, Nϕ, Natm, Nλ, n_tiles)
+        @printf(io, "gpu,%.4f,%d,%d,%d,%d,1\n", t_gpu_e2e, Nϕ, Natm, Nλ, n_tiles)
     end
 end
 

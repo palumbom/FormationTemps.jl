@@ -86,6 +86,75 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, σ_v:
     return ys_out
 end
 
+"""
+    _convolve_micro_inplace!(out, xs, ys, μ_v, σ_v, ws)
+
+In-place microturbulent broadening using pre-allocated [`CPUTileWorkspace`](@ref)
+buffers. When `μ_v` and `σ_v` are uniform across rows (the common case during
+disk integration), the kernel FFT is computed once and reused for all atmosphere
+layers. Otherwise falls back to per-row kernel computation. The vector interface
+for `σ_v` is preserved so that per-layer microturbulence can be supported in the
+future.
+"""
+function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
+                                  μ_v::AA{T,1}, σ_v::AA{T,1},
+                                  ws::CPUTileWorkspace) where T<:AF
+    Nλ = length(xs)
+    Natm = size(ys, 1)
+    Δλ = median(diff(xs))
+    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+    i0 = Nλ ÷ 2 + 1
+    λ0 = xs[i0]
+
+    # check if kernel is uniform across rows (common case in disk integration)
+    uniform = _allequal(μ_v) && _allequal(σ_v)
+
+    if uniform
+        # compute kernel once
+        σ_val = σ_v[1]
+        μ_val = μ_v[1]
+        λc = (μ_val / c_ms) * λ0 + λ0
+        @inbounds for j in eachindex(ws.kernel_real)
+            σx = max(xs[j] * (σ_val / c_ms), σ_floor)
+            ws.kernel_real[j] = exp(-((xs[j] - λc) / σx)^2.0)
+        end
+        s = sum(ws.kernel_real)
+        ws.kernel_real ./= s
+
+        _ifftshift_complex!(ws.kernel_ft, ws.kernel_real)
+        ws.fft_plan * ws.kernel_ft
+
+        _apply_fft_kernel!(out, ys, ws.kernel_ft, ws, Natm)
+    else
+        # per-row kernel (when σ_v or μ_v vary across atmosphere layers)
+        for t in 1:Natm
+            σ_val = σ_v[t]
+            μ_val = μ_v[t]
+            λc = (μ_val / c_ms) * λ0 + λ0
+            @inbounds for j in eachindex(ws.kernel_real)
+                σx = max(xs[j] * (σ_val / c_ms), σ_floor)
+                ws.kernel_real[j] = exp(-((xs[j] - λc) / σx)^2.0)
+            end
+            s = sum(ws.kernel_real)
+            ws.kernel_real ./= s
+
+            _ifftshift_complex!(ws.kernel_ft, ws.kernel_real)
+            ws.fft_plan * ws.kernel_ft
+
+            @inbounds for j in eachindex(ws.row_buf)
+                ws.row_buf[j] = complex(ys[t, j])
+            end
+            ws.fft_plan * ws.row_buf
+            ws.row_buf .*= ws.kernel_ft
+            ws.ifft_plan * ws.row_buf
+            @inbounds for j in axes(out, 2)
+                out[t, j] = real(ws.row_buf[j])
+            end
+        end
+    end
+    return nothing
+end
+
 function pad_signal!(signal, ys, Nλ, pad_left, pad_right)
     row = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     col = (blockIdx().y - 1) * blockDim().y + threadIdx().y

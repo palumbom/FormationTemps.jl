@@ -39,6 +39,8 @@ end
 
 readme_text = replace_admonition(readme_text, "WARNING", "!!! warning")
 readme_text = replace_admonition(readme_text, "CAUTION", "!!! danger")
+# avoid duplicate "Parallelization" slug (parallelization.md already owns it)
+readme_text = replace(readme_text, "## Parallelization" => "## Parallelization Overview")
 write(target_path, readme_text)
 
 # set pages
@@ -46,7 +48,7 @@ Introduction = "Quickstart" => "index.md"
 License = "License" => "license.md"
 Index = "Full Index" => "longlist.md"
 Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
-                      "GPU Acceleration" => "gpu.md",
+                      "Parallelization" => "parallelization.md",
                       "Contribution Functions" => "cont_func.md",
                       "Broadening & Convolutions" => "convolutions.md",
                       "Python Tutorial" => "python.md"]
