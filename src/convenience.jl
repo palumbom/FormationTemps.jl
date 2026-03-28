@@ -206,11 +206,13 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                    α_ref_out=α_ref, vmic_ref_cms=star.ξ * 100.0, kwargs...)
 
     # allocate on device; use anchored τ when tau_ref is available, Bezier otherwise
-    gpu_mem = if isempty(atm_gpu.τs)
-        GPUMemory(λs_korg, atm_gpu)
+    _make_gpu_mem = if isempty(atm_gpu.τs)
+        () -> GPUMemory(λs_korg, atm_gpu)
     else
-        GPUMemory(λs_korg, atm_gpu, α_ref)
+        () -> GPUMemory(λs_korg, atm_gpu, α_ref)
     end
+    gpu_mem = _make_gpu_mem()
+    gpu_mem_cont = _make_gpu_mem()  # separate buffers for dual-stream continuum
 
     # allocate memory for convolutions
     Nλ = length(λs_korg)
@@ -218,7 +220,8 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     Npad = 512
     cmem = ConvolutionMemory(Nλ, Natm, Npad)
     cmem_cont = ConvolutionMemory(Nλ, Natm, Npad)
-    cmem_mac = ConvolutionMemory(Nλ, Natm - 1, Npad)
+    cmem_mac = MacroConvolutionMemory(Nλ, Natm - 1, Npad)
+    cmem_mac_cont = MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
     # set microturbulent broadening
     σ_v = CUDA.zeros(T, length(atm_gpu.zs)) .+ star.ξ
@@ -227,8 +230,8 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
     cfunc_dt_flux = cfunc_flux_struct.cfunc_dt
 
-    # same for the continuum (use cmem_cont so each caches its own signal FFT)
-    cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem_cont, σ_v)
+    # same for the continuum (separate gpu_mem_cont + cmem_cont for independent buffers)
+    cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem_cont, cmem_cont, σ_v)
     cfunc_dt_flux_cont = cfunc_flux_struct_cont.cfunc_dt
 
     # convolution or numerical integration
@@ -255,15 +258,15 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         # allocate on gpu
         λs_gpu = CuArray{T}(collect(λs_korg))
         μ_v_rot = CUDA.zeros(T, Natm)
+        μ_v_rot_cont = CUDA.zeros(T, Natm)  # separate buffer for continuum stream
         flux_integration = CUDA.zeros(T, length(λs_korg))
         flux_cont_integration = CUDA.zeros(T, length(λs_korg))
         cfunc_flux_integration = CUDA.zeros(T, Natm - 1, length(λs_korg))
         cfunc_flux_cont_integration = CUDA.zeros(T, Natm - 1, length(λs_korg))
-        flux_tile_buf = CUDA.zeros(T, 1, length(λs_korg))
 
-        # pre-allocate buffers to avoid per-tile CuArray allocations
-        cfunc_total_buf = CUDA.zeros(T, Natm - 1, length(λs_korg))
-        cfunc_cont_buf = CUDA.zeros(T, Natm - 1, length(λs_korg))
+        # create two CUDA streams for overlapping total/continuum work
+        stream_total = CuStream()
+        stream_cont = CuStream()
 
         # prime the signal FFT cache: first tile computes + caches, rest reuse
         cmem.signal_cached = false
@@ -271,7 +274,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         μ_v_rot .= z_rot_cpu[1] .* c_ms
         calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μs_cpu[1], μ_v_rot, σ_v)
         cmem.signal_cached = true
-        calc_intensity_quantities_inplace!(αs_cont, atm_gpu, gpu_mem, cmem_cont, μs_cpu[1], μ_v_rot, σ_v)
+        calc_intensity_quantities_inplace!(αs_cont, atm_gpu, gpu_mem_cont, cmem_cont, μs_cpu[1], μ_v_rot, σ_v)
         cmem_cont.signal_cached = true
 
         # precompute macro kernel FFTs for unique μ values
@@ -283,37 +286,41 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             end
         end
 
-        # loop over cells on grid
+        # loop over cells on grid (total and continuum on separate streams)
         prog = Progress(length(μs_cpu); enabled=showprogress)
         for i in eachindex(μs_cpu)
             μ_tile = μs_cpu[i]
-            μ_v_rot .= z_rot_cpu[i] .* c_ms
+            z_rot_v = z_rot_cpu[i] * c_ms
 
-            # total absorption: inplace variant returns shared buffer — consume before continuum call
-            cfunc_intensity = calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
-            if iszero(star.ζ)
-                copyto!(cfunc_total_buf, cfunc_intensity.cfunc_dt)
-            else
-                cfunc_mac_result = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity.cfunc_dt,
-                                                                macro_kernel_cache[μ_tile])
-                copyto!(cfunc_total_buf, cfunc_mac_result)
+            # total absorption on stream_total
+            CUDA.stream!(stream_total) do
+                μ_v_rot .= z_rot_v
+                cfunc_intensity = calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
+                if iszero(star.ζ)
+                    src_total = cfunc_intensity.cfunc_dt
+                else
+                    src_total = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity.cfunc_dt,
+                                                             macro_kernel_cache[μ_tile])
+                end
+                accumulate_tile!(flux_integration, cfunc_flux_integration, src_total, dA_cpu[i])
             end
-            sum!(flux_tile_buf, cfunc_total_buf)
-            flux_integration .+= vec(flux_tile_buf) .* dA_cpu[i]
-            cfunc_flux_integration .+= cfunc_total_buf .* dA_cpu[i]
 
-            # continuum absorption: same inplace pattern, safe because total is fully accumulated above
-            cfunc_intensity_cont = calc_intensity_quantities_inplace!(αs_cont, atm_gpu, gpu_mem, cmem_cont, μ_tile, μ_v_rot, σ_v)
-            if iszero(star.ζ)
-                copyto!(cfunc_cont_buf, cfunc_intensity_cont.cfunc_dt)
-            else
-                cfunc_mac_result_cont = convolve_rt_macro_gpu_cached(cmem_mac, cfunc_intensity_cont.cfunc_dt,
-                                                                     macro_kernel_cache[μ_tile])
-                copyto!(cfunc_cont_buf, cfunc_mac_result_cont)
+            # continuum absorption on stream_cont (overlaps with total)
+            CUDA.stream!(stream_cont) do
+                μ_v_rot_cont .= z_rot_v
+                cfunc_intensity_cont = calc_intensity_quantities_inplace!(αs_cont, atm_gpu, gpu_mem_cont, cmem_cont, μ_tile, μ_v_rot_cont, σ_v)
+                if iszero(star.ζ)
+                    src_cont = cfunc_intensity_cont.cfunc_dt
+                else
+                    src_cont = convolve_rt_macro_gpu_cached(cmem_mac_cont, cfunc_intensity_cont.cfunc_dt,
+                                                            macro_kernel_cache[μ_tile])
+                end
+                accumulate_tile!(flux_cont_integration, cfunc_flux_cont_integration, src_cont, dA_cpu[i])
             end
-            sum!(flux_tile_buf, cfunc_cont_buf)
-            flux_cont_integration .+= vec(flux_tile_buf) .* dA_cpu[i]
-            cfunc_flux_cont_integration .+= cfunc_cont_buf .* dA_cpu[i]
+
+            # sync both streams before next tile (buffers reused)
+            CUDA.synchronize(stream_total)
+            CUDA.synchronize(stream_cont)
             next!(prog)
         end
 

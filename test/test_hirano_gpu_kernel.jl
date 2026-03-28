@@ -102,7 +102,7 @@ end
 
     Npad = 240
     cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-    cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+    cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
     gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
     σ_v_mic = CUDA.zeros(Float64, Natm) .+ 1200.0

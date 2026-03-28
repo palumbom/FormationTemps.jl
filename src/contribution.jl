@@ -14,7 +14,7 @@ Arguments:
 - `αs_init::AbstractMatrix{<:Real}`: Absorption coefficients, shape `(Natm, Nλ)`.
 - `atm::AtmosphereGPU`: GPU atmosphere.
 - `mem::GPUMemory`: Pre-allocated GPU working arrays.
-- `cmem::ConvolutionMemory`: Pre-allocated GPU convolution memory.
+- `cmem::AbstractConvolutionMemory`: Pre-allocated GPU convolution memory.
 - `μ_tile::Real`: Cosine of the local zenith angle for this disk tile.
 - `μ_v::CuArray{<:Real,1}`: Per-layer line-of-sight velocity from rotation (m/s).
 - `σ_v::CuArray{<:Real,1}`: Per-layer microturbulent broadening width (m/s).
@@ -27,7 +27,7 @@ Returns:
 See also: [`calc_flux_quantities`](@ref)
 """
 function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                                   cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
+                                   cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
                                    σ_v::CA{T,1}) where T<:AF
     # get contribution function
     calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
@@ -42,10 +42,23 @@ end
 # Returned cfunc and cfunc_dt alias mem.cfunc / mem.cfunc_dt — caller must consume
 # (copy or pass to a function that copies internally) before the next call that shares mem.
 function calc_intensity_quantities_inplace!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                                            cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
+                                            cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
                                             σ_v::CA{T,1}) where T<:AF
-    calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
-    compute_cfunc_dt!(mem.cfunc_dt, mem.cfunc, mem.τs)
+    # micro-broadening + tau (same as calc_intensity_cfunc!)
+    cmem.signal_cached || copyto!(mem.αs, αs_init)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
+    if mem.use_anchored
+        calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
+    else
+        calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs,
+                                mem.tau_ds, mem.tau_alphaC)
+    end
+
+    # fused cfunc + cfunc_dt in a single kernel launch
+    ts = (32, 16)
+    bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
+    @cuda threads=ts blocks=bs calc_intensity_cfunc_dt!(μ_tile, atm.Ts_gpu, mem.λs, mem.τs,
+                                                        mem.cfunc, mem.cfunc_dt)
     return IntensityContFunc(mem.cfunc, mem.cfunc_dt)
 end
 
@@ -63,7 +76,7 @@ Arguments:
 - `αs_init::AbstractMatrix{<:Real}`: Absorption coefficients, shape `(Natm, Nλ)`.
 - `atm::AtmosphereGPU`: GPU atmosphere.
 - `mem::GPUMemory`: Pre-allocated GPU working arrays.
-- `cmem::ConvolutionMemory`: Pre-allocated GPU convolution memory.
+- `cmem::AbstractConvolutionMemory`: Pre-allocated GPU convolution memory.
 - `σ_v::CuArray{<:Real,1}`: Per-layer microturbulent broadening width (m/s).
 
 Returns:
@@ -74,19 +87,31 @@ Returns:
 See also: [`calc_intensity_quantities`](@ref)
 """
 function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                              cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
-    # get contribution function
-    calc_flux_cfunc!(αs_init, atm, mem, cmem, σ_v)
+                              cmem::AbstractConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+    # micro-broadening + tau
+    cmem.signal_cached || copyto!(mem.αs, αs_init)
+    fill!(atm.μ_v, zero(T))
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, atm.μ_v, σ_v)
+    if mem.use_anchored
+        calc_tau_anchored_gpu!(one(T), mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
+    else
+        calc_tau_bezier_cached!(one(T), atm.zs_gpu, αs_gpu, mem.τs,
+                                mem.tau_ds, mem.tau_alphaC)
+    end
 
-    # multiply by differential for cum. cont. & flux
-    # copy the result since this is called once (not in hot loop) and the caller
-    # may hold the result across a second call that overwrites mem.cfunc_dt
-    compute_cfunc_dt!(mem.cfunc_dt, mem.cfunc, mem.τs)
+    # fused cfunc + cfunc_dt in a single kernel launch
+    ts = (32, 16)
+    bs = (cld(cmem.Nλ, ts[1]), cld(cmem.Natm, ts[2]))
+    @cuda threads=ts blocks=bs calc_flux_cfunc_dt!(atm.Ts_gpu, mem.λs, mem.τs,
+                                                    mem.cfunc, mem.cfunc_dt)
+
+    # copy since this is called once (not in hot loop) and the caller
+    # may hold the result across a second call that overwrites buffers
     return FluxContFunc(copy(mem.cfunc), copy(mem.cfunc_dt))
 end
 
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                               cmem::ConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
+                               cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
                                σ_v::CA{T,1}) where T<:AF
     # copy opacities (skip when signal FFT is cached — αs unchanged)
     cmem.signal_cached || copyto!(mem.αs, αs_init)
@@ -110,7 +135,7 @@ end
 # Like calc_intensity_cfunc! but writes intensity directly (fused cfunc+reduce).
 # Does NOT populate mem.cfunc — use calc_intensity_cfunc! if you need the cfunc matrix.
 function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::AtmosphereGPU{T},
-                                mem::GPUMemory, cmem::ConvolutionMemory, μ_tile::T,
+                                mem::GPUMemory, cmem::AbstractConvolutionMemory, μ_tile::T,
                                 μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
@@ -125,7 +150,7 @@ function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::Atmosphere
 end
 
 function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                         cmem::ConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+                         cmem::AbstractConvolutionMemory, σ_v::CA{T,1}) where T<:AF
     # move alphas to reusable buffers and zero mean velocity in-place
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     fill!(atm.μ_v, zero(T))
@@ -200,7 +225,7 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             T1 = Ts[k] + dT * frac1
             T2 = Ts[k] + dT * frac2
 
-            # evaluate integrand f = B(T,λ) * exp(-τ) 
+            # evaluate integrand f = B(T,λ) * exp(-τ)
             B1 = bb_num / (exp(bb_x / T1) - one(T))
             B2 = bb_num / (exp(bb_x / T2) - one(T))
             f1 = B1 * exp(-τp1)
@@ -208,6 +233,51 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
 
             # store contribution
             @inbounds cfunc[k, j] = T(0.5) * (f1 + f2) * T(1e-8)
+        end
+    end
+    return nothing
+end
+
+# fused cfunc + cfunc_dt: computes both in a single pass, avoiding a second kernel launch
+# and an extra global memory round-trip for the cfunc matrix
+function calc_intensity_cfunc_dt!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM,
+                                  cfunc::CDM, cfunc_dt::CDM) where T<:AF
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    sdx = gridDim().x * blockDim().x
+    idy = threadIdx().y + blockDim().y * (blockIdx().y - 1)
+    sdy = gridDim().y * blockDim().y
+
+    one_over_sqrt3 = one(T) / sqrt(T(3))
+    frac1 = T(0.5) * (one(T) - one_over_sqrt3)
+    frac2 = T(0.5) * (one(T) + one_over_sqrt3)
+
+    for j in idx:sdx:length(λs)
+        λ_cm = λs[j] * T(1e-8)
+        λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
+        bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
+        bb_x = T(h) * T(c) / (λ_cm * T(kB))
+
+        for k in idy:sdy:length(Ts)-1
+            τ0 = τs[k, j]
+            τ1 = τs[k+1, j]
+            Δτ = τ1 - τ0
+            τ_mid = T(0.5) * (τ0 + τ1)
+
+            τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
+            τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
+
+            dT = Ts[k+1] - Ts[k]
+            T1 = Ts[k] + dT * frac1
+            T2 = Ts[k] + dT * frac2
+
+            B1 = bb_num / (exp(bb_x / T1) - one(T))
+            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            f1 = B1 * exp(-τp1)
+            f2 = B2 * exp(-τp2)
+
+            cf = T(0.5) * (f1 + f2) * T(1e-8)
+            @inbounds cfunc[k, j] = cf
+            @inbounds cfunc_dt[k, j] = cf * Δτ
         end
     end
     return nothing
@@ -367,7 +437,7 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             T1 = Ts[k] + dT * frac1
             T2 = Ts[k] + dT * frac2
 
-            # evaluate integrand f = B(T,λ) * E_2(τ)  
+            # evaluate integrand f = B(T,λ) * E_2(τ)
             B1 = bb_num / (exp(bb_x / T1) - one(T))
             B2 = bb_num / (exp(bb_x / T2) - one(T))
             f1 = B1 * E_2(τp1)
@@ -375,6 +445,50 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
 
             # store contribution
             @inbounds cfunc[k, j] = T(0.5) * (f1 + f2) * T(1e-8)
+        end
+    end
+    return nothing
+end
+
+# fused flux cfunc + cfunc_dt
+function calc_flux_cfunc_dt!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM, cfunc_dt::CDM)
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    sdx = gridDim().x * blockDim().x
+    idy = threadIdx().y + blockDim().y * (blockIdx().y - 1)
+    sdy = gridDim().y * blockDim().y
+
+    T = eltype(Ts)
+    one_over_sqrt3 = one(T) / sqrt(T(3))
+    frac1 = T(0.5) * (one(T) - one_over_sqrt3)
+    frac2 = T(0.5) * (one(T) + one_over_sqrt3)
+
+    for j in idx:sdx:length(λs)
+        λ_cm = λs[j] * T(1e-8)
+        λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
+        bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
+        bb_x = T(h) * T(c) / (λ_cm * T(kB))
+
+        for k in idy:sdy:length(Ts)-1
+            τ0 = τs[k, j]
+            τ1 = τs[k+1, j]
+            Δτ = τ1 - τ0
+            τ_mid = T(0.5) * (τ0 + τ1)
+
+            τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
+            τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
+
+            dT = Ts[k+1] - Ts[k]
+            T1 = Ts[k] + dT * frac1
+            T2 = Ts[k] + dT * frac2
+
+            B1 = bb_num / (exp(bb_x / T1) - one(T))
+            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            f1 = B1 * E_2(τp1)
+            f2 = B2 * E_2(τp2)
+
+            cf = T(0.5) * (f1 + f2) * T(1e-8)
+            @inbounds cfunc[k, j] = cf
+            @inbounds cfunc_dt[k, j] = cf * Δτ
         end
     end
     return nothing

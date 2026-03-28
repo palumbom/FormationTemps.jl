@@ -167,7 +167,7 @@ with the anisotropic radial-tangential macroturbulence kernel using padded FFT
 convolution on the device.
 
 Arguments:
-- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `cmem::MacroConvolutionMemory`: Pre-allocated GPU working memory.
 - `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
 - `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
@@ -182,7 +182,7 @@ Notes:
 
 See also: [`convolve_rt_macro`](@ref), [`rt_macro_kernel`](@ref)
 """
-function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
+function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                ys::AA{T,2}, ζ_rt::T, μ::T) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
     if iszero(ζ_rt)
@@ -205,8 +205,8 @@ function convolve_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
 
     # compute the padded kernel once (reuse pre-allocated row buffers)
-    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
-    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
+    kernel_row = cmem.padded_kernel_gpu
+    shifted_kernel_row = cmem.shift_kernel_gpu
     fill!(kernel_row, zero(T))
 
     ts1 = (256,)
@@ -262,7 +262,7 @@ end
 Precompute the Fourier transform of the RT macroturbulence kernel for a given `μ`.
 Returns a `CuVector{Complex{T}}` that can be passed to [`convolve_rt_macro_gpu_cached`](@ref).
 """
-function precompute_rt_macro_kernel_ft(cmem::ConvolutionMemory, xs::AA{T,1},
+function precompute_rt_macro_kernel_ft(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                        ζ_rt::T, μ::T) where {T<:AF}
     # populate wavelength grid on device and get center wavelength without scalar indexing
     if xs isa CA
@@ -277,8 +277,8 @@ function precompute_rt_macro_kernel_ft(cmem::ConvolutionMemory, xs::AA{T,1},
     λ0 = xs_h[i0]
 
     # compute padded kernel
-    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
-    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
+    kernel_row = cmem.padded_kernel_gpu
+    shifted_kernel_row = cmem.shift_kernel_gpu
     fill!(kernel_row, zero(T))
 
     ts1 = (256,)
@@ -318,7 +318,7 @@ end
 Convolve `ys` with a precomputed RT macroturbulence kernel FFT. Skips kernel
 computation entirely. Use with [`precompute_rt_macro_kernel_ft`](@ref).
 """
-function convolve_rt_macro_gpu_cached(cmem::ConvolutionMemory,
+function convolve_rt_macro_gpu_cached(cmem::MacroConvolutionMemory,
                                       ys::CA{T,2},
                                       kernel_ft::CuVector{Complex{T}}) where {T<:AF}
     # copy signal to device buffer

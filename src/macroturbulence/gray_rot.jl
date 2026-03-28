@@ -105,7 +105,7 @@ GPU implementation of [`convolve_gray_rotation`](@ref). Convolves each row of `y
 with the Gray (2008) rotation kernel using padded FFT convolution on the device.
 
 Arguments:
-- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `cmem::MacroConvolutionMemory`: Pre-allocated GPU working memory.
 - `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
 - `vsini::Real`: Projected rotational velocity (m/s).
@@ -120,7 +120,7 @@ Notes:
 
 See also: [`convolve_gray_rotation`](@ref), [`gray_rot_kernel`](@ref)
 """
-function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
+function convolve_gray_rotation_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                     ys::AA{T,2}, vsini::T, u1::T) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
     if iszero(vsini)
@@ -143,8 +143,8 @@ function convolve_gray_rotation_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
 
     # kernel rows as 1-D views to avoid dim ambiguity
-    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
-    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
+    kernel_row = cmem.padded_kernel_gpu
+    shifted_kernel_row = cmem.shift_kernel_gpu
     fill!(kernel_row, zero(T))
 
     ts1 = (256,)

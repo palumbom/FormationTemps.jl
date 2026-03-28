@@ -47,7 +47,7 @@ rotmacro_error = zeros(length(steps))
     Natm = size(αs, 1)
     Npad = 240
     cmem     = FT.ConvolutionMemory(Nλ, Natm, Npad)
-    cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+    cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
     gpu_mem  = FT.GPUMemory(λs_korg, atm_gpu)
 
     μ_v_rot = CUDA.zeros(Float64, length(zs))

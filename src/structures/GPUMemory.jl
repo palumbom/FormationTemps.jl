@@ -6,7 +6,7 @@ Pre-allocated GPU working arrays for the radiative transfer computation.
 Fields:
 - `λs`: Wavelength grid on the device (Å), length `Nλ`.
 - `αs`, `τs`: Absorption coefficient and optical depth arrays, shape `(Natm, Nλ)`.
-- `cfunc`, `flux`: Contribution function and flux arrays, shape `(Natm-1, Nλ)`.
+- `cfunc`, `cfunc_dt`: Contribution function and dτ-weighted variant, shape `(Natm-1, Nλ)`.
 - `tau_ds`, `tau_alphaC`: Bézier τ-integration geometry work arrays; used when `use_anchored=false`.
 - `log_τ_ref`, `ifactor_base`: Anchored τ-integration constants (`log τ_ref` and `τ_ref / α_ref`);
   populated and used when `use_anchored=true`.
@@ -20,7 +20,6 @@ struct GPUMemory{T<:AF}
     τs::CA{T,2}
     cfunc::CA{T,2}
     cfunc_dt::CA{T,2}      # cfunc .* Δτ, pre-allocated to avoid per-tile allocation
-    flux::CA{T,2}
     # Bezier work arrays (used when use_anchored=false)
     tau_ds::CA{T,1}
     tau_alphaC::CA{T,1}
@@ -44,13 +43,12 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU) where T
     τs         = CUDA.zeros(T, Natm, Nλ)
     cfunc      = CUDA.zeros(T, Natm - 1, Nλ)
     cfunc_dt   = CUDA.zeros(T, Natm - 1, Nλ)
-    flux       = CUDA.zeros(T, Natm - 1, Nλ)
     tau_ds     = CUDA.zeros(T, Natm - 1)
     tau_alphaC = CUDA.zeros(T, Natm)
     log_τ_ref    = CUDA.zeros(T, Natm)
     ifactor_base = CUDA.zeros(T, Natm)
 
-    return GPUMemory(λs, αs, τs, cfunc, cfunc_dt, flux, tau_ds, tau_alphaC,
+    return GPUMemory(λs, αs, τs, cfunc, cfunc_dt, tau_ds, tau_alphaC,
                      log_τ_ref, ifactor_base, false)
 end
 
@@ -70,12 +68,11 @@ function GPUMemory(λs_cpu::AA{T,1}, atm::AtmosphereGPU, α_ref_cpu::AA{T,1}) wh
     τs           = CUDA.zeros(T, Natm, Nλ)
     cfunc        = CUDA.zeros(T, Natm - 1, Nλ)
     cfunc_dt     = CUDA.zeros(T, Natm - 1, Nλ)
-    flux         = CUDA.zeros(T, Natm - 1, Nλ)
     tau_ds       = CUDA.zeros(T, Natm - 1)
     tau_alphaC   = CUDA.zeros(T, Natm)
     log_τ_ref    = CuArray{T}(log.(atm.τs))
     ifactor_base = CuArray{T}(atm.τs ./ α_ref_cpu)
 
-    return GPUMemory(λs, αs, τs, cfunc, cfunc_dt, flux, tau_ds, tau_alphaC,
+    return GPUMemory(λs, αs, τs, cfunc, cfunc_dt, tau_ds, tau_alphaC,
                      log_τ_ref, ifactor_base, true)
 end

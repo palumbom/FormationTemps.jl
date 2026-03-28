@@ -3,11 +3,7 @@ using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
 using Printf, Statistics
-using PythonPlot; plt = PythonPlot.pyplot
-plt.style.use(joinpath(FT.moddir, "fig.mplstyle"))
-
-# output directories
-plotdir = joinpath(FT.moddir, "docs", "src", "static")
+# output directory
 datadir = joinpath(FT.moddir, "benchmarks", "data")
 !isdir(datadir) && mkpath(datadir)
 
@@ -42,7 +38,7 @@ FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, 
 
 # GPU memory
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
 # velocities
@@ -167,56 +163,6 @@ open(joinpath(datadir, "convolution_timings.csv"), "w") do io
     end
 end
 println("\nData written to: ", joinpath(datadir, "convolution_timings.csv"))
-
-# ── plot ──────────────────────────────────────────────────────────────────────
-plt.ioff()
-
-fig, ax = plt.subplots(figsize=(8, 4))
-x = 0:length(kernels)-1
-w = 0.35
-bars_cpu = ax.bar(x .- w / 2, cpu_median_ms, w,
-                  yerr=cpu_iqr_ms, capsize=3, ecolor="#333333",
-                  label="{\\rm CPU}", color="#56B4E9", edgecolor="none")
-bars_gpu = ax.bar(x .+ w / 2, gpu_median_ms, w,
-                  yerr=gpu_iqr_ms, capsize=3, ecolor="#333333",
-                  label="{\\rm GPU}", color="#D55E00", edgecolor="none")
-
-# speedup annotations with square brackets
-for i in eachindex(kernels)
-    speedup = cpu_median_ms[i] / gpu_median_ms[i]
-    y_top = max(cpu_median_ms[i] + cpu_iqr_ms[i], gpu_median_ms[i] + gpu_iqr_ms[i])
-    xi = i - 1
-
-    # square bracket encompassing both bars
-    x_left = xi - w
-    x_right = xi + w
-    y_brace = y_top * 1.15
-    tick_h = y_brace * 0.08
-    ax.plot([x_left, x_left, x_right, x_right],
-            [y_brace - tick_h, y_brace, y_brace, y_brace - tick_h],
-            color="#333333", lw=1.0, clip_on=false)
-
-    # speedup text above bracket
-    ax.text(xi, y_brace * 1.08, @sprintf("\$\\sim %.0f\\times\$", speedup),
-            ha="center", va="bottom", fontsize=9, fontweight="bold", color="#333333")
-end
-
-ax.set_xticks(collect(x))
-ax.set_xticklabels(["{\\rm " * k * "}" for k in kernels], rotation=20, ha="right")
-ax.set_ylabel("{\\rm Time [ms]}")
-ax.set_title(@sprintf("{\\rm Convolution kernel timings (}\$N_\\lambda\${\\rm =%d, %d trials)}", Nλ, N_REPEAT))
-ax.legend()
-ax.set_yscale("log")
-ax.grid(false)
-
-# add vertical buffer so annotations aren't clipped by the top spine
-y_max_data = maximum(cpu_median_ms .+ cpu_iqr_ms)
-ax.set_ylim(nothing, y_max_data * 5.0)
-
-fig.tight_layout()
-fig.savefig(joinpath(plotdir, "benchmark_convolutions.png"), dpi=150, bbox_inches="tight")
-plt.close(fig)
-println("Saved: benchmark_convolutions.png")
 
 println()
 println("DONE")

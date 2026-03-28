@@ -96,9 +96,11 @@ This means GPU memory usage is determined at allocation time and remains constan
 
 The [`benchmarks/`](https://github.com/palumbom/FormationTemps.jl/tree/main/benchmarks) directory contains scripts that measure performance:
 
-- [`benchmark_disk_integration.jl`](https://github.com/palumbom/FormationTemps.jl/blob/main/benchmarks/benchmark_disk_integration.jl) — per-tile step breakdown and end-to-end `calc_formation_temp` timing (CPU vs. GPU).
+- [`benchmark_disk_integration.jl`](https://github.com/palumbom/FormationTemps.jl/blob/main/benchmarks/benchmark_disk_integration.jl) — per-tile step breakdown (CPU vs. GPU).
 - [`benchmark_convolutions.jl`](https://github.com/palumbom/FormationTemps.jl/blob/main/benchmarks/benchmark_convolutions.jl) — individual convolution kernel comparisons.
 - [`benchmark_threading.jl`](https://github.com/palumbom/FormationTemps.jl/blob/main/benchmarks/benchmark_threading.jl) — CPU thread-scaling for disk integration (spawns separate Julia processes for each thread count).
+- [`benchmark_nlambda.jl`](https://github.com/palumbom/FormationTemps.jl/blob/main/benchmarks/benchmark_nlambda.jl) — end-to-end wall-clock time vs. `Nλ` for CPU (single-threaded, multi-threaded) and GPU.
+- [`plot_benchmarks.jl`](https://github.com/palumbom/FormationTemps.jl/blob/main/benchmarks/plot_benchmarks.jl) — generates all benchmark figures from CSV data files.
 
 The benchmark results shown below were obtained on the following hardware:
 
@@ -107,19 +109,33 @@ The benchmark results shown below were obtained on the following hardware:
 | CPU | Intel Xeon w5-3435X (16 cores / 32 threads, 3.1 GHz) |
 | GPU | NVIDIA RTX 6000 Ada Generation (48 GB VRAM) |
 
-All scripts write CSV files to [`benchmarks/data/`](https://github.com/palumbom/FormationTemps.jl/tree/main/benchmarks/data) and PNG figures to [`docs/src/static/`](https://github.com/palumbom/FormationTemps.jl/tree/main/docs/src/static). Run them with:
+All benchmark scripts write CSV files to [`benchmarks/data/`](https://github.com/palumbom/FormationTemps.jl/tree/main/benchmarks/data). To run benchmarks and generate plots:
 
 ```bash
 julia --project=. benchmarks/benchmark_disk_integration.jl
 julia --project=. benchmarks/benchmark_convolutions.jl
 julia --project=. benchmarks/benchmark_threading.jl [max_threads]
+julia --project=. benchmarks/benchmark_nlambda.jl [max_threads]
+julia --project=. benchmarks/plot_benchmarks.jl
 ```
 
-### Per-tile breakdown and end-to-end performance
+### Per-tile breakdown
 
-The left panel shows the normalized per-tile timing breakdown. On the GPU, the microturbulence, optical depth, and contribution function steps are fused into a single kernel dispatch (dashed dividers show estimated sub-step boundaries). The right panel shows wall-clock time for a complete `calc_formation_temp` call with disk integration, including atmosphere interpolation, absorption coefficient computation, and all tile iterations.
+The figure below shows the normalized per-tile timing breakdown for CPU and GPU. On the GPU, the microturbulence, optical depth, and contribution function steps are fused into a single kernel dispatch.
 
-![per-tile and end-to-end benchmark](static/benchmark_pertile.png)
+![per-tile benchmark](static/benchmark_pertile.png)
+
+### CPU thread scaling
+
+Speedup and wall-clock time as a function of the number of Julia threads for a full `calc_formation_temp` call with disk integration (`Nϕ = 128`).
+
+![threading benchmark](static/benchmark_threading.png)
+
+### Performance vs. wavelength grid size
+
+End-to-end wall-clock time as a function of `Nλ` (varied by changing `Δλ` over a fixed wavelength window) for single-threaded CPU, multi-threaded CPU, and GPU.
+
+![Nlambda benchmark](static/benchmark_nlambda.png)
 
 ### Convolution kernels
 

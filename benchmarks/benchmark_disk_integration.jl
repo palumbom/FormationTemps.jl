@@ -3,12 +3,9 @@ using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
 using Printf, Statistics
-using PythonPlot; plt = PythonPlot.pyplot
-plt.style.use(joinpath(FT.moddir, "fig.mplstyle"))
 using DelimitedFiles
 
-# output directories
-plotdir = joinpath(FT.moddir, "docs", "src", "static")
+# output directory
 datadir = joinpath(FT.moddir, "benchmarks", "data")
 !isdir(datadir) && mkpath(datadir)
 
@@ -145,7 +142,7 @@ function benchmark_gpu_pertile(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
         FT.GPUMemory(λs_korg, atm_gpu, α_ref_gpu)
     end
     cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-    cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+    cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
     σ_v = CUDA.zeros(T, Natm) .+ star.ξ
     μ_v_rot = CUDA.zeros(T, Natm)
@@ -288,189 +285,6 @@ open(joinpath(datadir, "e2e_timings.csv"), "w") do io
 end
 
 println("Data written to: ", datadir)
-
-# ── plots ─────────────────────────────────────────────────────────────────────
-plt.ioff()
-
-# combined per-tile breakdown + end-to-end absolute timing
-if use_gpu && gpu_times !== nothing
-    let
-    fig, (ax_brk, ax_abs) = plt.subplots(1, 2, figsize=(10, 3.2),
-                                          gridspec_kw=Dict("width_ratios" => [3, 1], "wspace" => 0.35))
-
-    # ── left panel: normalized per-tile breakdown ─────────────────────────────
-    step_labels = ["{\\rm Microturbulence}", "{\\rm Optical depth}",
-                   "{\\rm Contribution fn.}", "{\\rm Macroturbulence}"]
-    cpu_ms = [cpu_times.micro, cpu_times.tau, cpu_times.cfunc, cpu_times.macro_conv] .* 1000.0
-    gpu_ms_fused = [gpu_times.intensity, gpu_times.macro_conv] .* 1000.0
-    cpu_total = sum(cpu_ms)
-    gpu_total = sum(gpu_ms_fused)
-    cpu_pct = cpu_ms ./ cpu_total .* 100.0
-    gpu_pct = gpu_ms_fused ./ gpu_total .* 100.0
-
-    colors_cpu = ["#91D1F7", "#56B4E9", "#2A96D1", "#1A7AB5"]
-    colors_gpu = ["#F5A66E", "#D55E00"]
-    pe = PythonPlot.pyimport("matplotlib.patheffects")
-    bar_stroke = [pe.withStroke(linewidth=0.0, foreground="black")]
-
-    bar_h = 0.55
-    y_cpu = 0
-    y_gpu = 1
-    pct_min_inside = 12  # minimum segment width (%) to place label inside
-
-    # grid behind everything
-    ax_brk.set_axisbelow(true)
-    ax_brk.grid(true, axis="x", color="#DDDDDD", lw=0.5)
-    ax_brk.grid(false, axis="y")
-
-    # CPU row
-    cpu_left = 0.0
-    for (i, (label, pct, ms)) in enumerate(zip(step_labels, cpu_pct, cpu_ms))
-        ax_brk.barh(y_cpu, pct, left=cpu_left, color=colors_cpu[i],
-                    edgecolor="white", height=bar_h, zorder=3)
-        if pct > pct_min_inside
-            ax_brk.text(cpu_left + pct / 2, y_cpu, @sprintf("{\\rm %.1f ms}", ms),
-                        ha="center", va="center", fontsize=8, color="white",
-                        fontweight="bold", zorder=4, path_effects=bar_stroke)
-        end
-        cpu_left += pct
-    end
-
-    # GPU row: fused intensity + macro
-    ax_brk.barh(y_gpu, gpu_pct[1], left=0.0, color=colors_gpu[1],
-                edgecolor="white", height=bar_h, zorder=3)
-    if gpu_pct[1] > pct_min_inside
-        ax_brk.text(gpu_pct[1] / 2, y_gpu, @sprintf("{\\rm %.2f ms}", gpu_ms_fused[1]),
-                    ha="center", va="center", fontsize=8, color="white",
-                    fontweight="bold", zorder=4, path_effects=bar_stroke)
-    end
-
-    ax_brk.barh(y_gpu, gpu_pct[2], left=gpu_pct[1], color=colors_gpu[2],
-                edgecolor="white", height=bar_h, zorder=3)
-    if gpu_pct[2] > pct_min_inside
-        ax_brk.text(gpu_pct[1] + gpu_pct[2] / 2, y_gpu,
-                    @sprintf("{\\rm %.2f ms}", gpu_ms_fused[2]),
-                    ha="center", va="center", fontsize=8, color="white",
-                    fontweight="bold", zorder=4, path_effects=bar_stroke)
-    end
-
-    # total time underneath y-axis tick labels (in axes coords for x, data coords for y)
-    ax_brk.text(-0.01, y_cpu - 0.22, @sprintf("{\\rm (%.1f ms)}", cpu_total),
-                ha="right", va="top", fontsize=7, color="#555555",
-                transform=ax_brk.get_yaxis_transform(), zorder=4)
-    ax_brk.text(-0.01, y_gpu - 0.22, @sprintf("{\\rm (%.2f ms)}", gpu_total),
-                ha="right", va="top", fontsize=7, color="#555555",
-                transform=ax_brk.get_yaxis_transform(), zorder=4)
-
-    # segment name annotations below each bar
-    ann_color = "#000000"
-    ann_fs = 7
-    ann_props = Dict("arrowstyle" => "-", "color" => "#999999", "lw" => 0.5)
-
-    # CPU annotations (below CPU bar) — stagger vertically if x-centers are close
-    min_sep = 15.0  # minimum horizontal separation (in %) before staggering
-    base_dy = 0.3
-    stagger_dy = 0.35
-
-    cpu_x_mids = Float64[]
-    cpu_cum = 0.0
-    for pct in cpu_pct
-        push!(cpu_x_mids, cpu_cum + pct / 2)
-        cpu_cum += pct
-    end
-
-    cpu_dy = fill(base_dy, length(cpu_pct))
-    for i in 2:length(cpu_pct)
-        if abs(cpu_x_mids[i] - cpu_x_mids[i-1]) < min_sep
-            cpu_dy[i] = cpu_dy[i-1] + stagger_dy
-        end
-    end
-
-    ann_bbox = Dict("boxstyle" => "square,pad=0.05", "facecolor" => "white",
-                     "edgecolor" => "none", "alpha" => 1.0)
-
-    # draw all leader lines first (low zorder)
-    for (i, x_mid) in enumerate(cpu_x_mids)
-        ax_brk.plot([x_mid, x_mid],
-                    [y_cpu - bar_h / 2, y_cpu - bar_h / 2 - cpu_dy[i]],
-                    color="#999999", lw=0.5, zorder=4)
-    end
-    # then draw text on top (high zorder, white bbox covers lines)
-    for (i, (label, x_mid)) in enumerate(zip(step_labels, cpu_x_mids))
-        ax_brk.text(x_mid, y_cpu - bar_h / 2 - cpu_dy[i],
-                    label, ha="center", va="top", fontsize=ann_fs,
-                    color=ann_color, bbox=ann_bbox, zorder=5)
-    end
-
-    # GPU annotations (above GPU bar)
-    gpu_labels = ["{\\rm Intensity (fused)}", "{\\rm Macroturbulence}"]
-    gpu_lefts = [0.0, gpu_pct[1]]
-    gpu_x_mids = [left + pct / 2 for (left, pct) in zip(gpu_lefts, gpu_pct)]
-
-    gpu_dy = fill(base_dy, length(gpu_pct))
-    for i in 2:length(gpu_pct)
-        if abs(gpu_x_mids[i] - gpu_x_mids[i-1]) < min_sep
-            gpu_dy[i] = gpu_dy[i-1] + stagger_dy
-        end
-    end
-
-    for (i, x_mid) in enumerate(gpu_x_mids)
-        ax_brk.plot([x_mid, x_mid],
-                    [y_gpu + bar_h / 2, y_gpu + bar_h / 2 + gpu_dy[i]],
-                    color="#999999", lw=0.5, zorder=4)
-    end
-    for (i, (label, x_mid)) in enumerate(zip(gpu_labels, gpu_x_mids))
-        ax_brk.text(x_mid, y_gpu + bar_h / 2 + gpu_dy[i],
-                    label, ha="center", va="bottom", fontsize=ann_fs,
-                    color=ann_color, bbox=ann_bbox, zorder=5)
-    end
-
-    # expand y-limits to fit staggered annotations
-    max_below = maximum(cpu_dy) + 0.5
-    max_above = maximum(gpu_dy) + 0.7
-    ax_brk.set_yticks([y_cpu, y_gpu])
-    ax_brk.set_yticklabels(["{\\rm CPU}", "{\\rm GPU}"])
-    ax_brk.set_xlim(-0.2, 100.3)
-    ax_brk.set_ylim(y_cpu - max_below, y_gpu + max_above)
-    ax_brk.set_xlabel("{\\rm Fraction of per-tile time [\\%]}")
-
-    # ── right panel: absolute end-to-end times (log scale) ──────────────────
-    speedup_e2e = t_cpu_e2e / t_gpu_e2e
-
-    ax_abs.set_axisbelow(true)
-    ax_abs.grid(true, axis="x", color="#DDDDDD", lw=0.5)
-    ax_abs.grid(false, axis="y")
-    ax_abs.set_xscale("log")
-
-    ax_abs.barh([y_gpu, y_cpu], [t_gpu_e2e, t_cpu_e2e],
-                color=["#D55E00", "#56B4E9"], edgecolor="white", height=bar_h, zorder=3)
-
-    # time labels to the right of each bar
-    for (y, t) in zip([y_cpu, y_gpu], [t_cpu_e2e, t_gpu_e2e])
-        ax_abs.text(t * 1.15, y, @sprintf("{\\rm %.1f s}", t),
-                    ha="left", va="center", fontsize=9, fontweight="bold",
-                    color="#333333", zorder=4)
-    end
-
-    ax_abs.set_yticks([y_cpu, y_gpu])
-    ax_abs.set_yticklabels(["{\\rm CPU}", "{\\rm GPU}"])
-    ax_abs.set_xlabel("{\\rm Wall-clock time [s]}")
-    ax_abs.set_title(@sprintf("{\\rm End-to-end (}\$%.0f\\times\$ {\\rm speedup)}", speedup_e2e))
-
-    # clean scalar tick labels instead of 10^n
-    ticker = PythonPlot.pyimport("matplotlib.ticker")
-    ax_abs.xaxis.set_major_formatter(ticker.ScalarFormatter())
-    ax_abs.xaxis.get_major_formatter().set_scientific(false)
-    ax_abs.set_xlim(t_gpu_e2e * 0.7 - 0.2, t_cpu_e2e * 4.75)
-    ax_abs.set_ylim(y_cpu - max_below, y_gpu + max_above)
-
-    ax_brk.set_title(@sprintf("{\\rm Per-tile breakdown (}\$N_\\lambda\${\\rm =%d, }\$N_{\\rm atm}\${\\rm =%d)}", Nλ, Natm))
-    fig.subplots_adjust(bottom=0.18, top=0.88)
-    fig.savefig(joinpath(plotdir, "benchmark_pertile.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    println("Saved: benchmark_pertile.png")
-    end # let
-end
 
 println()
 println("="^70)

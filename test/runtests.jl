@@ -42,4 +42,7 @@ if use_gpu
     include("compare_cpu_gpu_disk_integration.jl")
     include("test_convolution_alignment.jl")
     include("test_hirano_gpu_kernel.jl")
+    include("test_fused_kernels.jl")
+    include("test_dual_stream.jl")
+    include("test_convmem_types.jl")
 end

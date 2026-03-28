@@ -96,7 +96,7 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 μ_v_mac = CUDA.zeros(Float64, length(zs)-1)
 σ_v_mac = CUDA.zeros(Float64, length(zs)-1)
 
-cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # get cfunc for flux
 cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)

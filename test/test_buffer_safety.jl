@@ -37,7 +37,7 @@ FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, 
 Npad = 512
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 σ_v = CUDA.zeros(Float64, Natm) .+ ξ
 μ_v_zero = CUDA.zeros(Float64, Natm)
 

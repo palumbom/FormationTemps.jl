@@ -107,7 +107,7 @@ with the isotropic radial-tangential macroturbulence kernel using padded FFT
 convolution on the device.
 
 Arguments:
-- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `cmem::MacroConvolutionMemory`: Pre-allocated GPU working memory.
 - `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
 - `ζ_rt::Real`: Isotropic macroturbulence velocity scale (m/s).
@@ -122,7 +122,7 @@ Notes:
 
 See also: [`convolve_iso_rt_macro`](@ref), [`gray_iso_rt_macro_kernel`](@ref)
 """
-function convolve_iso_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
+function convolve_iso_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                    ys::AA{T,2}, ζ_rt::T) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
     if iszero(ζ_rt)
@@ -145,8 +145,8 @@ function convolve_iso_rt_macro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
                                            cmem.Nλ, cmem.pad_left, cmem.pad_right)
 
     # compute the padded kernel once
-    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
-    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
+    kernel_row = cmem.padded_kernel_gpu
+    shifted_kernel_row = cmem.shift_kernel_gpu
     fill!(kernel_row, zero(T))
 
     ts1 = (256,)

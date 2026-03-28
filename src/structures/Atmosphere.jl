@@ -85,7 +85,6 @@ Fields:
 - `nₑ`, `nd`: Electron and total number density grids on the CPU.
 - `reference_wavelength`: MARCS reference wavelength for `τ_ref` (cm; typically 5000 Å).
 - `zs_gpu`, `Ts_gpu`, `nd_gpu`: Height, temperature, and number density on the device.
-- `vx`, `vy`, `vz`: Per-layer velocity components on the device (m/s).
 - `σ_v`, `μ_v`: Per-layer microturbulent speed and mean line-of-sight velocity on the device (m/s).
 
 See also: [`AtmosphereGPU(atm_korg)`](@ref)
@@ -102,9 +101,6 @@ mutable struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
     zs_gpu::AA{T,1}
     Ts_gpu::AA{T,1}
     nd_gpu::CA{T,1}
-    vx::CA{T,1}
-    vy::CA{T,1}
-    vz::CA{T,1}
     σ_v::CA{T,1}
     μ_v::CA{T,1}
 end
@@ -121,20 +117,17 @@ does not supply `tau_ref` (e.g., some non-MARCS grids), resampling is skipped an
 `atm.τs` is set to an empty vector — the Bézier τ integrator is used automatically
 downstream in that case.
 """
-function AtmosphereGPU(atm_korg)
+function AtmosphereGPU(atm_korg; T::Type{<:AF}=Float64)
     f = _extract_korg_fields(atm_korg)
 
-    zs_gpu = CuArray{Float64}(f.zs)
-    Ts_gpu = CuArray{Float64}(f.Ts)
-    nd_gpu = CuArray{Float64}(f.nd)
-    vx     = CUDA.zeros(Float64, f.Natm)
-    vy     = CUDA.zeros(Float64, f.Natm)
-    vz     = CUDA.zeros(Float64, f.Natm)
-    σ_v    = CUDA.zeros(Float64, f.Natm)
-    μ_v    = CUDA.zeros(Float64, f.Natm)
+    zs_gpu = CuArray{T}(f.zs)
+    Ts_gpu = CuArray{T}(f.Ts)
+    nd_gpu = CuArray{T}(f.nd)
+    σ_v    = CUDA.zeros(T, f.Natm)
+    μ_v    = CUDA.zeros(T, f.Natm)
 
     return AtmosphereGPU(f.Natm, f.τs, f.zs, f.Ts, f.nₑ, f.nd, f.ref_wl,
-                         zs_gpu, Ts_gpu, nd_gpu, vx, vy, vz, σ_v, μ_v)
+                         zs_gpu, Ts_gpu, nd_gpu, σ_v, μ_v)
 end
 
 """

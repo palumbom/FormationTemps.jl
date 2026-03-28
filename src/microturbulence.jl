@@ -213,6 +213,23 @@ function build_doppler_filter!(filter, shift_pix, sigma_pix, invL, nfreq)
     return nothing
 end
 
+# fused: computes per-row Doppler params inline and builds the filter in one kernel launch
+function build_doppler_filter_direct!(filter, μ_v, σ_v, scale, s_max, invL, nfreq)
+    i    = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    f_idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= size(filter, 1) && f_idx <= nfreq
+        T = eltype(μ_v)
+        s = clamp(@inbounds(μ_v[i]) * scale, -s_max, s_max)
+        σ = @inbounds(σ_v[i]) * scale
+        f0 = T(f_idx - 1)
+        θ = -T(2π) * f0 * s * invL
+        gauss = exp(-(T(π) * σ * f0 * invL)^2)
+        sθ, cθ = sincos(θ)
+        @inbounds filter[i, f_idx] = complex(gauss * cθ, gauss * sθ)
+    end
+    return nothing
+end
+
 """
     convolve_wavelength_axis_gpu(cmem, xs, ys, μ_v, σ_v)
 
@@ -220,7 +237,7 @@ GPU implementation of [`convolve_wavelength_axis`](@ref). Applies a per-row Dopp
 shift and Gaussian broadening in the Fourier domain using an analytical filter.
 
 Arguments:
-- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `cmem::AbstractConvolutionMemory`: Pre-allocated GPU working memory.
 - `xs::AbstractVector{<:Real}` or `CuArray{<:Real,1}`: Wavelength grid (Å).
 - `ys::AbstractMatrix{<:Real}` or `CuArray{<:Real,2}`: Input matrix `(Natm, Nλ)`.
 - `μ_v::CuArray{<:Real,1}`: Per-row Doppler velocity shift (m/s).
@@ -238,7 +255,7 @@ Notes:
 
 See also: [`convolve_wavelength_axis`](@ref)
 """
-function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
+function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, μ_v::CA{T,1}, σ_v::CA{T,1}) where {T<:AF}
     # compute per-row shift (pixels) and Gaussian width (pixels)
     # s[i]     = μ_v[i] * λ0 / (c * Δλ)  — shift of row i in pixels
@@ -251,12 +268,6 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     s_max = T(cmem.pad_left - 1)
     invL = inv(T(cmem.L))
 
-    # precompute per-row Doppler parameters (reuse existing row buffers)
-    ts_params = 256
-    bs_params = cld(cmem.Natm, ts_params)
-    @cuda threads=ts_params blocks=bs_params precompute_doppler_params!(
-        cmem.λc_gpu, cmem.σ_fac_gpu, μ_v, σ_v, cmem.doppler_scale, s_max)
-
     # pad + FFT the signal (skip if signal_cached — αs unchanged since last call)
     if !cmem.signal_cached
         copyto!(cmem.ys_gpu, ys)
@@ -267,13 +278,14 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
         mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
     end
 
-    # build per-row Fourier filter analytically (no spatial kernel, no normalization)
+    # fused: compute per-row Doppler params + build Fourier filter in one kernel
     nfreq = size(cmem.kernel_ft_gpu, 2)
     ts2 = (32, 32)
     bs2 = (cld(nfreq, ts2[1]), cld(cmem.Natm, ts2[2]))
-    @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
-                                                       cmem.λc_gpu, cmem.σ_fac_gpu,
-                                                       invL, nfreq)
+    @cuda threads=ts2 blocks=bs2 build_doppler_filter_direct!(cmem.kernel_ft_gpu,
+                                                               μ_v, σ_v,
+                                                               cmem.doppler_scale, s_max,
+                                                               invL, nfreq)
 
     # convolution theorem + inverse FFT
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
@@ -284,7 +296,7 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
 end
 
 # device-native overload: accepts CuArray inputs and avoids GPU scalar indexing
-function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
+function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory,
                                       xs_d::CuArray{T,1},
                                       ys_d::CuArray{T,2},
                                       μ_v_d::CuArray{T,1},
@@ -303,12 +315,6 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
     s_max = T(cmem.pad_left - 1)
     invL = inv(T(cmem.L))
 
-    # precompute per-row Doppler parameters (reuse existing row buffers)
-    ts_params = 256
-    bs_params = cld(cmem.Natm, ts_params)
-    @cuda threads=ts_params blocks=bs_params precompute_doppler_params!(
-        cmem.λc_gpu, cmem.σ_fac_gpu, μ_v_d, σ_v_d, cmem.doppler_scale, s_max)
-
     # pad + FFT the signal (skip if signal_cached — αs unchanged since last call)
     if !cmem.signal_cached
         ts = (32, 32)
@@ -319,13 +325,14 @@ function convolve_wavelength_axis_gpu(cmem::ConvolutionMemory,
         mul!(cmem.signal_ft_gpu, cmem.plan_fwd, cmem.signal_gpu)
     end
 
-    # build per-row Fourier filter analytically (no spatial kernel, no normalization)
+    # fused: compute per-row Doppler params + build Fourier filter in one kernel
     nfreq = size(cmem.kernel_ft_gpu, 2)
     ts2 = (32, 32)
     bs2 = (cld(nfreq, ts2[1]), cld(cmem.Natm, ts2[2]))
-    @cuda threads=ts2 blocks=bs2 build_doppler_filter!(cmem.kernel_ft_gpu,
-                                                       cmem.λc_gpu, cmem.σ_fac_gpu,
-                                                       invL, nfreq)
+    @cuda threads=ts2 blocks=bs2 build_doppler_filter_direct!(cmem.kernel_ft_gpu,
+                                                               μ_v_d, σ_v_d,
+                                                               cmem.doppler_scale, s_max,
+                                                               invL, nfreq)
 
     # convolution theorem + inverse FFT
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu

@@ -194,7 +194,7 @@ with the Hirano et al. (2011) combined rotation+macroturbulence kernel using pad
 FFT convolution on the device.
 
 Arguments:
-- `cmem::ConvolutionMemory`: Pre-allocated GPU working memory.
+- `cmem::MacroConvolutionMemory`: Pre-allocated GPU working memory.
 - `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
 - `vsini::Real`: Projected rotational velocity (m/s).
@@ -216,7 +216,7 @@ Notes:
 
 See also: [`convolve_hirano_rotmacro`](@ref), [`hirano_rotmacro_ft_kernel_gpu!`](@ref)
 """
-function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
+function convolve_hirano_rotmacro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, vsini::T, ζ_rt::T,
                                       u1::T, u2::T; intres::Int=intres_glob) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
@@ -258,8 +258,8 @@ function convolve_hirano_rotmacro_gpu(cmem::ConvolutionMemory, xs::AA{T,1},
     # kernel_spatial ./= sum(kernel_spatial)
 
     # fftshift + normalize on GPU, write into padded buffer
-    kernel_row = reshape(@view(cmem.padded_kernel_gpu[1, :]), :)
-    shifted_kernel_row = reshape(@view(cmem.shift_kernel_gpu[1, :]), :)
+    kernel_row = cmem.padded_kernel_gpu
+    shifted_kernel_row = cmem.shift_kernel_gpu
     fill!(kernel_row, zero(T))
     fill!(shifted_kernel_row, zero(T))
     k_real = @view cmem.kr_1d[1:N]

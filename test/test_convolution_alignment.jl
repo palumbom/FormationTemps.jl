@@ -16,7 +16,7 @@ Npad = 64
 spike_positions = [20, Nλ ÷ 2, Nλ - 20]
 
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-cmem_mac = FT.ConvolutionMemory(Nλ, Natm, Npad)
+cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
 
 σ_v_tiny = CUDA.zeros(Float64, Natm) .+ 1.0
 μ_v_zero = CUDA.zeros(Float64, Natm)

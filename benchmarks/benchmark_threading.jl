@@ -140,51 +140,6 @@ open(joinpath(DATADIR, "threading_scaling.csv"), "w") do io
 end
 println("\nData written to: ", joinpath(DATADIR, "threading_scaling.csv"))
 
-# ── plot ──────────────────────────────────────────────────────────────────────
-try
-    using PythonPlot; plt = PythonPlot.pyplot
-    moddir = joinpath(PROJECT_DIR, "src")
-    stylefile = joinpath(moddir, "..", "fig.mplstyle")
-    if isfile(stylefile)
-        plt.style.use(stylefile)
-    end
-    plt.ioff()
-
-    plotdir = joinpath(PROJECT_DIR, "docs", "src", "static")
-    !isdir(plotdir) && mkpath(plotdir)
-
-    sorted_nt = sort(collect(keys(results)))
-    t1 = haskey(results, 1) ? results[1].median_s : results[first(sorted_nt)].median_s
-    speedups = [t1 / results[nt].median_s for nt in sorted_nt]
-    times = [results[nt].median_s for nt in sorted_nt]
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-
-    # left: speedup
-    ax1.plot(sorted_nt, speedups, "o-", color="#2A96D1", lw=2, ms=6, label="{\\rm Measured}")
-    ax1.plot([1, maximum(sorted_nt)], [1, maximum(sorted_nt)], "--",
-             color="#999999", lw=1, label="{\\rm Ideal}")
-    ax1.set_xlabel("{\\rm Number of threads}")
-    ax1.set_ylabel("{\\rm Speedup}")
-    ax1.set_title("{\\rm Threading scaling}")
-    ax1.legend()
-    ax1.set_xlim(0, maximum(sorted_nt) + 1)
-    ax1.set_ylim(0, maximum(sorted_nt) + 1)
-
-    # right: wall-clock time
-    ax2.plot(sorted_nt, times, "s-", color="#D55E00", lw=2, ms=6)
-    ax2.set_xlabel("{\\rm Number of threads}")
-    ax2.set_ylabel("{\\rm Wall-clock time [s]}")
-    ax2.set_title(@sprintf("{\\rm Disk integration (}\$N_\\phi\${\\rm =%d)}", Nϕ))
-
-    fig.tight_layout()
-    fig.savefig(joinpath(plotdir, "benchmark_threading.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    println("Saved: benchmark_threading.png")
-catch e
-    println("Skipping plot (PythonPlot not available): ", e)
-end
-
 println()
 println("="^60)
 println("DONE")

@@ -98,7 +98,7 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 μ_v_rot = CUDA.zeros(Float64, length(zs))
 
 # memory for convolution
-cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # params for convolution
 @load joinpath(FT.datdir, "ld_coeffs.jld2") u1 u2

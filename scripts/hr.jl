@@ -107,7 +107,7 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 μ_v_mac = CUDA.zeros(Float64, Natm-1)
 σ_v_mac = CUDA.zeros(Float64, Natm-1)
 
-cmem_mac = FT.ConvolutionMemory(Nλ, Natm - 1, Npad)
+cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # make the fit 
 function quad_limb_darkening(μ::T, u1::T, u2::T) where T<:AF
