@@ -56,7 +56,7 @@ Natm = length(zs)
 αs_cont = zeros(Natm, Nλ)
 α_ref = zeros(Natm)
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_cpu, A_X;
-                  α_ref_out=α_ref, vmic_ref_cms=ξ * 100.0, ne_warn_thresh=Inf)
+                  α_ref_out=α_ref, ne_warn_thresh=Inf)
 
 # stellar grid
 μs_grid, dA_grid, z_rot_grid = FT.calc_stellar_grid_cpu(star.ρstar, star.istar, star.vsini, Nϕ)
@@ -80,7 +80,7 @@ println("  Unique μ = ", unique_μs)
 println("  Threads  = ", Threads.nthreads())
 println()
 
-# ── CPU benchmark ──────────────────────────────────────────────────────────────
+# ── CPU per-tile benchmark ────────────────────────────────────────────────────
 function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, z_rot_cpu;
                                n_repeat=5)
     T = Float64
@@ -100,7 +100,6 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
     τs_int = zeros(T, Natm, Nλ)
     cfunc_int = zeros(T, Natm - 1, Nλ)
 
-    # collect timings over n_repeat passes
     t_micro = zeros(n_repeat)
     t_tau = zeros(n_repeat)
     t_cfunc = zeros(n_repeat)
@@ -110,8 +109,9 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
         μ_tile = μs_cpu[1]
         μ_v_rot .= z_rot_cpu[1] .* FT.c_ms
 
-        t_micro[r] = @elapsed FT.convolve_wavelength_axis(λs_korg, αs, μ_v_rot, σ_v)
-        αs_broad_i = FT.convolve_wavelength_axis(λs_korg, αs, μ_v_rot, σ_v)
+        t_micro[r] = @elapsed begin
+            αs_broad_i = FT.convolve_wavelength_axis(λs_korg, αs, μ_v_rot, σ_v)
+        end
         t_tau[r] = @elapsed _calc_tau_cpu!(μ_tile, αs_broad_i, τs_int)
         t_cfunc[r] = @elapsed FT.calc_intensity_cfunc_cpu!(cfunc_int, Ts, λs_korg, τs_int)
         cfunc_dt_int = cfunc_int .* diff(τs_int, dims=1)
@@ -122,81 +122,112 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
             cfunc=median(t_cfunc), macro_conv=median(t_macro))
 end
 
-# ── GPU benchmark ──────────────────────────────────────────────────────────────
-function benchmark_gpu_pertile(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu;
-                               n_repeat=10)
+# ── GPU batched kernel benchmark ──────────────────────────────────────────────
+function benchmark_gpu_batched(αs, star, λs_korg, μs_cpu, z_rot_cpu;
+                               n_repeat=10, B=8)
     T = Float64
     A_X = star.A_X
     atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(star.Teff, star.logg, A_X))
     Natm = length(atm_gpu.zs)
     Nλ = length(λs_korg)
+    Natm1 = Natm - 1
     Npad = 512
 
     α_ref_gpu = zeros(Natm)
-    FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X;
-                      α_ref_out=α_ref_gpu, vmic_ref_cms=star.ξ * 100.0, ne_warn_thresh=Inf)
+    FT.compute_alpha!(αs, zeros(Natm, Nλ), Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X;
+                      α_ref_out=α_ref_gpu, ne_warn_thresh=Inf)
 
-    gpu_mem = if isempty(atm_gpu.τs)
-        FT.GPUMemory(λs_korg, atm_gpu)
-    else
-        FT.GPUMemory(λs_korg, atm_gpu, α_ref_gpu)
-    end
-    cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-    cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
-
+    # GPU memory
+    λs_gpu = CuArray(collect(λs_korg))
     σ_v = CUDA.zeros(T, Natm) .+ star.ξ
-    μ_v_rot = CUDA.zeros(T, Natm)
+    log_τ_ref = CuArray{T}(log.(atm_gpu.τs))
+    ifactor_base = CuArray{T}(atm_gpu.τs ./ α_ref_gpu)
+    Ts_gpu = CuArray{T}(atm_gpu.Ts)
 
-    # warmup
-    μ_v_rot .= z_rot_cpu[1] .* FT.c_ms
-    cfunc_warmup = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[1], μ_v_rot, σ_v)
-    FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, Array(cfunc_warmup.cfunc_dt), star.ζ, μs_cpu[1])
+    bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)
+    cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm1, Npad)
+
+    # batch parameters
+    μ_tiles = CuArray{T}(μs_cpu[1:B])
+    dA_tiles = CuArray{T}(ones(B) * 0.001)
+    μ_v_batch_cpu = zeros(T, B * Natm)
+    for bi in 1:B
+        v = z_rot_cpu[min(bi, length(z_rot_cpu))] * FT.c_ms
+        for k in 1:Natm
+            μ_v_batch_cpu[(bi-1)*Natm+k] = v
+        end
+    end
+    μ_v_batch = CuArray{T}(μ_v_batch_cpu)
+
+    # working arrays
+    τs_batch = CUDA.zeros(T, B * Natm, Nλ)
+    cfdt_batch = CUDA.zeros(T, B * Natm1, Nλ)
+    flux_acc = CUDA.zeros(T, Nλ)
+    cfunc_acc = CUDA.zeros(T, Natm1, Nλ)
+
+    # prime signal cache
+    bcmem.signal_cached = false
+    FT.convolve_wavelength_axis_batched!(bcmem, collect(λs_korg), αs,
+        CUDA.zeros(T, Natm), σ_v, 1)
+    bcmem.signal_cached = true
+
+    # precompute macro kernel
+    macro_kft = FT.precompute_rt_macro_kernel_ft(cmem_mac, collect(λs_korg), star.ζ, μs_cpu[1])
     CUDA.synchronize()
 
-    # collect timings
-    t_intensity = zeros(n_repeat)
+    # timing
+    t_micro = zeros(n_repeat)
+    t_tau = zeros(n_repeat)
+    t_cfunc = zeros(n_repeat)
     t_macro = zeros(n_repeat)
 
     for r in 1:n_repeat
-        μ_tile = μs_cpu[1]
-        μ_v_rot .= z_rot_cpu[1] .* FT.c_ms
-
         CUDA.synchronize()
-        t_intensity[r] = CUDA.@elapsed begin
-            cfunc_intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
+        t_micro[r] = CUDA.@elapsed begin
+            αs_conv = FT.convolve_wavelength_axis_batched!(bcmem, collect(λs_korg), αs,
+                μ_v_batch, σ_v, B)
         end
 
-        tbc = Array(cfunc_intensity.cfunc_dt)
-        CUDA.synchronize()
+        t_tau[r] = CUDA.@elapsed begin
+            FT.calc_tau_anchored_batched!(μ_tiles, log_τ_ref, ifactor_base,
+                αs_conv, τs_batch, Natm, B)
+        end
+
+        t_cfunc[r] = CUDA.@elapsed begin
+            FT.calc_intensity_cfunc_dt_batched!(cfdt_batch, τs_batch,
+                Ts_gpu, λs_gpu, Natm, B)
+        end
+
         t_macro[r] = CUDA.@elapsed begin
-            FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, star.ζ, μ_tile)
+            for bi in 1:B
+                tile_cfdt = @view cfdt_batch[(bi-1)*Natm1+1 : bi*Natm1, :]
+                FT.convolve_rt_macro_gpu_cached(cmem_mac, tile_cfdt, macro_kft)
+            end
         end
     end
 
-    return (intensity=median(t_intensity), macro_conv=median(t_macro))
+    return (micro=median(t_micro), tau=median(t_tau),
+            cfunc=median(t_cfunc), macro_conv=median(t_macro))
 end
 
 # ── end-to-end benchmark ──────────────────────────────────────────────────────
-function benchmark_end_to_end(star, linelist; Δλ, Nϕ, use_gpu, n_repeat=3)
+function benchmark_end_to_end(star, linelist; Δλ, Nϕ, use_gpu, n_repeat=3,
+                              gpu_precision=Float64)
     # warmup
     calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=16,
-                        use_gpu=use_gpu, ne_warn_thresh=Inf,
-                        showprogress=false)
+                        use_gpu=use_gpu, gpu_precision=gpu_precision,
+                        ne_warn_thresh=Inf, showprogress=false)
 
     times = zeros(n_repeat)
     local result
     for r in 1:n_repeat
-        if use_gpu
-            CUDA.synchronize()
-        end
+        if use_gpu; CUDA.synchronize(); end
         times[r] = @elapsed begin
             result = calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
-                                         use_gpu=use_gpu, ne_warn_thresh=Inf,
-                                         showprogress=false)
+                                         use_gpu=use_gpu, gpu_precision=gpu_precision,
+                                         ne_warn_thresh=Inf, showprogress=false)
         end
-        if use_gpu
-            CUDA.synchronize()
-        end
+        if use_gpu; CUDA.synchronize(); end
     end
     return median(times), result
 end
@@ -221,18 +252,24 @@ cpu_total_pertile = sum(cpu_times) * 1000
 @printf("  Total per tile:  %8.3f ms\n", cpu_total_pertile)
 println()
 
-# GPU per-tile
+# GPU batched kernels
 gpu_times = nothing
 if use_gpu
+    B_bench = 8
     println("─"^40)
-    println("GPU BENCHMARK (per-tile)")
+    println("GPU BENCHMARK (batched, B=$B_bench)")
     println("─"^40)
-    gpu_times = benchmark_gpu_pertile(copy(αs), copy(αs_cont), star, λs_korg,
-                                      μs_cpu, z_rot_cpu)
-    @printf("  Intensity (micro+tau+cfunc): %8.3f ms\n", gpu_times.intensity * 1000)
-    @printf("  Macro conv:                  %8.3f ms\n", gpu_times.macro_conv * 1000)
-    gpu_total_pertile = sum(gpu_times) * 1000
-    @printf("  Total per tile:              %8.3f ms\n", gpu_total_pertile)
+    gpu_times = benchmark_gpu_batched(copy(αs), star, λs_korg, μs_cpu, z_rot_cpu;
+                                      B=B_bench)
+    @printf("  Micro (batched):  %8.3f ms\n", gpu_times.micro * 1000)
+    @printf("  Tau (batched):    %8.3f ms\n", gpu_times.tau * 1000)
+    @printf("  Cfunc (batched):  %8.3f ms\n", gpu_times.cfunc * 1000)
+    @printf("  Macro (per-tile): %8.3f ms\n", gpu_times.macro_conv * 1000)
+    gpu_total = sum(gpu_times) * 1000
+    @printf("  Total (B=%d):     %8.3f ms\n", B_bench, gpu_total)
+    cpu_equiv = cpu_total_pertile * B_bench
+    @printf("  CPU equiv (%d tiles): %8.3f ms  (%.1f× speedup)\n",
+            B_bench, cpu_equiv, cpu_equiv / gpu_total)
     println()
 end
 
@@ -244,26 +281,34 @@ println("─"^40)
 t_cpu_e2e, result_cpu = benchmark_end_to_end(star, linelist; Δλ=Δλ, Nϕ=Nϕ, use_gpu=false)
 @printf("CPU  (Nϕ=%d): %.2f s\n", Nϕ, t_cpu_e2e)
 
-t_gpu_e2e = NaN
+t_gpu64_e2e = NaN
+t_gpu32_e2e = NaN
 if use_gpu
-    t_gpu_e2e, result_gpu = benchmark_end_to_end(star, linelist; Δλ=Δλ, Nϕ=Nϕ, use_gpu=true)
-    @printf("GPU  (Nϕ=%d): %.2f s\n", Nϕ, t_gpu_e2e)
-    @printf("Speedup: %.1fx\n", t_cpu_e2e / t_gpu_e2e)
+    t_gpu64_e2e, result_gpu64 = benchmark_end_to_end(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
+                                                      use_gpu=true, gpu_precision=Float64)
+    @printf("GPU Float64 (Nϕ=%d): %.2f s  (%.1f× vs CPU)\n",
+            Nϕ, t_gpu64_e2e, t_cpu_e2e / t_gpu64_e2e)
 
-    max_flux_diff = maximum(abs.(result_cpu.flux .- result_gpu.flux))
-    @printf("Max flux difference (CPU vs GPU): %.2e\n", max_flux_diff)
+    t_gpu32_e2e, result_gpu32 = benchmark_end_to_end(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
+                                                      use_gpu=true, gpu_precision=Float32)
+    @printf("GPU Float32 (Nϕ=%d): %.2f s  (%.1f× vs CPU, %.2f× vs GPU64)\n",
+            Nϕ, t_gpu32_e2e, t_cpu_e2e / t_gpu32_e2e, t_gpu64_e2e / t_gpu32_e2e)
+
+    println()
+    max_flux_diff_64 = maximum(abs.(result_cpu.flux .- result_gpu64.flux))
+    max_flux_diff_32 = maximum(abs.(result_cpu.flux .- Float64.(result_gpu32.flux)))
+    @printf("Max |flux diff| CPU vs GPU64: %.2e\n", max_flux_diff_64)
+    @printf("Max |flux diff| CPU vs GPU32: %.2e\n", max_flux_diff_32)
 end
 println()
 
 # ── save data ─────────────────────────────────────────────────────────────────
-# per-tile step timings (ms)
-header_pertile = "step cpu_ms gpu_ms"
+# per-tile/batch step timings (ms)
 steps = ["microturbulence", "tau", "cfunc", "macro"]
 cpu_vals = [cpu_times.micro, cpu_times.tau, cpu_times.cfunc, cpu_times.macro_conv] .* 1000.0
 
 if use_gpu && gpu_times !== nothing
-    # GPU combines micro+tau+cfunc into one kernel
-    gpu_vals = [gpu_times.intensity, 0.0, 0.0, gpu_times.macro_conv] .* 1000.0
+    gpu_vals = [gpu_times.micro, gpu_times.tau, gpu_times.cfunc, gpu_times.macro_conv] .* 1000.0
 else
     gpu_vals = fill(NaN, 4)
 end
@@ -277,10 +322,11 @@ end
 
 # end-to-end timings
 open(joinpath(datadir, "e2e_timings.csv"), "w") do io
-    println(io, "backend,time_s,Nphi,Natm,Nlambda,Ntiles,threads")
-    @printf(io, "cpu,%.4f,%d,%d,%d,%d,%d\n", t_cpu_e2e, Nϕ, Natm, Nλ, n_tiles, Threads.nthreads())
+    println(io, "backend,precision,time_s,Nphi,Natm,Nlambda,Ntiles,threads")
+    @printf(io, "cpu,float64,%.4f,%d,%d,%d,%d,%d\n", t_cpu_e2e, Nϕ, Natm, Nλ, n_tiles, Threads.nthreads())
     if use_gpu
-        @printf(io, "gpu,%.4f,%d,%d,%d,%d,1\n", t_gpu_e2e, Nϕ, Natm, Nλ, n_tiles)
+        @printf(io, "gpu,float64,%.4f,%d,%d,%d,%d,1\n", t_gpu64_e2e, Nϕ, Natm, Nλ, n_tiles)
+        @printf(io, "gpu,float32,%.4f,%d,%d,%d,%d,1\n", t_gpu32_e2e, Nϕ, Natm, Nλ, n_tiles)
     end
 end
 

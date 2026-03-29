@@ -28,7 +28,7 @@ Nλ = length(λs_korg)
 αs_cont = zeros(Natm, Nλ)
 α_ref = zeros(Natm)
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X;
-                  α_ref_out=α_ref, vmic_ref_cms=ξ * 100.0, ne_warn_thresh=Inf)
+                  α_ref_out=α_ref, ne_warn_thresh=Inf)
 
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
 σ_v = CUDA.zeros(Float64, Natm) .+ ξ

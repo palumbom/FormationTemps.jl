@@ -82,17 +82,18 @@ function compute_padded_gray_kernel_1D!(kernel_row, xs, λc, vsini, u1, Nλ, pad
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
 
     # get LD terms
-    ld1 = 2.0 * (1.0 - u1)
-    ld2 = 0.5 * π * u1
-    ld3 = π * (1.0 - u1 / 3.0)
+    F = typeof(vsini)
+    ld1 = F(2) * (one(F) - u1)
+    ld2 = F(0.5) * F(π) * u1
+    ld3 = F(π) * (one(F) - u1 / F(3))
 
     # evaluate the kernel
     if j <= Nλ
-        xj = c_ms * (xs[j] - λc) / λc / vsini
-        omx2 = CUDA.abs(1.0 - xj ^ 2.0)
+        xj = F(c_ms) * (xs[j] - λc) / λc / vsini
+        omx2 = CUDA.abs(one(F) - xj ^ 2)
 
         val = (ld1 * sqrt(omx2) + ld2 * omx2) / ld3
-        val *= abs(xj) <= 1.0
+        val *= abs(xj) <= one(F)
         @inbounds kernel_row[j + pad_left] = val
     end
     return nothing

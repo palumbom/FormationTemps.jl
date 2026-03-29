@@ -125,7 +125,7 @@ function _conv_mem_geometry(Nλ::Int, Npad::Int)
     pad_left = Npad_eff ÷ 2
     pad_right = Npad_eff - pad_left
     (pad_left + Nλ + pad_right == L) || error("padding split inconsistent with L")
-    (pad_left - 1) >= 0 || error("pad_left must be >= 1")
+    pad_left >= 1 || error("pad_left must be >= 1, got $pad_left")
     return L, Npad_eff, pad_left, pad_right
 end
 

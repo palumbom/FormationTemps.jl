@@ -112,8 +112,8 @@ function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_r, ζ_t, μ, Nλ, 
         s2 = one(T) - μ * μ
         sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
 
-        invR = 0.5 / (sqrt(π) * ζ_r * cosθ)
-        invT = 0.5 / (sqrt(π) * ζ_t * sinθ)
+        invR = T(0.5) / (sqrt(T(π)) * ζ_r * cosθ)
+        invT = T(0.5) / (sqrt(T(π)) * ζ_t * sinθ)
 
         t1 = exp(-(xj / (ζ_r * cosθ))^2) * invR
         t2 = exp(-(xj / (ζ_t * sinθ))^2) * invT

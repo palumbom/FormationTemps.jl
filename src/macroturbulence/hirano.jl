@@ -52,33 +52,32 @@ shared memory.
 This is the GPU equivalent of [`hirano_rotmacro_ft_kernel`](@ref).
 """
 function hirano_rotmacro_ft_kernel_gpu!(Kσ, σs, vsini, ζ_rt, u1, u2, intres, Nσ)
-    # one block per frequency bin, threads split quadrature points
+    FT = eltype(Kσ)
     i = blockIdx().x
     i > Nσ && return nothing
     tid = threadIdx().x
     nthreads = blockDim().x
 
-    dt = 1.0 / (intres - 1)
-    ld_norm = 1.0 - u1 / 3.0 - u2 / 6.0
-    a = π^2 * ζ_rt^2 * σs[i]^2
+    dt = one(FT) / (intres - 1)
+    ld_norm = one(FT) - u1 / FT(3) - u2 / FT(6)
+    a = FT(π)^2 * ζ_rt^2 * σs[i]^2
     σ_i = σs[i]
 
-    # each thread accumulates a partial sum over its share of quadrature points
-    s = 0.0
+    s = zero(FT)
     j = tid
     while j <= intres
         t = (j - 1) * dt
         t2 = t * t
-        μ = sqrt(max(0.0, 1.0 - t2))
-        ld = (1.0 - u1 * (1.0 - μ) - u2 * (1.0 - μ)^2) / ld_norm
-        integrand = ld * (exp(-a * (1.0 - t2)) + exp(-a * t2)) * besselj0(2π * σ_i * vsini * t) * t
-        w = (j == 1 || j == intres) ? 0.5 : 1.0
+        μ = sqrt(max(zero(FT), one(FT) - t2))
+        ld = (one(FT) - u1 * (one(FT) - μ) - u2 * (one(FT) - μ)^2) / ld_norm
+        integrand = ld * (exp(-a * (one(FT) - t2)) + exp(-a * t2)) * besselj0(FT(2π) * σ_i * vsini * t) * t
+        w = (j == 1 || j == intres) ? FT(1)/FT(2) : one(FT)
         s += w * integrand
         j += nthreads
     end
 
     # shared memory reduction
-    shmem = CuDynamicSharedArray(Float64, nthreads)
+    shmem = CuDynamicSharedArray(FT, nthreads)
     shmem[tid] = s
     sync_threads()
 

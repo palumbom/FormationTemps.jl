@@ -40,6 +40,7 @@ include("structures/ContFunc.jl")
 include("structures/StellarProps.jl")
 include("structures/FormTempResult.jl")
 include("structures/CPUTileWorkspace.jl")
+include("structures/BatchedMicroConvMem.jl")
 
 # numerical stuff
 include("interpolations.jl")

@@ -126,8 +126,8 @@ function AtmosphereGPU(atm_korg; T::Type{<:AF}=Float64)
     σ_v    = CUDA.zeros(T, f.Natm)
     μ_v    = CUDA.zeros(T, f.Natm)
 
-    return AtmosphereGPU(f.Natm, f.τs, f.zs, f.Ts, f.nₑ, f.nd, f.ref_wl,
-                         zs_gpu, Ts_gpu, nd_gpu, σ_v, μ_v)
+    return AtmosphereGPU(f.Natm, T.(f.τs), T.(f.zs), T.(f.Ts), T.(f.nₑ), T.(f.nd),
+                         T(f.ref_wl), zs_gpu, Ts_gpu, nd_gpu, σ_v, μ_v)
 end
 
 """

@@ -47,7 +47,7 @@ Nλ = length(λs_korg)
 αs = zeros(T, Natm, Nλ)
 αs_cont = zeros(T, Natm, Nλ)
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_cpu, star_stat.A_X;
-                  α_ref_out=α_ref, vmic_ref_cms=star_stat.ξ * 100.0, ne_warn_thresh=Inf)
+                  α_ref_out=α_ref, ne_warn_thresh=Inf)
 
 # set microturbulent broadening
 σ_v = fill(ξ, Natm)
@@ -84,7 +84,9 @@ end
 @testset "Testing stationary flux" begin
     @test maximum(flux_norm) .<= (one(T) .+ eps(Float32))
     @test maximum(result_stationary_convenience.flux) .<= (one(T) .+ eps(Float32))
-    @test all(isapprox.(result_stationary_convenience.flux, flux_norm))
+    # Hirano convolution with vsini=ζ=0 applies a near-delta FFT kernel that
+    # introduces tiny floating-point noise vs the manual path (no convolution)
+    @test all(isapprox.(result_stationary_convenience.flux, flux_norm, atol=1e-10))
 end
 
 # now do non-stationary flux

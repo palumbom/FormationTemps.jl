@@ -552,3 +552,96 @@ function calc_flux_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
     end
     return nothing
 end
+
+# ── batched kernels ────────────────────────────────────────────────────────────
+
+# batched fused intensity cfunc_dt: one thread per (tile, wavelength), serial over layers
+# τs layout: (B*Natm, Nλ), cfunc_dt layout: (B*(Natm-1), Nλ)
+function calc_intensity_cfunc_dt_batched_kernel!(cfunc_dt, τs, Ts, λs,
+                                                  Natm, Nλ, Bcur, total)
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    sdx = gridDim().x * blockDim().x
+    T = eltype(cfunc_dt)
+    Natm1 = Natm - 1
+
+    one_over_sqrt3 = one(T) / sqrt(T(3))
+    frac1 = T(0.5) * (one(T) - one_over_sqrt3)
+    frac2 = T(0.5) * (one(T) + one_over_sqrt3)
+
+    for lin in idx:sdx:total
+        b = ((lin - 1) ÷ Nλ) + 1
+        j = ((lin - 1) % Nλ) + 1
+        off_τ  = (b - 1) * Natm   # row offset in τs
+        off_cf = (b - 1) * Natm1  # row offset in cfunc_dt
+
+        λ_cm = @inbounds λs[j] * T(1e-8)
+        λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
+        bb_num = T(2.0) * T(h) * T(c)^2 / λ5
+        bb_x = T(h) * T(c) / (λ_cm * T(kB))
+
+        @inbounds for k in 1:Natm1
+            τ0 = τs[off_τ + k, j]
+            τ1 = τs[off_τ + k + 1, j]
+            Δτ = τ1 - τ0
+            τ_mid = T(0.5) * (τ0 + τ1)
+
+            τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
+            τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
+
+            dT = Ts[k + 1] - Ts[k]
+            T1 = Ts[k] + dT * frac1
+            T2 = Ts[k] + dT * frac2
+
+            B1 = bb_num / (exp(bb_x / T1) - one(T))
+            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            f1 = B1 * exp(-τp1)
+            f2 = B2 * exp(-τp2)
+
+            cf = T(0.5) * (f1 + f2) * T(1e-8)
+            cfunc_dt[off_cf + k, j] = cf * Δτ
+        end
+    end
+    return nothing
+end
+
+function calc_intensity_cfunc_dt_batched!(cfunc_dt::CA{T,2}, τs::CA{T,2},
+                                           Ts::CA{T,1}, λs::CA{T,1},
+                                           Natm::Int, Bcur::Int) where T<:AF
+    Nλ = size(cfunc_dt, 2)
+    total = Bcur * Nλ  # Int product — safe from Int32 overflow
+    threads = 256
+    blocks = cld(total, threads)
+    @cuda threads=threads blocks=blocks calc_intensity_cfunc_dt_batched_kernel!(
+        cfunc_dt, τs, Ts, λs, Int32(Natm), Int32(Nλ), Int32(Bcur), Int32(total))
+    return nothing
+end
+
+# batched accumulation: one thread per wavelength, loops over B tiles and Natm-1 layers
+function accumulate_batch_kernel!(flux_acc, cfunc_acc, cfunc_dt, dA_tiles, Natm1, Nλ, Bcur)
+    j = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    j > Nλ && return nothing
+    T = eltype(flux_acc)
+    @inbounds for b in 1:Bcur
+        dA_i = dA_tiles[b]
+        off = (b - 1) * Natm1
+        s = zero(T)
+        for k in 1:Natm1
+            val = cfunc_dt[off + k, j] * dA_i
+            cfunc_acc[k, j] += val
+            s += val
+        end
+        flux_acc[j] += s
+    end
+    return nothing
+end
+
+function accumulate_batch!(flux_acc::CA{T,1}, cfunc_acc::CA{T,2},
+                           cfunc_dt::CA{T,2}, dA_tiles::CA{T,1},
+                           Natm1::Int, Bcur::Int) where T<:AF
+    Nλ = Int32(size(cfunc_acc, 2))
+    threads = 256
+    blocks = cld(Nλ, threads)
+    @cuda threads=threads blocks=blocks accumulate_batch_kernel!(
+        flux_acc, cfunc_acc, cfunc_dt, dA_tiles, Int32(Natm1), Nλ, Int32(Bcur))
+    return nothing
+end

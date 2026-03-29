@@ -45,7 +45,7 @@ function elav(a::AbstractArray{T,N}; dims::Integer) where {T,N}
     r = axes(a)
     r0 = ntuple(i -> i == dims ? UnitRange(1, last(r[i]) - 1) : UnitRange(r[i]), N)
     r1 = ntuple(i -> i == dims ? UnitRange(2, last(r[i])) : UnitRange(r[i]), N)
-    return (view(a, r1...) .+ view(a, r0...)) ./ 2.0
+    return (view(a, r1...) .+ view(a, r0...)) ./ T(2)
 end
 
 function moving_average(x, w)

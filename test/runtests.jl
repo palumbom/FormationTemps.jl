@@ -45,4 +45,6 @@ if use_gpu
     include("test_fused_kernels.jl")
     include("test_dual_stream.jl")
     include("test_convmem_types.jl")
+    include("test_batched_kernels.jl")
+    include("test_gpu_precision.jl")
 end

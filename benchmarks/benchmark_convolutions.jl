@@ -102,6 +102,10 @@ function record!(label, cpu_times, gpu_times)
             median(cpu_ms), iqr(cpu_ms), median(gpu_ms), iqr(gpu_ms), speedup)
 end
 
+# pre-allocate GPU arrays for microturbulence timing (avoid H2D transfer in loop)
+λs_gpu = CuArray(collect(λs_korg))
+αs_gpu = CuArray(αs)
+
 # microturbulence
 println("Microturbulence...")
 record!("Microturbulence",
@@ -109,7 +113,7 @@ record!("Microturbulence",
         FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot), Array(σ_v_mic))
     end,
     time_gpu() do
-        FT.convolve_wavelength_axis_gpu(cmem, CuArray(λs_korg), CuArray(αs), μ_v_rot, σ_v_mic)
+        FT.convolve_wavelength_axis_gpu(cmem, λs_gpu, αs_gpu, μ_v_rot, σ_v_mic)
     end)
 
 # gray rotation

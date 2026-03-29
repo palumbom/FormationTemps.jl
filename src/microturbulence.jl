@@ -230,6 +230,95 @@ function build_doppler_filter_direct!(filter, μ_v, σ_v, scale, s_max, invL, nf
     return nothing
 end
 
+# batched Doppler filter: B*Natm rows, σ_v is shared (length Natm, index wraps)
+function build_doppler_filter_batched!(filter, μ_v_batch, σ_v, scale, s_max, invL, nfreq, Natm, BNatm)
+    i     = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    f_idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= BNatm && f_idx <= nfreq
+        T = eltype(μ_v_batch)
+        i_local = ((i - 1) % Natm) + 1
+        s = clamp(@inbounds(μ_v_batch[i]) * scale, -s_max, s_max)
+        σ = @inbounds(σ_v[i_local]) * scale
+        f0 = T(f_idx - 1)
+        θ = -T(2π) * f0 * s * invL
+        gauss = exp(-(T(π) * σ * f0 * invL)^2)
+        sθ, cθ = sincos(θ)
+        @inbounds filter[i, f_idx] = complex(gauss * cθ, gauss * sθ)
+    end
+    return nothing
+end
+
+# broadcast shared signal_ft (Natm rows) across B*Natm filter rows
+function batched_spectral_multiply!(conv_ft, signal_ft, kernel_ft, Natm, BNatm)
+    i     = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    f_idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= BNatm && f_idx <= size(conv_ft, 2)
+        i_local = ((i - 1) % Natm) + 1
+        @inbounds conv_ft[i, f_idx] = signal_ft[i_local, f_idx] * kernel_ft[i, f_idx]
+    end
+    return nothing
+end
+
+"""
+    convolve_wavelength_axis_batched!(bcmem, xs, ys, μ_v_batch, σ_v, Bcur)
+
+Batched Doppler convolution for `Bcur` tiles simultaneously. The absorption signal
+`ys` (Natm × Nλ) is shared across tiles; `μ_v_batch` (Bcur*Natm) provides per-tile
+velocities. Returns a view of the valid region `(Bcur*Natm, Nλ)`.
+"""
+function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
+                                           xs::AA{T,1}, ys::AA{T,2},
+                                           μ_v_batch::CA{T,1}, σ_v::CA{T,1},
+                                           Bcur::Int) where {T<:AF}
+    Natm = bcmem.Natm
+    BNatm = Bcur * Natm
+
+    # initialize wavelength-to-pixel conversion once
+    if !bcmem.doppler_ready
+        i0 = length(xs) ÷ 2 + 1
+        λ0 = xs[i0]
+        Δλ = median(diff(xs))
+        bcmem.doppler_scale = T(λ0 / (c_ms * Δλ))
+        bcmem.doppler_ready = true
+    end
+    s_max = T(bcmem.pad_left - 1)
+    invL = inv(T(bcmem.L))
+
+    # pad + FFT the shared signal (skip if cached)
+    if !bcmem.signal_cached
+        copyto!(bcmem.ys_gpu, ys)
+        ts = (32, 32)
+        bs = (cld(Natm, ts[1]), cld(bcmem.L, ts[2]))
+        @cuda threads=ts blocks=bs pad_signal!(bcmem.signal_gpu, bcmem.ys_gpu,
+                                               bcmem.Nλ, bcmem.pad_left, bcmem.pad_right)
+        mul!(bcmem.signal_ft_gpu, bcmem.plan_fwd, bcmem.signal_gpu)
+    end
+
+    # build batched Doppler filter (BNatm rows)
+    nfreq = size(bcmem.kernel_ft_gpu, 2)
+    BNatm32 = Int32(BNatm)
+    ts2 = (32, 32)
+    bs2 = (cld(nfreq, ts2[1]), cld(BNatm, ts2[2]))
+    @cuda threads=ts2 blocks=bs2 build_doppler_filter_batched!(bcmem.kernel_ft_gpu,
+                                                                μ_v_batch, σ_v,
+                                                                bcmem.doppler_scale, s_max,
+                                                                invL, nfreq, Int32(Natm),
+                                                                BNatm32)
+
+    # broadcast signal_ft × filter → conv_ft (custom kernel avoids replicating signal)
+    bs3 = (cld(nfreq, ts2[1]), cld(BNatm, ts2[2]))
+    @cuda threads=ts2 blocks=bs3 batched_spectral_multiply!(bcmem.conv_ft_gpu,
+                                                             bcmem.signal_ft_gpu,
+                                                             bcmem.kernel_ft_gpu,
+                                                             Int32(Natm), BNatm32)
+
+    # batched inverse FFT
+    mul!(bcmem.conv_gpu, bcmem.plan_bwd, bcmem.conv_ft_gpu)
+
+    # return view of valid region
+    return @view bcmem.conv_gpu[1:BNatm, bcmem.pad_left+1:bcmem.pad_left+bcmem.Nλ]
+end
+
 """
     convolve_wavelength_axis_gpu(cmem, xs, ys, μ_v, σ_v)
 

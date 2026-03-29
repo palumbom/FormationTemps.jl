@@ -92,8 +92,9 @@ function compute_padded_iso_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, Nλ, pad_l
         av = CUDA.abs(xj)
         z = av / ζ_rt
 
-        t1 = 2.0 * exp(-(xj/ζ_rt)^2) / (sqrt(π) * ζ_rt)
-        t2 = -2.0 * av * erfc(z) / (ζ_rt^2)
+        T = typeof(ζ_rt)
+        t1 = T(2) * exp(-(xj/ζ_rt)^2) / (sqrt(T(π)) * ζ_rt)
+        t2 = T(-2) * av * erfc(z) / (ζ_rt^2)
         @inbounds kernel_row[j + pad_left] = t1 + t2
     end
     return nothing

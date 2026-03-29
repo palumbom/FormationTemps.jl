@@ -149,8 +149,8 @@ function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, μ, Nλ, pad_l
         s2 = one(T) - μ * μ
         sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
 
-        invR = 0.5 / (sqrt(π) * ζ_rt * cosθ)
-        invT = 0.5 / (sqrt(π) * ζ_rt * sinθ)
+        invR = T(0.5) / (sqrt(T(π)) * ζ_rt * cosθ)
+        invT = T(0.5) / (sqrt(T(π)) * ζ_rt * sinθ)
 
         t1 = exp(-(xj / (ζ_rt * cosθ))^2) * invR
         t2 = exp(-(xj / (ζ_rt * sinθ))^2) * invT
@@ -319,7 +319,7 @@ Convolve `ys` with a precomputed RT macroturbulence kernel FFT. Skips kernel
 computation entirely. Use with [`precompute_rt_macro_kernel_ft`](@ref).
 """
 function convolve_rt_macro_gpu_cached(cmem::MacroConvolutionMemory,
-                                      ys::CA{T,2},
+                                      ys::AA{T,2},
                                       kernel_ft::CuVector{Complex{T}}) where {T<:AF}
     # copy signal to device buffer
     copyto!(cmem.ys_gpu, ys)

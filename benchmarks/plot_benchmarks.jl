@@ -6,11 +6,13 @@ Reads:
     benchmarks/data/pertile_timings.csv
     benchmarks/data/e2e_timings.csv
     benchmarks/data/threading_scaling.csv
+    benchmarks/data/nlambda_scaling.csv
 
 Writes:
     docs/src/static/benchmark_convolutions.png
     docs/src/static/benchmark_pertile.png
     docs/src/static/benchmark_threading.png
+    docs/src/static/benchmark_nlambda.png
 
 Usage:
     julia --project=. benchmarks/plot_benchmarks.jl

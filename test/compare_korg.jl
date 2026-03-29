@@ -45,7 +45,7 @@ sol = Korg.synthesize(atm_resampled, linelist, A_X, λs_korg;
 αs_cont = zeros(Natm, length(λs_korg))
 α_ref   = zeros(Natm)
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X;
-                  α_ref_out=α_ref, vmic_ref_cms=val * 100.0)
+                  α_ref_out=α_ref)
 
 # convolve absorption with microturbulence
 Nλ   = length(λs_korg)

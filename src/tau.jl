@@ -283,3 +283,162 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
     end
     return nothing
 end
+
+# batched anchored τ: one thread per (tile, wavelength), serial over layers
+function calc_tau_anchored_batched_kernel!(αs, τs, log_τ_ref, ifactor_base,
+                                           μ_tiles, Natm, Nλ, Bcur, total)
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    sdx = gridDim().x * blockDim().x
+    for lin in idx:sdx:total
+        b = ((lin - 1) ÷ Nλ) + 1
+        j = ((lin - 1) % Nλ) + 1
+        T = eltype(τs)
+        inv_μ = one(T) / @inbounds μ_tiles[b]
+        off = (b - 1) * Natm  # row offset for this tile
+        @inbounds τs[off + 1, j] = zero(T)
+        @inbounds for i in 2:Natm
+            f_prev = αs[off + i - 1, j] * ifactor_base[i - 1] * inv_μ
+            f_curr = αs[off + i, j]     * ifactor_base[i]     * inv_μ
+            τs[off + i, j] = τs[off + i - 1, j] +
+                T(0.5) * (f_prev + f_curr) * (log_τ_ref[i] - log_τ_ref[i - 1])
+        end
+    end
+    return nothing
+end
+
+function calc_tau_anchored_batched!(μ_tiles::CA{T,1}, log_τ_ref::CA{T,1},
+                                    ifactor_base::CA{T,1}, αs::AA{T,2}, τs::CA{T,2},
+                                    Natm::Int, Bcur::Int) where T<:AF
+    Nλ = size(αs, 2)
+    total = Bcur * Nλ  # Int product — safe from Int32 overflow
+    threads = 256
+    blocks = cld(total, threads)
+    @cuda threads=threads blocks=blocks calc_tau_anchored_batched_kernel!(
+        αs, τs, log_τ_ref, ifactor_base, μ_tiles, Int32(Natm), Int32(Nλ), Int32(Bcur),
+        Int32(total))
+    return nothing
+end
+
+# batched Bezier geometry: precompute ds and alphaC for B tiles
+function precompute_bezier_geometry_batched!(μ_tiles, zs, ds, alphaC, Natm, Bcur)
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    sdx = gridDim().x * blockDim().x
+    T = eltype(ds)
+    one_third = inv(T(3))
+    N = Natm
+    for lin in idx:sdx:(Bcur * N)
+        b = ((lin - 1) ÷ N) + 1
+        p = ((lin - 1) % N) + 1
+        inv_μ = one(T) / @inbounds μ_tiles[b]
+        off = (b - 1) * N
+        @inbounds if p <= (N - 1)
+            ds[off + p] = (zs[p + 1] - zs[p]) * inv_μ
+        end
+        @inbounds if p >= 2 && p <= (N - 1)
+            ds_left  = (zs[p] - zs[p - 1]) * inv_μ
+            ds_right = (zs[p + 1] - zs[p]) * inv_μ
+            alphaC[off + p] = one_third * (one(T) + ds_right / (ds_left + ds_right))
+        elseif p == 1 || p == N
+            alphaC[off + p] = zero(T)
+        end
+    end
+    return nothing
+end
+
+# batched Bezier tau: one thread per (tile, wavelength), serial over layers
+function calc_tau_bezier_batched_kernel!(αs, τs, ds, alphaC, Natm, Nλ, Bcur, total)
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
+    sdx = gridDim().x * blockDim().x
+    T = eltype(τs)
+    N = Natm
+    one_third = inv(T(3))
+    half = T(0.5)
+    zeroT = zero(T)
+    oneT = one(T)
+
+    for lin in idx:sdx:total
+        b = ((lin - 1) ÷ Nλ) + 1
+        j = ((lin - 1) % Nλ) + 1
+        off = (b - 1) * N
+
+        # αmax scan for overshoot clamping
+        @inbounds α_prev = αs[off + 1, j]
+        αmax = α_prev
+        @inbounds for p in 2:N
+            v = αs[off + p, j]
+            αmax = max(αmax, v)
+        end
+        hi = max(T(2) * αmax, zeroT)
+        @inbounds τs[off + 1, j] = T(1e-5)
+
+        # first iteration (c=2)
+        @inbounds ds_prev = ds[off + 1]
+        @inbounds ds_curr = ds[off + 2]
+        @inbounds α_curr = αs[off + 2, j]
+        @inbounds α_next = αs[off + 3, j]
+        prev_dC = (α_curr - α_prev) / ds_prev
+        dC = (α_next - α_curr) / ds_curr
+
+        @inbounds αC = alphaC[off + 2]
+        ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                      (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+        C0 = α_curr + half * ds_prev * ybar
+        C1 = α_curr - half * ds_curr * ybar
+        Cf = min(max(C0, zeroT), hi)
+        @inbounds τs[off + 2, j] = τs[off + 1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
+
+        prev_dC = dC
+        prev_C1 = C1
+        α_prev = α_curr
+        α_curr = α_next
+        ds_prev = ds_curr
+
+        # main loop (c=3..N-1)
+        for c in 3:(N - 1)
+            @inbounds ds_curr = ds[off + c]
+            @inbounds αC = alphaC[off + c]
+            @inbounds α_next = αs[off + c + 1, j]
+            dC = (α_next - α_curr) / ds_curr
+
+            ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                          (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+            C0 = α_curr + half * ds_prev * ybar
+            C1 = α_curr - half * ds_curr * ybar
+            Cf = min(max(half * (C0 + prev_C1), zeroT), hi)
+            @inbounds τs[off + c, j] = τs[off + c - 1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
+
+            prev_dC = dC
+            prev_C1 = C1
+            α_prev = α_curr
+            α_curr = α_next
+            ds_prev = ds_curr
+        end
+
+        # last step (c=N)
+        Cf = min(max(prev_C1, zeroT), hi)
+        @inbounds τs[off + N, j] = τs[off + N - 1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
+    end
+    return nothing
+end
+
+function calc_tau_bezier_batched!(μ_tiles::CA{T,1}, zs::CA{T,1},
+                                  αs::AA{T,2}, τs::CA{T,2},
+                                  ds::CA{T,1}, alphaC::CA{T,1},
+                                  Natm::Int, Bcur::Int) where T<:AF
+    Natm >= 3 || error("calc_tau_bezier_batched! requires Natm >= 3")
+    Nλ = size(αs, 2)
+
+    # precompute geometry for B tiles
+    t_geom = 256
+    b_geom = cld(Bcur * Natm, t_geom)
+    @cuda threads=t_geom blocks=b_geom precompute_bezier_geometry_batched!(
+        μ_tiles, zs, ds, alphaC, Int32(Natm), Int32(Bcur))
+
+    # main Bezier integration
+    total = Bcur * Nλ  # Int product — safe from Int32 overflow
+    threads = 256
+    blocks = cld(total, threads)
+    @cuda threads=threads blocks=blocks calc_tau_bezier_batched_kernel!(
+        αs, τs, ds, alphaC, Int32(Natm), Int32(Nλ), Int32(Bcur), Int32(total))
+    return nothing
+end
