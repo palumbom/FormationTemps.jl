@@ -1,5 +1,6 @@
 """
-    calc_formation_temp(star, linelist; use_gpu=GPU_DEFAULT, Δλ=0.01, convolve=false,
+    calc_formation_temp(star, linelist; use_gpu=GPU_DEFAULT, Δλ=0.01,
+                        gpu_precision=Float64, convolve=false,
                         minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN, Nϕ=128,
                         showprogress=true, kwargs...)
 
@@ -20,6 +21,11 @@ coefficients `u1` and `u2`. Otherwise, performs numerical disk integration using
 bins. Set `use_gpu=true` to use the GPU implementation when available.
 Set `showprogress=false` to suppress the progress bar during disk integration.
 
+Pass `gpu_precision=Float32` to run GPU computations at single precision. Absorption
+coefficients are always computed at Float64 (a Korg requirement) and converted to the target
+precision before GPU upload. This roughly halves GPU memory usage and can improve throughput
+on consumer GPUs. The default is `Float64`.
+
 The CPU disk integration path (`use_gpu=false, convolve=false`) is parallelized across tiles
 using `Threads.@threads`. Launch Julia with multiple threads (e.g. `julia -t auto`) to benefit.
 FFTW internal threading is disabled during the tile loop to avoid contention. See
@@ -30,6 +36,9 @@ FFTW internal threading is disabled during the tile loop to avoid contention. Se
 star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0)
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[1:500]
 result = calc_formation_temp(star, linelist; Δλ=0.01, convolve=true, u1=0.43, u2=0.31)
+
+# Float32 GPU:
+result32 = calc_formation_temp(star, linelist; Δλ=0.01, gpu_precision=Float32)
 ```
 """
 function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEFAULT,

@@ -106,10 +106,13 @@ mutable struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
 end
 
 """
-    AtmosphereGPU(atm_korg)
+    AtmosphereGPU(atm_korg; T=Float64)
 
-Construct an `AtmosphereGPU` with thermodynamic fields from Korg and velocity
-fields allocated on the GPU.
+Construct an `AtmosphereGPU{T}` with thermodynamic fields from Korg and velocity
+fields allocated on the GPU. Pass `T=Float32` for single-precision GPU arrays.
+
+Korg always returns Float64 data; the constructor converts all fields (CPU and GPU)
+to type `T`.
 
 The input atmosphere is first resampled onto a uniform log-τ grid to remove
 non-uniform layer spacing introduced by `Korg.interpolate_marcs`. If the model

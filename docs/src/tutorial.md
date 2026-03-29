@@ -19,10 +19,32 @@ At low spectral resolving power, convolutions can be used to approximate the eff
 
 ![convolution_vs_integration](static/convolution_vs_integration.png)
 
-## GPU Usage
+## Parallelization
+
+Disk integration (`convolve=false`) is the most computationally intensive mode and benefits from parallelization on both CPU and GPU.
+
+### CPU multithreading
+
+The CPU disk integration path distributes tiles across Julia threads. Launch Julia with multiple threads to benefit:
+
+```bash
+julia -t auto           # use all available cores
+julia -t 8              # use 8 threads
+```
+
+No code changes are required — `calc_formation_temp` detects the available threads automatically.
+
+!!! warning "Python interop"
+    CPU multithreading is not compatible with calling FormationTemps.jl from Python via juliacall/PythonCall. Set `JULIA_NUM_THREADS=1` when calling from Python. Use the GPU path for parallelism in that case.
+
+### GPU acceleration
 
 > `use_gpu=true`
 
 By default, ```calc_formation_temp``` will use an NVIDIA GPU to accelerate the computation of spectra, if one is present and configured. The [CUDA.jl documentation](https://cuda.juliagpu.org/stable/) provides installation instructions, though it is fortunately fairly autonomous. Pass `use_gpu=false` to force the CPU path.
+
+> `gpu_precision=Float32`
+
+Pass `gpu_precision=Float32` to run GPU computations at single precision. This roughly halves GPU memory and can improve throughput on consumer GPUs. Absorption coefficients are always computed at Float64 (a Korg requirement) and converted before GPU upload. The default is `Float64`.
 
 For details on what gets accelerated, memory layout, benchmarks, and CPU/GPU numerical differences, see the [Parallelization](parallelization.md) guide.
