@@ -1,23 +1,3 @@
-"""
-Plot all benchmark results from CSV data files in benchmarks/data/.
-
-Reads:
-    benchmarks/data/convolution_timings.csv
-    benchmarks/data/pertile_timings.csv
-    benchmarks/data/e2e_timings.csv
-    benchmarks/data/threading_scaling.csv
-    benchmarks/data/nlambda_scaling.csv
-
-Writes:
-    docs/src/static/benchmark_convolutions.png
-    docs/src/static/benchmark_pertile.png
-    docs/src/static/benchmark_threading.png
-    docs/src/static/benchmark_nlambda.png
-
-Usage:
-    julia --project=. benchmarks/plot_benchmarks.jl
-"""
-
 using Printf, DelimitedFiles
 using PythonPlot; plt = PythonPlot.pyplot
 
@@ -31,6 +11,12 @@ if isfile(stylefile)
     plt.style.use(stylefile)
 end
 plt.ioff()
+
+# ── consistent color palette ─────────────────────────────────────────────────
+const COL_CPU_1T  = "#91D1F7"  # light blue — CPU single-thread
+const COL_CPU_MT  = "#2A96D1"  # dark blue  — CPU multi-thread
+const COL_GPU64   = "#D55E00"  # orange     — GPU Float64
+const COL_GPU32   = "#009E73"  # green      — GPU Float32
 
 # ── helper ────────────────────────────────────────────────────────────────────
 function read_csv(path)
@@ -48,48 +34,82 @@ try
     header, rows = read_csv(csv)
 
     kernels = [r[1] for r in rows]
-    cpu_median_ms = [parse(Float64, r[2]) for r in rows]
-    cpu_iqr_ms = [parse(Float64, r[3]) for r in rows]
-    gpu_median_ms = [parse(Float64, r[4]) for r in rows]
-    gpu_iqr_ms = [parse(Float64, r[5]) for r in rows]
-    speedups = [parse(Float64, r[6]) for r in rows]
+    cpu_med = [parse(Float64, r[2]) for r in rows]
+    cpu_iq = [parse(Float64, r[3]) for r in rows]
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    x = 0:length(kernels)-1
-    w = 0.35
-    ax.bar(x .- w / 2, cpu_median_ms, w,
-           yerr=cpu_iqr_ms, capsize=3, ecolor="#333333",
-           label="{\\rm CPU}", color="#56B4E9", edgecolor="none")
-    ax.bar(x .+ w / 2, gpu_median_ms, w,
-           yerr=gpu_iqr_ms, capsize=3, ecolor="#333333",
-           label="{\\rm GPU}", color="#D55E00", edgecolor="none")
-
-    # speedup annotations with square brackets
-    for i in eachindex(kernels)
-        y_top = max(cpu_median_ms[i] + cpu_iqr_ms[i], gpu_median_ms[i] + gpu_iqr_ms[i])
-        xi = i - 1
-        x_left = xi - w
-        x_right = xi + w
-        y_brace = y_top * 1.15
-        tick_h = y_brace * 0.08
-        ax.plot([x_left, x_left, x_right, x_right],
-                [y_brace - tick_h, y_brace, y_brace, y_brace - tick_h],
-                color="#333333", lw=1.0, clip_on=false)
-        ax.text(xi, y_brace * 1.08, @sprintf("\$\\sim %.0f\\times\$", speedups[i]),
-                ha="center", va="bottom", fontsize=9, fontweight="bold", color="#333333")
+    # detect old (6-col) vs new (7-col) CSV format
+    has_gpu32 = length(rows[1]) >= 7
+    g64_med = [parse(Float64, r[4]) for r in rows]
+    g64_iq = [parse(Float64, r[5]) for r in rows]
+    if has_gpu32
+        g32_med = [parse(Float64, r[6]) for r in rows]
+        g32_iq = [parse(Float64, r[7]) for r in rows]
     end
 
-    Nλ_label = length(kernels) > 0 ? length(kernels) : 0  # placeholder
+    fig, ax = plt.subplots(figsize=(9, 4))
+    x = 0:length(kernels)-1
+    nbar = has_gpu32 ? 3 : 2
+    w = 0.8 / nbar
+
+    ax.bar(x .- (nbar - 1) * w / 2, cpu_med, w,
+           yerr=cpu_iq, capsize=3, ecolor="#333333",
+           label="{\\rm CPU}", color=COL_CPU_MT, edgecolor="none")
+    ax.bar(x .- (nbar - 1) * w / 2 .+ w, g64_med, w,
+           yerr=g64_iq, capsize=3, ecolor="#333333",
+           label="{\\rm GPU (Float64)}", color=COL_GPU64, edgecolor="none")
+    if has_gpu32
+        ax.bar(x .- (nbar - 1) * w / 2 .+ 2w, g32_med, w,
+               yerr=g32_iq, capsize=3, ecolor="#333333",
+               label="{\\rm GPU (Float32)}", color=COL_GPU32, edgecolor="none")
+    end
+
+    # speedup annotations: nested brackets for GPU64 and GPU32
+    for i in eachindex(kernels)
+        xi = i - 1
+        y_top = maximum([cpu_med[i] + cpu_iq[i], g64_med[i] + g64_iq[i]])
+        if has_gpu32
+            y_top = max(y_top, g32_med[i] + g32_iq[i])
+        end
+
+        # positions of the three bar centers
+        x_cpu = xi - (nbar - 1) * w / 2
+        x_g64 = x_cpu + w
+        x_g32 = has_gpu32 ? x_cpu + 2w : x_g64
+
+        # inner bracket: CPU → GPU64
+        y_inner = y_top * 1.15
+        tick_h = y_inner * 0.06
+        sp64 = cpu_med[i] / g64_med[i]
+        ax.plot([x_cpu - w/2, x_cpu - w/2, x_g64 + w/2, x_g64 + w/2],
+                [y_inner - tick_h, y_inner, y_inner, y_inner - tick_h],
+                color=COL_GPU64, lw=0.8, clip_on=false)
+        ax.text((x_cpu + x_g64) / 2, y_inner * 1.04,
+                @sprintf("\$\\sim %.0f\\times\$", sp64),
+                ha="center", va="bottom", fontsize=7, fontweight="bold", color=COL_GPU64)
+
+        if has_gpu32
+            # outer bracket: CPU → GPU32
+            y_outer = y_inner * 1.55
+            sp32 = cpu_med[i] / g32_med[i]
+            ax.plot([x_cpu - w/2, x_cpu - w/2, x_g32 + w/2, x_g32 + w/2],
+                    [y_outer - tick_h, y_outer, y_outer, y_outer - tick_h],
+                    color=COL_GPU32, lw=0.8, clip_on=false)
+            ax.text((x_cpu + x_g32) / 2, y_outer * 1.04,
+                    @sprintf("\$\\sim %.0f\\times\$", sp32),
+                    ha="center", va="bottom", fontsize=7, fontweight="bold", color=COL_GPU32)
+        end
+    end
+
     ax.set_xticks(collect(x))
     ax.set_xticklabels(["{\\rm " * k * "}" for k in kernels], rotation=20, ha="right")
     ax.set_ylabel("{\\rm Time [ms]}")
     ax.set_title("{\\rm Convolution kernel timings}")
-    ax.legend()
+    ax.legend(fontsize=9)
     ax.set_yscale("log")
     ax.grid(false)
 
-    y_max_data = maximum(cpu_median_ms .+ cpu_iqr_ms)
-    ax.set_ylim(nothing, y_max_data * 5.0)
+    y_max_data = maximum(cpu_med .+ cpu_iq)
+    ax.set_ylim(nothing, y_max_data * (has_gpu32 ? 8.0 : 5.0))
 
     fig.tight_layout()
     fig.savefig(joinpath(PLOTDIR, "benchmark_convolutions.png"), dpi=150, bbox_inches="tight")
@@ -103,35 +123,41 @@ end
 # 2. Per-tile breakdown + end-to-end timing
 # ══════════════════════════════════════════════════════════════════════════════
 try
-    # read per-tile data
+    # read per-tile data (new format: step,cpu_ms,gpu64_ms,gpu32_ms)
     _, pt_rows = read_csv(joinpath(DATADIR, "pertile_timings.csv"))
     steps = [r[1] for r in pt_rows]
     cpu_ms = [parse(Float64, r[2]) for r in pt_rows]
-    gpu_ms = [parse(Float64, r[3]) for r in pt_rows]
+    gpu_ms = [parse(Float64, r[3]) for r in pt_rows]  # gpu64 for the breakdown plot
 
-    # read end-to-end data
+    # read end-to-end data (new format: backend,precision,time_s,...)
     _, e2e_rows = read_csv(joinpath(DATADIR, "e2e_timings.csv"))
+
+    # detect CSV format: new has "precision" as column 2
+    has_precision_col = length(e2e_rows[1]) >= 8
+
     e2e = Dict{String, NamedTuple{(:time_s, :Nphi, :Natm, :Nlambda), NTuple{4, Float64}}}()
     for r in e2e_rows
-        e2e[r[1]] = (time_s=parse(Float64, r[2]), Nphi=parse(Float64, r[3]),
-                      Natm=parse(Float64, r[4]), Nlambda=parse(Float64, r[5]))
+        if has_precision_col
+            key = r[1] == "cpu" ? "cpu" : r[1] * "_" * r[2]  # "gpu_float64", "gpu_float32"
+            e2e[key] = (time_s=parse(Float64, r[3]), Nphi=parse(Float64, r[4]),
+                        Natm=parse(Float64, r[5]), Nlambda=parse(Float64, r[6]))
+        else
+            e2e[r[1]] = (time_s=parse(Float64, r[2]), Nphi=parse(Float64, r[3]),
+                         Natm=parse(Float64, r[4]), Nlambda=parse(Float64, r[5]))
+        end
     end
 
-    has_gpu = haskey(e2e, "gpu") && any(g -> g > 0.0, gpu_ms)
+    has_gpu = any(k -> startswith(k, "gpu"), keys(e2e)) && any(g -> g > 0.0, gpu_ms)
     if !has_gpu
         println("Skipping per-tile plot: no GPU data")
     else
         Nλ = Int(e2e["cpu"].Nlambda)
         Natm = Int(e2e["cpu"].Natm)
 
-        # GPU fuses micro+tau+cfunc into one "intensity" measurement;
-        # the CSV stores the fused time in row 1, zeros in rows 2-3
-        gpu_ms_fused = [gpu_ms[1], gpu_ms[4]]  # intensity, macro
-
         cpu_total = sum(cpu_ms)
-        gpu_total = sum(gpu_ms_fused)
+        gpu_total = sum(gpu_ms)
         cpu_pct = cpu_ms ./ cpu_total .* 100.0
-        gpu_pct = gpu_ms_fused ./ gpu_total .* 100.0
+        gpu_pct = gpu_ms ./ gpu_total .* 100.0
 
         pe = PythonPlot.pyimport("matplotlib.patheffects")
         bar_stroke = [pe.withStroke(linewidth=0.0, foreground="black")]
@@ -140,8 +166,8 @@ try
 
         step_labels = ["{\\rm Microturbulence}", "{\\rm Optical depth}",
                        "{\\rm Contribution fn.}", "{\\rm Macroturbulence}"]
-        colors_cpu = ["#91D1F7", "#56B4E9", "#2A96D1", "#1A7AB5"]
-        colors_gpu = ["#F5A66E", "#D55E00"]
+        colors_cpu = ["#B8DFFB", COL_CPU_1T, COL_CPU_MT, "#1A7AB5"]
+        colors_gpu = [COL_GPU64, "#F5A66E", "#FFD3A6", "#B8432E"]
 
         bar_h = 0.55
         y_cpu = 0
@@ -166,21 +192,16 @@ try
         end
 
         # GPU row
-        ax_brk.barh(y_gpu, gpu_pct[1], left=0.0, color=colors_gpu[1],
-                    edgecolor="white", height=bar_h, zorder=3)
-        if gpu_pct[1] > pct_min_inside
-            ax_brk.text(gpu_pct[1] / 2, y_gpu, @sprintf("{\\rm %.2f ms}", gpu_ms_fused[1]),
-                        ha="center", va="center", fontsize=8, color="white",
-                        fontweight="bold", zorder=4, path_effects=bar_stroke)
-        end
-
-        ax_brk.barh(y_gpu, gpu_pct[2], left=gpu_pct[1], color=colors_gpu[2],
-                    edgecolor="white", height=bar_h, zorder=3)
-        if gpu_pct[2] > pct_min_inside
-            ax_brk.text(gpu_pct[1] + gpu_pct[2] / 2, y_gpu,
-                        @sprintf("{\\rm %.2f ms}", gpu_ms_fused[2]),
-                        ha="center", va="center", fontsize=8, color="white",
-                        fontweight="bold", zorder=4, path_effects=bar_stroke)
+        gpu_left = 0.0
+        for (i, (label, pct, ms)) in enumerate(zip(step_labels, gpu_pct, gpu_ms))
+            ax_brk.barh(y_gpu, pct, left=gpu_left, color=colors_gpu[i],
+                        edgecolor="white", height=bar_h, zorder=3)
+            if pct > pct_min_inside
+                ax_brk.text(gpu_left + pct / 2, y_gpu, @sprintf("{\\rm %.2f ms}", ms),
+                            ha="center", va="center", fontsize=8, color="white",
+                            fontweight="bold", zorder=4, path_effects=bar_stroke)
+            end
+            gpu_left += pct
         end
 
         # total time annotations
@@ -227,9 +248,12 @@ try
         end
 
         # GPU annotations (above GPU bar)
-        gpu_labels = ["{\\rm Intensity (fused)}", "{\\rm Macroturbulence}"]
-        gpu_lefts = [0.0, gpu_pct[1]]
-        gpu_x_mids = [left + pct / 2 for (left, pct) in zip(gpu_lefts, gpu_pct)]
+        gpu_x_mids = Float64[]
+        gpu_cum = 0.0
+        for pct in gpu_pct
+            push!(gpu_x_mids, gpu_cum + pct / 2)
+            gpu_cum += pct
+        end
 
         gpu_dy = fill(base_dy, length(gpu_pct))
         for i in 2:length(gpu_pct)
@@ -243,7 +267,7 @@ try
                         [y_gpu + bar_h / 2, y_gpu + bar_h / 2 + gpu_dy[i]],
                         color="#999999", lw=0.5, zorder=4)
         end
-        for (i, (label, x_mid)) in enumerate(zip(gpu_labels, gpu_x_mids))
+        for (i, (label, x_mid)) in enumerate(zip(step_labels, gpu_x_mids))
             ax_brk.text(x_mid, y_gpu + bar_h / 2 + gpu_dy[i],
                         label, ha="center", va="bottom", fontsize=ann_fs,
                         color=ann_color, bbox=ann_bbox, zorder=5)
@@ -252,7 +276,7 @@ try
         max_below = maximum(cpu_dy) + 0.5
         max_above = maximum(gpu_dy) + 0.7
         ax_brk.set_yticks([y_cpu, y_gpu])
-        ax_brk.set_yticklabels(["{\\rm CPU}", "{\\rm GPU}"])
+        ax_brk.set_yticklabels(["{\\rm CPU}", "{\\rm GPU (Float64)}"])
         ax_brk.set_xlim(-0.2, 100.3)
         ax_brk.set_ylim(y_cpu - max_below, y_gpu + max_above)
         ax_brk.set_xlabel("{\\rm Fraction of per-tile time [\\%]}")
@@ -279,23 +303,20 @@ try
     max_s = [parse(Float64, r[4]) for r in rows]
     speedups = [parse(Float64, r[5]) for r in rows]
 
-    # error bars on speedup: propagate min/max times through t1/t
-    t1 = median_s[1]
-    speedup_lo = speedups .- t1 ./ max_s   # slower run → lower speedup
-    speedup_hi = t1 ./ min_s .- speedups   # faster run → higher speedup
-
-    # read Nϕ from e2e CSV if available, else default
+    # read Nϕ from e2e CSV if available
     Nϕ = 128
     try
         _, e2e_rows = read_csv(joinpath(DATADIR, "e2e_timings.csv"))
-        Nϕ = Int(parse(Float64, e2e_rows[1][3]))
+        # handle both old (col 3) and new (col 4) CSV formats
+        Nϕ = length(e2e_rows[1]) >= 8 ? Int(parse(Float64, e2e_rows[1][4])) :
+                                         Int(parse(Float64, e2e_rows[1][3]))
     catch; end
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
-    ax1.errorbar(sorted_nt, speedups, yerr=0.0, # (speedup_lo, speedup_hi),
-                 fmt="o-", color="#2A96D1", lw=2, ms=6, capsize=3,
-                 ecolor="#2A96D1", label="{\\rm Measured}")
+    ax1.errorbar(sorted_nt, speedups, yerr=0.0,
+                 fmt="o-", color=COL_CPU_MT, lw=2, ms=6, capsize=3,
+                 ecolor=COL_CPU_MT, label="{\\rm Measured}")
     ax1.plot([1, maximum(sorted_nt)], [1, maximum(sorted_nt)], "--",
              color="#999999", lw=1, label="{\\rm Ideal}")
     ax1.set_xlabel("{\\rm Number of threads}")
@@ -305,10 +326,8 @@ try
     ax1.set_xlim(0, maximum(sorted_nt) + 1)
     ax1.set_ylim(0, maximum(sorted_nt) + 1)
 
-    yerr_lo = median_s .- min_s
-    yerr_hi = max_s .- median_s
-    ax2.errorbar(sorted_nt, median_s, yerr=0.0, # (yerr_lo, yerr_hi),
-                 fmt="s-", color="#D55E00", lw=2, ms=6, capsize=3, ecolor="#D55E00")
+    ax2.errorbar(sorted_nt, median_s, yerr=0.0,
+                 fmt="s-", color=COL_CPU_MT, lw=2, ms=6, capsize=3, ecolor=COL_CPU_MT)
     ax2.set_xlabel("{\\rm Number of threads}")
     ax2.set_ylabel("{\\rm Wall-clock time [s]}")
     ax2.set_title(@sprintf("{\\rm Disk integration (}\$N_\\phi\${\\rm =%d)}", Nϕ))
@@ -322,7 +341,7 @@ catch e
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. Nλ scaling (CPU 1T, CPU NT, GPU)
+# 4. Nλ scaling (CPU 1T, CPU NT, GPU64, GPU32)
 # ══════════════════════════════════════════════════════════════════════════════
 try
     _, rows = read_csv(joinpath(DATADIR, "nlambda_scaling.csv"))
@@ -337,7 +356,16 @@ try
         mn = parse(Float64, r[6])
         mx = parse(Float64, r[7])
 
-        key = backend == "gpu" ? "GPU" : (threads == 1 ? "CPU (1 thread)" : @sprintf("CPU (%d threads)", threads))
+        if backend == "gpu_float32"
+            key = "GPU (Float32)"
+        elseif backend == "gpu_float64" || backend == "gpu"
+            key = "GPU (Float64)"
+        elseif threads == 1
+            key = "CPU (1 thread)"
+        else
+            key = @sprintf("CPU (%d threads)", threads)
+        end
+
         if !haskey(series, key)
             series[key] = (Int[], Float64[], Float64[], Float64[])
         end
@@ -349,9 +377,11 @@ try
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
 
-    # consistent styling per series
+    # styling per series
     style = Dict(
-        "CPU (1 thread)" => (color="#91D1F7", marker="^", ls="--"),
+        "CPU (1 thread)" => (color=COL_CPU_1T, marker="^", ls="--"),
+        "GPU (Float64)"  => (color=COL_GPU64, marker="s", ls="-"),
+        "GPU (Float32)"  => (color=COL_GPU32, marker="D", ls="-"),
     )
     # find the multi-thread key dynamically
     cpu_mt_key = ""
@@ -361,12 +391,12 @@ try
         end
     end
     if !isempty(cpu_mt_key)
-        style[cpu_mt_key] = (color="#2A96D1", marker="o", ls="-")
+        style[cpu_mt_key] = (color=COL_CPU_MT, marker="o", ls="-")
     end
-    style["GPU"] = (color="#D55E00", marker="s", ls="-")
 
-    # plot order: 1T, NT, GPU
-    plot_order = filter(k -> haskey(series, k), ["CPU (1 thread)", cpu_mt_key, "GPU"])
+    # plot order
+    plot_order = filter(k -> haskey(series, k),
+        ["CPU (1 thread)", cpu_mt_key, "GPU (Float64)", "GPU (Float32)"])
 
     for key in plot_order
         isempty(key) && continue

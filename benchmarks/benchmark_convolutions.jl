@@ -36,18 +36,34 @@ Npad = 2400
 αs_cont = zeros(Natm, Nλ)
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
 
-# GPU memory
-cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
-gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
+# GPU memory — Float64
+cmem64 = FT.ConvolutionMemory(Nλ, Natm, Npad; T=Float64)
+cmem_mac64 = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=Float64)
+gpu_mem = FT.GPUMemory(collect(λs_korg), atm_gpu)
 
-# velocities
-μ_v_rot = CUDA.zeros(Float64, Natm)
-σ_v_mic = CUDA.zeros(Float64, Natm) .+ 1200.0
+# GPU memory — Float32
+cmem32 = FT.ConvolutionMemory(Nλ, Natm, Npad; T=Float32)
+cmem_mac32 = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=Float32)
+
+# velocities — Float64
+μ_v_rot64 = CUDA.zeros(Float64, Natm)
+σ_v_mic64 = CUDA.zeros(Float64, Natm) .+ 1200.0
+
+# velocities — Float32
+μ_v_rot32 = CUDA.zeros(Float32, Natm)
+σ_v_mic32 = CUDA.zeros(Float32, Natm) .+ Float32(1200.0)
+
+# pre-allocate GPU arrays for microturbulence (avoid H2D transfer in loop)
+λs_gpu64 = CuArray(collect(Float64, λs_korg))
+αs_gpu64 = CuArray(αs)
+λs_gpu32 = CuArray(collect(Float32, λs_korg))
+αs_gpu32 = CuArray(Float32.(αs))
 
 # get a spectrum to convolve
-cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-tbc = Array(cfunc_flux_stationary.cfunc_dt)
+cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem64, σ_v_mic64)
+tbc64 = Array(cfunc_flux_stationary.cfunc_dt)
+tbc32 = Float32.(tbc64)
+λs_korg_f32 = Float32.(collect(λs_korg))
 
 # broadening params
 vsini = 4200.0
@@ -85,85 +101,103 @@ end
 # ── benchmark each kernel ──────────────────────────────────────────────────────
 kernels = String[]
 cpu_median_ms = Float64[]
-gpu_median_ms = Float64[]
+gpu64_median_ms = Float64[]
+gpu32_median_ms = Float64[]
 cpu_iqr_ms = Float64[]
-gpu_iqr_ms = Float64[]
+gpu64_iqr_ms = Float64[]
+gpu32_iqr_ms = Float64[]
 
-function record!(label, cpu_times, gpu_times)
+function record!(label, cpu_times, gpu64_times, gpu32_times)
     cpu_ms = cpu_times .* 1000
-    gpu_ms = gpu_times .* 1000
+    g64_ms = gpu64_times .* 1000
+    g32_ms = gpu32_times .* 1000
     push!(kernels, label)
     push!(cpu_median_ms, median(cpu_ms))
-    push!(gpu_median_ms, median(gpu_ms))
+    push!(gpu64_median_ms, median(g64_ms))
+    push!(gpu32_median_ms, median(g32_ms))
     push!(cpu_iqr_ms, iqr(cpu_ms))
-    push!(gpu_iqr_ms, iqr(gpu_ms))
-    speedup = median(cpu_ms) / median(gpu_ms)
-    @printf("  CPU: %.3f ± %.3f ms  GPU: %.3f ± %.3f ms  (%.0f×)\n",
-            median(cpu_ms), iqr(cpu_ms), median(gpu_ms), iqr(gpu_ms), speedup)
+    push!(gpu64_iqr_ms, iqr(g64_ms))
+    push!(gpu32_iqr_ms, iqr(g32_ms))
+    sp64 = median(cpu_ms) / median(g64_ms)
+    sp32 = median(cpu_ms) / median(g32_ms)
+    @printf("  CPU: %.3f ms  GPU64: %.3f ms (%.0f×)  GPU32: %.3f ms (%.0f×)\n",
+            median(cpu_ms), median(g64_ms), sp64, median(g32_ms), sp32)
 end
-
-# pre-allocate GPU arrays for microturbulence timing (avoid H2D transfer in loop)
-λs_gpu = CuArray(collect(λs_korg))
-αs_gpu = CuArray(αs)
 
 # microturbulence
 println("Microturbulence...")
 record!("Microturbulence",
     time_cpu() do
-        FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot), Array(σ_v_mic))
+        FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot64), Array(σ_v_mic64))
     end,
     time_gpu() do
-        FT.convolve_wavelength_axis_gpu(cmem, λs_gpu, αs_gpu, μ_v_rot, σ_v_mic)
+        FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, μ_v_rot64, σ_v_mic64)
+    end,
+    time_gpu() do
+        FT.convolve_wavelength_axis_gpu(cmem32, λs_gpu32, αs_gpu32, μ_v_rot32, σ_v_mic32)
     end)
 
 # gray rotation
 println("Gray rotation...")
 record!("Gray rotation",
     time_cpu() do
-        FT.convolve_gray_rotation(λs_korg, tbc, vsini, u1)
+        FT.convolve_gray_rotation(λs_korg, tbc64, vsini, u1)
     end,
     time_gpu() do
-        FT.convolve_gray_rotation_gpu(cmem_mac, λs_korg, tbc, vsini, u1)
+        FT.convolve_gray_rotation_gpu(cmem_mac64, λs_korg, tbc64, vsini, u1)
+    end,
+    time_gpu() do
+        FT.convolve_gray_rotation_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(vsini), Float32(u1))
     end)
 
 # isotropic RT macroturbulence
 println("Isotropic RT macro...")
 record!("Iso. RT macro",
     time_cpu() do
-        FT.convolve_iso_rt_macro(λs_korg, tbc, ζ_rt)
+        FT.convolve_iso_rt_macro(λs_korg, tbc64, ζ_rt)
     end,
     time_gpu() do
-        FT.convolve_iso_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt)
+        FT.convolve_iso_rt_macro_gpu(cmem_mac64, λs_korg, tbc64, ζ_rt)
+    end,
+    time_gpu() do
+        FT.convolve_iso_rt_macro_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(ζ_rt))
     end)
 
 # anisotropic RT macroturbulence
 println("Anisotropic RT macro...")
 record!("Aniso. RT macro",
     time_cpu() do
-        FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, 0.9)
+        FT.convolve_rt_macro(λs_korg, tbc64, ζ_rt, 0.9)
     end,
     time_gpu() do
-        FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, 0.9)
+        FT.convolve_rt_macro_gpu(cmem_mac64, λs_korg, tbc64, ζ_rt, 0.9)
+    end,
+    time_gpu() do
+        FT.convolve_rt_macro_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(ζ_rt), Float32(0.9))
     end)
 
 # Hirano rotation+macro
 println("Hirano rot+macro...")
 record!("Hirano rot+macro",
     time_cpu() do
-        FT.convolve_hirano_rotmacro(λs_korg, tbc, vsini, ζ_rt, u1, u2)
+        FT.convolve_hirano_rotmacro(λs_korg, tbc64, vsini, ζ_rt, u1, u2)
     end,
     time_gpu() do
-        FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, tbc, vsini, ζ_rt, u1, u2)
+        FT.convolve_hirano_rotmacro_gpu(cmem_mac64, λs_korg, tbc64, vsini, ζ_rt, u1, u2)
+    end,
+    time_gpu() do
+        FT.convolve_hirano_rotmacro_gpu(cmem_mac32, λs_korg_f32, tbc32,
+            Float32(vsini), Float32(ζ_rt), Float32(u1), Float32(u2))
     end)
 
 # ── save data ─────────────────────────────────────────────────────────────────
 open(joinpath(datadir, "convolution_timings.csv"), "w") do io
-    println(io, "kernel,cpu_median_ms,cpu_iqr_ms,gpu_median_ms,gpu_iqr_ms,speedup")
+    println(io, "kernel,cpu_median_ms,cpu_iqr_ms,gpu64_median_ms,gpu64_iqr_ms,gpu32_median_ms,gpu32_iqr_ms")
     for i in eachindex(kernels)
-        @printf(io, "%s,%.4f,%.4f,%.4f,%.4f,%.1f\n",
+        @printf(io, "%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
                 kernels[i], cpu_median_ms[i], cpu_iqr_ms[i],
-                gpu_median_ms[i], gpu_iqr_ms[i],
-                cpu_median_ms[i] / gpu_median_ms[i])
+                gpu64_median_ms[i], gpu64_iqr_ms[i],
+                gpu32_median_ms[i], gpu32_iqr_ms[i])
     end
 end
 println("\nData written to: ", joinpath(datadir, "convolution_timings.csv"))

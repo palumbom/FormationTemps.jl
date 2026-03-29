@@ -1,20 +1,3 @@
-"""
-End-to-end wall-clock time vs Nλ for CPU (1 thread), CPU (max threads), and GPU.
-
-Nλ is varied by changing Δλ over a fixed wavelength window (Fe I lines near
-6300 Å, buffer=2 Å).  Since Julia's thread count is set at startup, CPU runs
-are spawned as separate processes.
-
-Usage:
-    julia --project=. benchmarks/benchmark_nlambda.jl [max_threads]
-
-    max_threads  — thread count for the multi-threaded CPU runs
-                   (default: half of Sys.CPU_THREADS).
-
-Output:
-    benchmarks/data/nlambda_scaling.csv
-"""
-
 using Printf, Statistics
 
 # ── configuration ─────────────────────────────────────────────────────────────
@@ -85,7 +68,7 @@ using FormationTemps; FT = FormationTemps
 using Korg, Statistics, CUDA
 
 if !CUDA.functional()
-    println("RESULT:gpu,", ARGS[2], ",0,NaN,NaN,NaN")
+    println("RESULT:gpu_" * ARGS[4] * ",", ARGS[2], ",0,NaN,NaN,NaN")
     exit()
 end
 
@@ -104,10 +87,13 @@ star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0,
 Nphi = parse(Int, ARGS[1])
 dlambda = parse(Float64, ARGS[2])
 n_repeat = parse(Int, ARGS[3])
+precision_str = ARGS[4]  # "float64" or "float32"
+gpu_prec = precision_str == "float32" ? Float32 : Float64
 
 # warmup
 calc_formation_temp(star, linelist; Δλ=0.1, Nϕ=16,
-                    use_gpu=true, showprogress=false, ne_warn_thresh=Inf)
+                    use_gpu=true, gpu_precision=gpu_prec,
+                    showprogress=false, ne_warn_thresh=Inf)
 CUDA.synchronize()
 
 Nlambda = 0
@@ -116,14 +102,14 @@ for r in 1:n_repeat
     CUDA.synchronize()
     times[r] = @elapsed begin
         res = calc_formation_temp(star, linelist; Δλ=dlambda, Nϕ=Nphi,
-                                   use_gpu=true, showprogress=false,
-                                   ne_warn_thresh=Inf)
+                                   use_gpu=true, gpu_precision=gpu_prec,
+                                   showprogress=false, ne_warn_thresh=Inf)
         global Nlambda = length(res.wavs)
     end
     CUDA.synchronize()
 end
 
-println("RESULT:gpu,", dlambda, ",", Nlambda, ",",
+println("RESULT:gpu_", precision_str, ",", dlambda, ",", Nlambda, ",",
         median(times), ",", minimum(times), ",", maximum(times))
 """
 
@@ -187,20 +173,23 @@ for dλ in Δλ_values
         end
     end
 
-    # GPU
-    print(@sprintf("  GPU      Δλ=%.4f: ", dλ)); flush(stdout)
-    output, errmsg = run_worker(`julia --startup-file=no --project=$PROJECT_DIR $gpu_file $Nϕ $dλ $n_repeat`)
-    if errmsg !== nothing
-        println("skipped (error)")
-        !isempty(errmsg) && println("  stderr: ", first(errmsg, 500))
-    else
-        r = parse_result(output)
-        if r !== nothing && !isnan(r.median_s)
-            push!(results, (backend="gpu", threads=1, dlambda=dλ, Nlambda=r.Nlambda,
-                            median_s=r.median_s, min_s=r.min_s, max_s=r.max_s))
-            @printf("Nλ=%5d  %.2f s\n", r.Nlambda, r.median_s)
+    # GPU Float64 and Float32
+    for prec in ["float64", "float32"]
+        label = prec == "float64" ? "GPU64" : "GPU32"
+        print(@sprintf("  %-6s  Δλ=%.4f: ", label, dλ)); flush(stdout)
+        output, errmsg = run_worker(`julia --startup-file=no --project=$PROJECT_DIR $gpu_file $Nϕ $dλ $n_repeat $prec`)
+        if errmsg !== nothing
+            println("skipped (error)")
+            !isempty(errmsg) && println("  stderr: ", first(errmsg, 500))
         else
-            println("skipped (no GPU)")
+            r = parse_result(output)
+            if r !== nothing && !isnan(r.median_s)
+                push!(results, (backend="gpu_" * prec, threads=1, dlambda=dλ, Nlambda=r.Nlambda,
+                                median_s=r.median_s, min_s=r.min_s, max_s=r.max_s))
+                @printf("Nλ=%5d  %.2f s\n", r.Nlambda, r.median_s)
+            else
+                println("skipped (no GPU)")
+            end
         end
     end
 

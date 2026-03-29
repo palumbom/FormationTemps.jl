@@ -1,21 +1,3 @@
-"""
-CPU threading scaling benchmark for disk integration.
-
-Measures end-to-end wall-clock time for `calc_formation_temp` with `convolve=false`
-(numerical disk integration) as a function of the number of Julia threads. Since
-Julia's thread count is set at startup, this script spawns separate Julia processes
-for each thread count and collects timings.
-
-Usage:
-    julia --project=. benchmarks/benchmark_threading.jl [max_threads]
-
-    max_threads  — upper bound on thread counts to test (default: number of physical cores).
-
-Output:
-    benchmarks/data/threading_scaling.csv
-    docs/src/static/benchmark_threading.png  (if PythonPlot available)
-"""
-
 using Printf, Statistics, DelimitedFiles
 
 # ── configuration ─────────────────────────────────────────────────────────────

@@ -8,15 +8,7 @@ FormationTemps.jl parallelizes the disk integration pipeline in two complementar
 
 ## CPU Multithreading
 
-### What gets parallelized
-
-When `use_gpu=false` and `convolve=false`, `calc_formation_temp` iterates over every visible tile on the stellar surface (typically thousands for `Nϕ = 128`). Each tile independently computes microturbulent broadening, optical depth, the intensity contribution function, and macroturbulent broadening. These tiles are distributed across Julia threads using `Threads.@threads` with `:static` scheduling.
-
-Each thread receives its own [`CPUTileWorkspace`](@ref) containing pre-allocated working arrays (`τs`, contribution functions, and per-thread accumulators). After the loop, the per-thread accumulators are reduced to produce the final result.
-
-### Setup
-
-Start Julia with multiple threads:
+When `use_gpu=false` and `convolve=false`, `calc_formation_temp` distributes tiles across Julia threads. Start Julia with multiple threads to benefit:
 
 ```bash
 julia -t auto           # use all available cores
@@ -35,12 +27,6 @@ You can verify the thread count from within Julia:
 Threads.nthreads()
 ```
 
-### FFTW considerations
-
-FFTW plan creation is not thread-safe. Before entering the threaded tile loop, `calc_formation_temp` pre-warms the FFTW plan cache on the main thread and sets `FFTW.set_num_threads(1)` to disable FFTW's internal threading (which would compete with tile-level parallelism). The previous FFTW thread count is restored after the loop.
-
-### Limitations
-
 !!! warning "Python interop"
     CPU multithreading is **not compatible** with calling FormationTemps.jl from Python via juliacall/PythonCall. Julia's multi-threaded garbage collector can conflict with PythonCall's runtime bridge, causing hard crashes (SIGBUS/segfault). When calling from Python, `JULIA_NUM_THREADS` must be set to `1`. See the [Python Tutorial](@ref "Python Tutorial") for details.
 
@@ -49,6 +35,18 @@ FFTW plan creation is not thread-safe. Before entering the threaded tile loop, `
 ## GPU Acceleration
 
 GPU acceleration is enabled by default when a compatible NVIDIA device is detected (`CUDA.functional() == true`); pass `use_gpu=false` to force the CPU path.
+
+### Setup
+
+GPU support requires an NVIDIA GPU and a working CUDA toolkit. CUDA.jl handles driver detection and toolkit installation automatically in most cases:
+
+```julia
+using CUDA
+CUDA.functional()  # should return true
+CUDA.versioninfo()  # check device and toolkit details
+```
+
+If `CUDA.functional()` returns `false`, consult the [CUDA.jl troubleshooting guide](https://cuda.juliagpu.org/stable/installation/troubleshooting/). FormationTemps.jl will fall back to the CPU path transparently.
 
 ### GPU precision
 
@@ -69,40 +67,7 @@ The disk integration pipeline repeats the full radiative transfer calculation fo
 3. **Contribution function** — Planck-weighted intensity contribution per layer, combined with `dτ`.
 4. **Macroturbulent broadening** — radial-tangential convolution of the contribution function.
 
-On the GPU, tiles are processed in batches of `B` (automatically sized to fit GPU memory). Steps 1--3 use batched CUDA kernels ([`BatchedMicroConvMem`](@ref) for microturbulence, `calc_tau_*_batched!` for optical depth, `calc_intensity_cfunc_dt_batched!` for contribution functions). Step 4 uses a separate FFT-based convolution kernel per tile. Pre-allocated memory structs ([`GPUMemory`](@ref), [`ConvolutionMemory`](@ref), [`BatchedMicroConvMem`](@ref)) eliminate per-tile allocations.
-
-#### Additional GPU optimizations
-
-- **Batched tile processing**: tiles are grouped into batches of `B` (up to 64) and processed simultaneously. The batch size is chosen to stay within 50% of free GPU memory. Dual CUDA streams overlap total and continuum absorption processing.
-- **Signal caching**: [`BatchedMicroConvMem`](@ref) caches the forward FFT of the absorption signal (`signal_cached` flag). During disk integration, the absorption coefficients are identical across tiles — only the Doppler shift kernel changes — so the signal FFT is computed once and reused for all batches.
-- **Macroturbulence kernel caching**: the radial-tangential kernel depends only on `μ` (the cosine of the viewing angle), not on the tile's rotational velocity. Since many tiles share the same `μ`, kernels are precomputed for each unique `μ` value and looked up during the tile loop.
-- **FFT-friendly padding**: convolution buffers are padded to lengths with small prime factors (2, 3, 5, 7) for efficient FFTs via CUFFT.
-- **Buffer reuse**: per-tile contribution function results are written into pre-allocated GPU buffers, avoiding repeated `CuArray` allocations during the tile loop.
-
-### Setup
-
-GPU support requires an NVIDIA GPU and a working CUDA toolkit. CUDA.jl handles driver detection and toolkit installation automatically in most cases:
-
-```julia
-using CUDA
-CUDA.functional()  # should return true
-CUDA.versioninfo()  # check device and toolkit details
-```
-
-If `CUDA.functional()` returns `false`, consult the [CUDA.jl troubleshooting guide](https://cuda.juliagpu.org/stable/installation/troubleshooting/). FormationTemps.jl will fall back to the CPU path transparently.
-
-### Memory layout
-
-The GPU path pre-allocates all working arrays at the start of a `calc_formation_temp` call:
-
-| Struct | Contents | Lifetime |
-|---|---|---|
-| [`AtmosphereGPU`](@ref) | Temperature, number density, electron density, optical depth scale as `CuArrays`; typed at `gpu_precision` | One per call |
-| [`GPUMemory`](@ref) | `αs`, `τs`, `cfunc`, `cfunc_dt`, and anchored-τ / Bezier work arrays | One per stream (total + continuum) |
-| [`ConvolutionMemory`](@ref) | Padded FFT buffers, CUFFT plans, cached signal/kernel transforms | Stationary flux computation |
-| [`BatchedMicroConvMem`](@ref) | Shared signal FFT + per-tile batched Doppler filter/convolution buffers | One per stream (total + continuum) during disk integration |
-
-GPU memory usage is determined at allocation time and remains constant throughout the tile loop. All GPU structs are parameterized on the float type from `gpu_precision` (default `Float64`; pass `Float32` to halve memory).
+On the GPU, tiles are processed in batches and steps 1–3 use batched CUDA kernels. Step 4 uses a separate FFT-based convolution kernel per tile. All GPU memory is pre-allocated at the start of the call and reused throughout.
 
 ## Benchmarks
 
@@ -110,7 +75,7 @@ The results below were obtained on an Intel Xeon w5-3435X (16 cores / 32 threads
 
 ### Per-tile breakdown
 
-The figure below shows the normalized per-tile timing breakdown for CPU and GPU. On the GPU, the microturbulence, optical depth, and contribution function steps are fused into a single kernel dispatch.
+The figure below shows the normalized per-tile timing breakdown for CPU and GPU.
 
 ![per-tile benchmark](static/benchmark_pertile.png)
 
@@ -134,7 +99,7 @@ Individual broadening kernel comparisons on a two-line Fe I test spectrum (`Nλ 
 
 ## CPU vs. GPU numerical differences
 
-The CPU and GPU paths use slightly different algorithms in a few places, leading to small numerical differences. In brief:
+The CPU and GPU paths use slightly different algorithms in a few places, leading to small numerical differences:
 
 - **Microturbulence**: the GPU applies an analytical Fourier-domain Gaussian; the CPU samples a real-space kernel. Flux differences are ~4×10⁻⁴ at typical parameters.
 - **RT macroturbulence kernels**: GPU `erfc` vs. CPU `erfc` differ at ~10⁻⁴ relative to peak.
@@ -142,9 +107,9 @@ The CPU and GPU paths use slightly different algorithms in a few places, leading
 
 ### Float32 vs. Float64 accuracy
 
-The figures below compare flux and formation temperature spectra ((for two Fe I lines near 6300 Å)) computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra; the middle and bottom rows show residuals relative to the CPU Float64 reference.
+The figures below compare flux and formation temperature spectra for two Fe I lines near 6300 Å, computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra (visually indistinguishable); the bottom row shows residuals relative to the CPU Float64 reference on a symmetric log scale, with both GPU precisions overplotted.
 
-GPU Float64 residuals are dominated by the algorithmic differences described above (Fourier-domain vs. real-space microturbulence, padded vs. circular convolution). GPU Float32 introduces additional single-precision rounding, primarily visible in the flux residuals at the ~10⁻³ level and in formation temperatures at the ~1–5 K level — well below the systematic uncertainties of 1D model atmospheres.
+GPU Float64 residuals (orange squares) are small — dominated by the algorithmic differences described above. GPU Float32 residuals (green triangles) are orders of magnitude larger but still modest: flux residuals at the ~10⁻³ level and formation temperature differences of ~1–5 K.
 
 ![GPU precision: convolution path](static/gpu_precision_convolve.png)
 

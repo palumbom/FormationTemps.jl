@@ -1,24 +1,3 @@
-"""
-Run all benchmarks and generate plots.
-
-Usage:
-    julia --project=. benchmarks/run_all.jl [max_threads]
-
-    max_threads  — thread count for threading/nlambda benchmarks
-                   (default: half of physical cores).
-
-Runs in order:
-    1. benchmark_convolutions.jl   (in-process, needs GPU)
-    2. benchmark_disk_integration.jl (in-process, needs GPU)
-    3. benchmark_memory.jl          (in-process, needs GPU)
-    4. benchmark_threading.jl       (spawns subprocesses)
-    5. benchmark_nlambda.jl         (spawns subprocesses)
-    6. plot_benchmarks.jl           (in-process)
-
-Steps 4 and 5 spawn their own Julia processes to vary thread counts,
-so they are run as separate processes from this script as well.
-"""
-
 using Printf
 
 const PROJECT_DIR = dirname(@__DIR__)

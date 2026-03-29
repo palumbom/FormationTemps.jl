@@ -1,9 +1,8 @@
-#!/usr/bin/env julia
-# Measure actual GPU memory costs of all struct types at Float64 and Float32.
+using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
-using Printf
+using Printf, Statistics
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 function gpu_used_bytes()
