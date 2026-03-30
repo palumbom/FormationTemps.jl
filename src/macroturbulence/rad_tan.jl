@@ -51,54 +51,34 @@ Returns:
 See also: [`rt_macro_kernel`](@ref), [`convolve_iso_rt_macro`](@ref)
 """
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
-    # short circuit
     if iszero(ζ_rt)
         return ys
     end
-
-    # offset the kernel by the velocity (discrete center)
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
-
-    # get the normalized kernel (GPU-style phase)
     kernel = rt_macro_kernel(vs, ζ_rt, μ)
-    kshift = ifftshift(kernel)
-
-    # return convolution via FFT (matches GPU convention)
-    return real(ifft(fft(ys) .* fft(kshift)))
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 function convolve_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T, μ::T) where T<:AF
-    # short circuit
     if iszero(ζ_rt)
         return ys
     end
-
-    # offset the kernel by the velocity (discrete center)
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
-
-    # get the normalized kernel (GPU-style phase)
     kernel = rt_macro_kernel(vs, ζ_rt, μ)
-    kshift = ifftshift(kernel)
-    ftk = fft(kshift)
-
-    # allocate array for output spectrum
-    ys_out = zeros(size(ys))
-    for t in axes(ys, 1)
-        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* ftk))
-    end
-    return ys_out
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 """
     _convolve_macro_inplace!(out, xs, ys, ζ_rt, μ, ws)
 
 In-place radial-tangential macroturbulence convolution using pre-allocated
-[`CPUTileWorkspace`](@ref) buffers. When `ζ_rt == 0`, copies `ys` into `out`
-directly. Otherwise computes the RT kernel once and applies it to all rows.
+[`CPUTileWorkspace`](@ref) buffers. Uses padded linear convolution with
+edge replication and R2C FFTs, matching the GPU path. When `ζ_rt == 0`,
+copies `ys` into `out` directly.
 """
 function _convolve_macro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
                                   ζ_rt::T, μ::T,
@@ -109,7 +89,8 @@ function _convolve_macro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
         return nothing
     end
 
-    i0 = length(xs) ÷ 2 + 1
+    Nλ = ws.Nλ
+    i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
 
     ϵ = T(1e-6)
@@ -118,17 +99,20 @@ function _convolve_macro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
     sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ * ϵ))
     sqrt_π = sqrt(T(π))
 
-    @inbounds for j in eachindex(ws.kernel_real)
+    # evaluate kernel into a temporary Nλ-length buffer, then normalize
+    kvec = Vector{T}(undef, Nλ)
+    @inbounds for j in 1:Nλ
         v = c_ms * (xs[j] - λ0) / λ0
         t1 = T(0.5) * exp(-(v / (ζ_rt * cosθ))^2) / (sqrt_π * ζ_rt * cosθ)
         t2 = T(0.5) * exp(-(v / (ζ_rt * sinθ))^2) / (sqrt_π * ζ_rt * sinθ)
-        ws.kernel_real[j] = t1 + t2
+        kvec[j] = t1 + t2
     end
-    s = sum(ws.kernel_real)
-    ws.kernel_real ./= s
+    s = sum(kvec)
+    kvec ./= s
 
-    _ifftshift_complex!(ws.kernel_ft, ws.kernel_real)
-    ws.fft_plan * ws.kernel_ft
+    # place kernel in DFT layout, then R2C FFT
+    _kernel_to_dft_layout!(ws.kernel_real, kvec, i0)
+    mul!(ws.kernel_ft, ws.fft_plan, ws.kernel_real)
 
     _apply_fft_kernel!(out, ys, ws.kernel_ft, ws, Nrows)
     return nothing
@@ -178,7 +162,7 @@ Returns:
 
 Notes:
 - Short-circuits (returns `CuArray(ys)`) when `ζ_rt` is zero.
-- CPU and GPU results differ at the spectrum edges due to circular vs padded FFT convention.
+- CPU and GPU both use padded linear convolution with edge replication.
 
 See also: [`convolve_rt_macro`](@ref), [`rt_macro_kernel`](@ref)
 """

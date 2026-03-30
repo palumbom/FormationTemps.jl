@@ -45,36 +45,19 @@ Returns:
 See also: [`gray_rot_kernel`](@ref), [`convolve_gray_rotation_gpu`](@ref)
 """
 function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,1}, vsini::T, u1::T) where T<:AF
-    # offset the kernel by the velocity
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
-
-    # get the normalized kernel (GPU-style phase: zero-lag at index 1)
     kernel = gray_rot_kernel(vs, vsini, u1)
-    kshift = ifftshift(kernel)
-
-    # return convolution via FFT (matches GPU convention)
-    return real(ifft(fft(ys) .* fft(kshift)))
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,2}, vsini::T, u1::T) where T<:AF
-    # offset the kernel by the velocity
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
-
-    # get the normalized kernel (GPU-style phase)
     kernel = gray_rot_kernel(vs, vsini, u1)
-    kshift = ifftshift(kernel)
-    ftk = fft(kshift)
-
-    # allocate array for output spectrum
-    ys_out = zeros(size(ys))
-    for t in axes(ys, 1)
-        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* ftk))
-    end
-    return ys_out
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 function compute_padded_gray_kernel_1D!(kernel_row, xs, λc, vsini, u1, Nλ, pad_left)
@@ -116,8 +99,7 @@ Returns:
 - `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
 
 Notes:
-- CPU and GPU results differ at the first and last `~vsini/c × λ₀/Δλ` pixels because
-  the CPU uses an unpadded circular FFT while the GPU uses a padded linear convolution.
+- CPU and GPU both use padded linear convolution with edge replication.
 
 See also: [`convolve_gray_rotation`](@ref), [`gray_rot_kernel`](@ref)
 """

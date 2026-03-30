@@ -42,7 +42,7 @@ vsini = 2100.0
 Δλ = 0.01
 u1 = 0.43
 u2 = 0.31
-Nϕ = 64
+Nϕ = 128
 
 star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                     vsini=vsini, v_macro=ζ_RT, v_micro=ξ)

@@ -23,65 +23,58 @@ Notes:
 See also: [`convolve_wavelength_axis_gpu`](@ref)
 """
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::T, σ_v::T) where {T<:AF}
-    # clamp broadening to prevent div by 0
     Δλ = median(diff(xs))
     σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
 
-    # gaussian width depends on wavelength (constant in velocity)
     σ(x) = max(x * (σ_v / c_ms), σ_floor)
     g(x, n) = exp(-((x - n) / σ(x))^2.0)
 
-    # offset the kernel by the velocity (use discrete center to avoid half-sample offset)
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     λc = (μ_v / c_ms) * λ0 + λ0
 
-    # sample and normalize the kernel
     kernel = g.(xs, λc)
     kernel ./= sum(kernel)
 
-    # FFT-style convolution that preserves the μ_v offset
-    kshift = ifftshift(kernel)
-    ftk = fft(kshift)
-
-    ys_out = zeros(size(ys))
-    for t in axes(ys, 1)
-        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* ftk))
-    end
-    return ys_out
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, σ_v::AA{T,1}) where {T<:AF}
-    # allocate for kernel 
-    kernel = zeros(length(xs))
+    Nλ = length(xs)
+    Npad = 512
+    L, _, pad_left, _ = _conv_mem_geometry(Nλ, Npad)
 
-    # allocate array for output spectrum
-    ys_out = zeros(size(ys))
-
-    # clamp broadening to prevent div by 0
     Δλ = median(diff(xs))
     σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
-
-    # discrete center reference
-    i0 = length(xs) ÷ 2 + 1
+    i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
 
-    # loop over slices of atmosphere
+    ys_out = zeros(T, size(ys))
+    kbuf = zeros(T, L)
+    kvec = Vector{T}(undef, Nλ)
+    sig = zeros(T, L)
+
     for t in axes(ys, 1)
-        # gaussian width depends on wavelength (constant in velocity)
         σ(x) = max(x * (σ_v[t] / c_ms), σ_floor)
         g(x, n) = exp(-((x - n) / σ(x))^2.0)
-
-        # offset the kernel by the velocity
         λc = (μ_v[t] / c_ms) * λ0 + λ0
 
-        # sample and normalize the kernel
-        kernel .= g.(xs, λc)
-        kernel ./= sum(kernel)
+        @inbounds for j in 1:Nλ
+            kvec[j] = g(xs[j], λc)
+        end
+        s = sum(kvec)
+        kvec ./= s
 
-        # FFT-style convolution that preserves the μ_v offset
-        kshift = ifftshift(kernel)
-        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* fft(kshift)))
+        _kernel_to_dft_layout!(kbuf, kvec, i0)
+        _pad_edges!(sig, view(ys, t, :), pad_left, Nλ)
+
+        sig_ft = rfft(sig)
+        ker_ft = rfft(kbuf)
+        sig_ft .*= ker_ft
+        conv = irfft(sig_ft, L)
+        @inbounds for j in 1:Nλ
+            ys_out[t, j] = conv[pad_left + j]
+        end
     end
     return ys_out
 end
@@ -99,7 +92,7 @@ future.
 function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
                                   μ_v::AA{T,1}, σ_v::AA{T,1},
                                   ws::CPUTileWorkspace) where T<:AF
-    Nλ = length(xs)
+    Nλ = ws.Nλ
     Natm = size(ys, 1)
     Δλ = median(diff(xs))
     σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
@@ -109,20 +102,22 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
     # check if kernel is uniform across rows (common case in disk integration)
     uniform = _allequal(μ_v) && _allequal(σ_v)
 
+    # temporary Nλ-length kernel buffer (reused per iteration)
+    kvec = Vector{T}(undef, Nλ)
+
     if uniform
-        # compute kernel once
         σ_val = σ_v[1]
         μ_val = μ_v[1]
         λc = (μ_val / c_ms) * λ0 + λ0
-        @inbounds for j in eachindex(ws.kernel_real)
+        @inbounds for j in 1:Nλ
             σx = max(xs[j] * (σ_val / c_ms), σ_floor)
-            ws.kernel_real[j] = exp(-((xs[j] - λc) / σx)^2.0)
+            kvec[j] = exp(-((xs[j] - λc) / σx)^2.0)
         end
-        s = sum(ws.kernel_real)
-        ws.kernel_real ./= s
+        s = sum(kvec)
+        kvec ./= s
 
-        _ifftshift_complex!(ws.kernel_ft, ws.kernel_real)
-        ws.fft_plan * ws.kernel_ft
+        _kernel_to_dft_layout!(ws.kernel_real, kvec, i0)
+        mul!(ws.kernel_ft, ws.fft_plan, ws.kernel_real)
 
         _apply_fft_kernel!(out, ys, ws.kernel_ft, ws, Natm)
     else
@@ -131,24 +126,23 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
             σ_val = σ_v[t]
             μ_val = μ_v[t]
             λc = (μ_val / c_ms) * λ0 + λ0
-            @inbounds for j in eachindex(ws.kernel_real)
+            @inbounds for j in 1:Nλ
                 σx = max(xs[j] * (σ_val / c_ms), σ_floor)
-                ws.kernel_real[j] = exp(-((xs[j] - λc) / σx)^2.0)
+                kvec[j] = exp(-((xs[j] - λc) / σx)^2.0)
             end
-            s = sum(ws.kernel_real)
-            ws.kernel_real ./= s
+            s = sum(kvec)
+            kvec ./= s
 
-            _ifftshift_complex!(ws.kernel_ft, ws.kernel_real)
-            ws.fft_plan * ws.kernel_ft
+            _kernel_to_dft_layout!(ws.kernel_real, kvec, i0)
+            mul!(ws.kernel_ft, ws.fft_plan, ws.kernel_real)
 
-            @inbounds for j in eachindex(ws.row_buf)
-                ws.row_buf[j] = complex(ys[t, j])
-            end
-            ws.fft_plan * ws.row_buf
-            ws.row_buf .*= ws.kernel_ft
-            ws.ifft_plan * ws.row_buf
-            @inbounds for j in axes(out, 2)
-                out[t, j] = real(ws.row_buf[j])
+            # pad signal row, R2C FFT, convolve, extract
+            _pad_edges!(ws.signal_padded, view(ys, t, :), ws.pad_left, Nλ)
+            mul!(ws.signal_ft, ws.fft_plan, ws.signal_padded)
+            ws.signal_ft .*= ws.kernel_ft
+            mul!(ws.result_buf, ws.ifft_plan, ws.signal_ft)
+            @inbounds for j in 1:Nλ
+                out[t, j] = ws.result_buf[ws.pad_left + j]
             end
         end
     end

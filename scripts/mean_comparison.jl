@@ -268,6 +268,7 @@ norm = mpl.colors.Normalize(vmin=1, vmax=length(wls_interest))
 colors = cmap(norm(1:length(wls_interest)))
 
 # loop over ftemps
+jsave = 21
 for j in eachindex(ftemps)
     # make figure objects
     fig, ax1 = plt.subplots(figsize=(9.2,4.8))
@@ -307,7 +308,7 @@ for j in eachindex(ftemps)
     ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
     fig.tight_layout()
     fig.savefig(joinpath(framedir, "line_lineup_$j.png"), bbox_inches="tight")
-    if j == 20
+    if j == jsave
         fig.savefig("figures/line_lineup.pdf", bbox_inches="tight")
     end
     plt.clf(); plt.close()
@@ -362,7 +363,7 @@ for j in eachindex(ftemps)
 
     fig.subplots_adjust(wspace=0.25)
     fig.savefig(joinpath(framedir, "cont_comparison_$j.png"), bbox_inches="tight")
-    if j == 11
+    if j == jsave
         @show ftemps[j]
         ax1.set_ylim(the_ymin, this_ymax[1] + 0.25)
         fig.savefig("figures/cont_comparison.pdf", bbox_inches="tight")

@@ -85,8 +85,7 @@ Individual broadening kernel timings for each convolution type (CPU vs GPU Float
 The CPU and GPU paths use slightly different algorithms in a few places, leading to small numerical differences:
 
 - Microturbulence: the GPU applies an analytical Fourier-domain Gaussian; the CPU samples a real-space kernel. Flux differences are ~4×10⁻⁴ at typical parameters.
-- RT macroturbulence kernels: GPU `erfc` vs. CPU `erfc` differ at ~10⁻⁴ relative to peak.
-- Rotation kernels: the CPU uses unpadded circular FFT; the GPU uses padded linear convolution. This produces edge effects in the first and last few pixels of the spectrum. Interior pixels agree to machine precision.
+- All broadening kernels (iso_rad_tan, rad_tan, rad_tan_two, gray_rot, Hirano): CPU and GPU both use padded linear convolution with edge replication. Agreement is at floating-point precision.
 
 ### Float32 vs. Float64 accuracy
 

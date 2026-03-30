@@ -40,46 +40,25 @@ See also: [`gray_iso_rt_macro_kernel`](@ref), [`convolve_iso_rt_macro_gpu`](@ref
 [`convolve_rt_macro`](@ref)
 """
 function convolve_iso_rt_macro(xs::AA{T,1}, ys::AA{T,1}, ζ_rt::T) where T<:AF
-    # short circuit
     if iszero(ζ_rt)
         return ys
     end
-
-    # offset the kernel by the velocity (discrete center)
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
-
-    # get the normalized kernel (GPU-style phase)
     kernel = gray_iso_rt_macro_kernel(vs, ζ_rt)
-    kshift = ifftshift(kernel)
-
-    # return convolution via FFT (matches GPU convention)
-    return real(ifft(fft(ys) .* fft(kshift)))
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 function convolve_iso_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
-    # short circuit
     if iszero(ζ_rt)
         return ys
     end
-
-    # offset the kernel by the velocity (discrete center)
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
-
-    # get the normalized kernel (GPU-style phase)
     kernel = gray_iso_rt_macro_kernel(vs, ζ_rt)
-    kshift = ifftshift(kernel)
-    ftk = fft(kshift)
-
-    # allocate array for output spectrum
-    ys_out = zeros(size(ys))
-    for t in axes(ys, 1)
-        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* ftk))
-    end
-    return ys_out
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 function compute_padded_iso_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, Nλ, pad_left)
@@ -118,8 +97,7 @@ Returns:
 
 Notes:
 - Short-circuits (returns `CuArray(ys)`) when `ζ_rt` is zero.
-- The GPU evaluates `erfc` in a CUDA kernel; results differ from the CPU `erfc`
-  (Julia standard library) by ~1e-4 relative to peak flux.
+- CPU and GPU both use padded linear convolution with edge replication.
 
 See also: [`convolve_iso_rt_macro`](@ref), [`gray_iso_rt_macro_kernel`](@ref)
 """

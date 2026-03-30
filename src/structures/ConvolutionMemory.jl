@@ -129,6 +129,102 @@ function _conv_mem_geometry(Nλ::Int, Npad::Int)
     return L, Npad_eff, pad_left, pad_right
 end
 
+# ── CPU padded linear convolution (R2C FFT) ──────────────────────────────────
+
+"""
+    _pad_edges!(dst, src, pad_left, Nλ)
+
+Fill length-L vector `dst` with edge-replicated padding of `src`:
+left pad = src[1], right pad = src[Nλ].
+"""
+function _pad_edges!(dst::Vector{T}, src, pad_left::Int, Nλ::Int) where T
+    @inbounds for j in 1:pad_left
+        dst[j] = src[1]
+    end
+    @inbounds for j in 1:Nλ
+        dst[pad_left + j] = src[j]
+    end
+    L = length(dst)
+    @inbounds for j in (pad_left + Nλ + 1):L
+        dst[j] = src[Nλ]
+    end
+    return nothing
+end
+
+"""
+    _kernel_to_dft_layout!(kbuf, kernel, i0)
+
+Place a length-Nλ `kernel` (with zero-lag at index `i0`) into a length-L DFT-ordered
+buffer `kbuf` (zero-lag at index 1, positive lags next, negative lags at end).
+"""
+function _kernel_to_dft_layout!(kbuf::Vector{T}, kernel::Vector{T}, i0::Int) where T
+    L = length(kbuf)
+    fill!(kbuf, zero(T))
+    @inbounds for j in eachindex(kernel)
+        d = j - i0
+        idx = d >= 0 ? d + 1 : L + d + 1
+        kbuf[idx] = kernel[j]
+    end
+    return nothing
+end
+
+"""
+    _padded_convolve(ys::Vector, kernel::Vector; Npad=512)
+    _padded_convolve(ys::Matrix, kernel::Vector; Npad=512)
+
+CPU padded linear convolution with edge replication using R2C FFT.
+Matches the GPU convolution strategy (padded signal, zero-padded kernel,
+extract valid region). Returns an array the same size as `ys`.
+"""
+function _padded_convolve(ys::Vector{T}, kernel::Vector{T}; Npad::Int=512) where T<:AF
+    Nλ = length(ys)
+    L, _, pad_left, _ = _conv_mem_geometry(Nλ, Npad)
+    i0 = Nλ ÷ 2 + 1
+
+    # pad signal with edge replication
+    sig = zeros(T, L)
+    _pad_edges!(sig, ys, pad_left, Nλ)
+
+    # place kernel in DFT layout (zero-lag at index 1)
+    kbuf = zeros(T, L)
+    _kernel_to_dft_layout!(kbuf, kernel, i0)
+
+    # R2C convolution
+    sig_ft = rfft(sig)
+    ker_ft = rfft(kbuf)
+    sig_ft .*= ker_ft
+    conv = irfft(sig_ft, L)
+
+    # extract valid region
+    return conv[pad_left+1 : pad_left+Nλ]
+end
+
+function _padded_convolve(ys::Matrix{T}, kernel::Vector{T}; Npad::Int=512) where T<:AF
+    Nλ = size(ys, 2)
+    Nrows = size(ys, 1)
+    L, _, pad_left, _ = _conv_mem_geometry(Nλ, Npad)
+    i0 = Nλ ÷ 2 + 1
+
+    # compute kernel FT once
+    kbuf = zeros(T, L)
+    _kernel_to_dft_layout!(kbuf, kernel, i0)
+    ker_ft = rfft(kbuf)
+
+    # convolve each row
+    sig = zeros(T, L)
+    out = zeros(T, Nrows, Nλ)
+    for t in 1:Nrows
+        _pad_edges!(sig, view(ys, t, :), pad_left, Nλ)
+        sig_ft = rfft(sig)
+        sig_ft .*= ker_ft
+        conv = irfft(sig_ft, L)
+        @inbounds for j in 1:Nλ
+            out[t, j] = conv[pad_left + j]
+        end
+    end
+    return out
+end
+
 # ── constructors ───────────────────────────────────────────────────────────────
 
 """

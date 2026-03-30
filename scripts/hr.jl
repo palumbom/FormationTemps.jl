@@ -30,7 +30,7 @@ astropy = pyimport("astropy.io.ascii")
 img_cmap = "viridis"
 μ_cmap = "autumn"
 
-# alias type 
+# alias type
 AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
@@ -45,7 +45,7 @@ end
 plotdir = joinpath(pwd(), "figures")
 !isdir(plotdir) && mkdir(plotdir)
 
-# read in brewer data 
+# read in brewer data
 bfile = joinpath(FT.datdir, "apjsaa6d5at8_mrt.txt")
 t = astropy.read(bfile)
 tmp = tempname()*".csv"
@@ -71,7 +71,7 @@ specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 
 # get the Fe I 6301 & 6302 lines (just cuz)
-wls = [l.wl for l in linelist] 
+wls = [l.wl for l in linelist]
 idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
 idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
@@ -109,7 +109,7 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
-# make the fit 
+# make the fit
 function quad_limb_darkening(μ::T, u1::T, u2::T) where T<:AF
     μ < zero(T) && return 0.0
     return !iszero(μ) * (one(T) - u1*(one(T)-μ) - u2*(one(T)-μ)^2)
@@ -146,7 +146,7 @@ for i in eachindex(T_effs)
 
     # get some abundances
     A_X = Korg.format_A_X(mohs[i])
- 
+
     # get the atmosphere
     atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(T_effs[i], loggs[i], A_X))
     zs = atm_gpu.zs
@@ -161,7 +161,7 @@ for i in eachindex(T_effs)
     αs_cont .= 0.0
     FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X, ne_warn_thresh=Inf)
 
-    # get vmicro 
+    # get vmicro
     vmic = FT.vmic_fit(T_effs[i])
     @show vmic
     @show vsinis[i]
@@ -184,19 +184,19 @@ for i in eachindex(T_effs)
     # plt.plot(μs, ints[idx_int, :])
     # plt.show()
 
-    # perform the fit 
+    # perform the fit
     xdata = μs
     ydata = ints[idx_int, :]
     p0 = [0.5, 0.25]
     fit = curve_fit(quad_limb_darkening, xdata, ydata, p0)
 
-    # write em 
+    # write em
     coeffs = coef(fit)
     u1 = coeffs[1]
     u2 = coeffs[2]
 
-    @show u1 
-    @show u2 
+    @show u1
+    @show u2
     println()
 
     # get cfunc for flux
@@ -206,13 +206,13 @@ for i in eachindex(T_effs)
     # get disk integrated continuum
     cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
     flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_struct)')
-    
+
     # convolution
     flux_convolution = FT.convolve_hirano_rotmacro(λs_korg, flux_stationary, vsinis[i], vmacs[i], u1, u2)
     flux_cont_convolution = FT.convolve_hirano_rotmacro(λs_korg, flux_cont_stationary, vsinis[i], vmacs[i], u1, u2)
     flux_convolution_norm .= (flux_convolution ./ flux_cont_convolution)'
 
-    # get disk stuff 
+    # get disk stuff
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[i]
@@ -241,24 +241,24 @@ for i in eachindex(T_effs)
 
         # get intensity stuff
         cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
-        
+
         tbc = cfunc_intensity_struct.cfunc_dt
         cfunc_int_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmacs[i], μs_cpu[k])
         flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[k]
 
         # now do continuum intensity
         cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
-        
+
         tbc_cont = cfunc_intensity_cont.cfunc_dt
         cfunc_int_cont_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, vmacs[i], μs_cpu[k])
         flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[k]
     end
 
-    # get the flux 
+    # get the flux
     flux_integration .*= 2π
     flux_cont_integration .*=2π
 
-    # now get cumulative cfuncs 
+    # now get cumulative cfuncs
     flux_integration_norm .= flux_integration ./ flux_cont_integration
 
     # fill max error
@@ -270,7 +270,7 @@ end
 outfile = joinpath(FT.datdir, "hr_error_data.jld2")
 jldsave(outfile; df.Teff, df.logg, vsinis, max_errors)
 
-# scatter plot 
+# scatter plot
 fig, ax1 = plt.subplots()
 sc = ax1.scatter(df.Teff, df.logg, s=vsinis./1000, c=max_errors, vmin=0.0, vmax=4.0)
 ax1.xaxis.set_inverted(true)

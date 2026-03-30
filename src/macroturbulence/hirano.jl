@@ -119,54 +119,41 @@ See also: [`hirano_rotmacro_ft_kernel`](@ref), [`convolve_hirano_rotmacro_gpu`](
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
                                   ζ_rt::T, u1::T, u2::T;
                                   intres::Int=intres_glob) where T<:AF
-    # velocity grid
     N = length(xs)
     i0 = N ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
     Δv = (vs[end] - vs[1]) / (N - 1)
 
-
-    # frequency grid and kernel FT
+    # compute kernel FT analytically, then IFFT to spatial domain
     σ = FFTW.fftfreq(N) ./ Δv
     Kσ = hirano_rotmacro_ft_kernel(σ, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
-
-    # inverse FT → circular kernel with zero-lag at index 1 (GPU-style phase)
     K_dft = Kσ ./ Δv
     k_circ = real(ifft(K_dft))
-    k_circ ./= sum(k_circ)
+    kernel = FFTW.fftshift(k_circ)
+    kernel ./= sum(kernel)
 
-    # convolution via FFT (matches GPU convention)
-    return real(ifft(fft(ys) .* fft(k_circ)))
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
                                   ζ_rt::T, u1::T, u2::T;
                                   intres::Int=intres_glob) where T<:AF
-    # velocity grid
     N = length(xs)
     i0 = N ÷ 2 + 1
     λ0 = xs[i0]
     vs = c_ms .* (xs .- λ0) ./ λ0
     Δv = (vs[end] - vs[1]) / (N - 1)
 
-
-    # frequency grid and kernel FT
+    # compute kernel FT analytically, then IFFT to spatial domain
     σ = FFTW.fftfreq(N) ./ Δv
     Kσ = hirano_rotmacro_ft_kernel(σ, vsini, ζ_rt; u1=u1, u2=u2, intres=intres)
-
-    # inverse FT → circular kernel with zero-lag at index 1 (GPU-style phase)
     K_dft = Kσ ./ Δv
     k_circ = real(ifft(K_dft))
-    k_circ ./= sum(k_circ)
-    ftk = fft(k_circ)
+    kernel = FFTW.fftshift(k_circ)
+    kernel ./= sum(kernel)
 
-    # allocate array for output spectrum
-    ys_out = zeros(size(ys))
-    for t in axes(ys, 1)
-        ys_out[t, :] .= real(ifft(fft(ys[t, :]) .* ftk))
-    end
-    return ys_out
+    return _padded_convolve(collect(T, ys), kernel)
 end
 
 function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=intres_glob) where T<:AF
@@ -210,8 +197,7 @@ Notes:
 - The Hirano FT kernel is computed entirely on the GPU via
   [`hirano_rotmacro_ft_kernel_gpu!`](@ref), then converted to the spatial domain
   and applied via padded FFT convolution on the device.
-- CPU and GPU results differ at the first and last `~vsini/c × λ₀/Δλ` pixels because
-  the CPU uses an unpadded circular FFT while the GPU uses a padded linear convolution.
+- CPU and GPU both use padded linear convolution with edge replication.
 
 See also: [`convolve_hirano_rotmacro`](@ref), [`hirano_rotmacro_ft_kernel_gpu!`](@ref)
 """
