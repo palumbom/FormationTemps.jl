@@ -1,15 +1,11 @@
 # Python Tutorial
 
-!!! note
-    FormationTemps.jl can be called from Python using
-    [juliacall](https://juliapy.github.io/PythonCall.jl/stable/juliacall/).
-    This requires a working Julia installation (v1.12+).
+FormationTemps.jl can be called from Python using [juliacall](https://juliapy.github.io/PythonCall.jl/stable/juliacall/). This requires a working Julia installation (v1.12+) and Python 3.12+ with [uv](https://docs.astral.sh/uv/) (recommended) or pip. We strongly advise against Conda.
 
 ## Prerequisites
 
-- **Julia 1.12+**: install from [julialang.org](https://julialang.org/downloads/) or via
-  [juliaup](https://github.com/JuliaLang/juliaup).
-- **Python 3.12+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip. We strongly advise against Conda.
+- Julia 1.12+: install from [julialang.org](https://julialang.org/downloads/) or via [juliaup](https://github.com/JuliaLang/juliaup).
+- Python 3.12+ with [uv](https://docs.astral.sh/uv/) (recommended) or pip.
 
 ## Installation
 
@@ -56,9 +52,9 @@ This pulls the latest compatible version of FormationTemps.jl from the
 [Julia General registry](https://github.com/JuliaRegistries/General).
 
 !!! warning
-    `PYTHON_JULIAPKG_EXE` is required on macOS with juliaup (see Troubleshooting).
-    `JULIA_NUM_THREADS=1` prevents GC crashes in the PythonCall bridge — **CPU
-    multithreading is not available** when calling from Python.
+    `PYTHON_JULIAPKG_EXE` is required on macOS with juliaup (see Troubleshooting below).
+    `JULIA_NUM_THREADS=1` prevents GC crashes in the PythonCall bridge — CPU
+    multithreading is not available when calling from Python.
     The local clone setup script (`deps/setup.py`) handles both automatically.
 
 ## Basic Usage
@@ -100,20 +96,19 @@ Markdown.parse("```python\n" * code * "\n```")
     ```python
     import ssl; print(ssl.OPENSSL_VERSION)
     ```
-    If it reports < 3.5, you need a Python built against a newer OpenSSL. Recreate
-    your venv pointing at one:
+    If it reports < 3.5, recreate your venv pointing at a Python built against a
+    newer OpenSSL:
     ```bash
     rm -rf .venv
     uv sync --python /path/to/python3
     ```
-    Where `/path/to/python3` is a Python with OpenSSL 3.5+. Options include:
-
-    - **macOS**: Homebrew Python (`/opt/homebrew/bin/python3`) links against Homebrew's OpenSSL, which is typically up to date.
-    - **Linux**: System Python from recent distros (Ubuntu 24.04+, Fedora 39+) ships OpenSSL 3.1+. On older distros, install a newer OpenSSL and rebuild Python via [pyenv](https://github.com/pyenv/pyenv).
-    - **Windows**: The [python.org installer](https://www.python.org/downloads/) bundles its own OpenSSL. Recent releases (3.13.4+) include OpenSSL 3.5.
-
-    uv's standalone Python builds (`uv python install`) currently bundle OpenSSL 3.0
-    and will **not** work.
+    On macOS, Homebrew Python (`/opt/homebrew/bin/python3`) links against Homebrew's
+    OpenSSL, which is typically up to date. On Linux, system Python from recent distros
+    (Ubuntu 24.04+, Fedora 39+) ships OpenSSL 3.1+; on older distros, install a newer
+    OpenSSL and rebuild Python via [pyenv](https://github.com/pyenv/pyenv). On Windows,
+    the [python.org installer](https://www.python.org/downloads/) bundles its own OpenSSL
+    (releases 3.13.4+ include OpenSSL 3.5). Note that uv's standalone Python builds
+    (`uv python install`) currently bundle OpenSSL 3.0 and will not work.
 
 !!! details "Julia GC crash (SIGBUS/segfault) during long computations"
     Julia's multi-threaded garbage collector can conflict with PythonCall's runtime
@@ -122,11 +117,10 @@ Markdown.parse("```python\n" * code * "\n```")
     ```bash
     export JULIA_NUM_THREADS=1
     ```
-    This disables Julia's CPU multithreading (the disk integration tile loop will
-    run single-threaded) but avoids the GC contention. **GPU acceleration is
-    unaffected** — pass `use_gpu=True` to benefit from GPU parallelism even with
-    `JULIA_NUM_THREADS=1`. If you need CPU multithreading, run the computation in
-    pure Julia and load the results in Python. See
+    This disables Julia's CPU multithreading but avoids the GC contention. GPU
+    acceleration is unaffected — pass `use_gpu=True` to benefit from GPU parallelism
+    even with a single Julia thread. If CPU multithreading is needed, run the
+    computation in pure Julia and load the results in Python. See
     [Parallelization](parallelization.md) for details.
 
 ## Tips
@@ -143,16 +137,14 @@ Markdown.parse("```python\n" * code * "\n```")
     configured with Julia's [CUDA.jl](https://cuda.juliagpu.org/stable/).
 
 !!! tip "Type mapping between Python and Julia"
-    - **Keyword arguments** map directly to Julia kwargs:
-      `FT.calc_formation_temp(star, linelist, use_gpu=False, convolve=True, u1=0.43, u2=0.31)`.
-    - **Arrays**: use `numpy.asarray(result.wavs)` to convert Julia arrays to numpy.
-      This is zero-copy for contiguous `Float64` arrays.
-    - **Booleans**: Python `True`/`False` map to Julia `true`/`false` automatically.
-    - **Indexing**: juliacall uses 0-based indexing from the Python side. When slicing
-      Julia arrays from Python, indices are shifted by one relative to Julia. For exact
-      Julia-equivalent slicing, use `jl.seval("array[1:10]")`.
+    Keyword arguments map directly to Julia kwargs (e.g.,
+    `FT.calc_formation_temp(star, linelist, use_gpu=False, convolve=True)`).
+    Julia arrays can be converted to numpy with `numpy.asarray(result.wavs)`,
+    which is zero-copy for contiguous `Float64` arrays. Python `True`/`False`
+    map to Julia `true`/`false` automatically. Note that juliacall uses 0-based
+    indexing from the Python side.
 
 !!! tip "Matplotlib backend"
-    Interactive backends (e.g. `macosx`, `Qt5Agg`) can crash under juliacall due to
+    Interactive backends (e.g., `macosx`, `Qt5Agg`) can crash under juliacall due to
     event loop conflicts. Use `matplotlib.use("Agg")` before importing `pyplot` and
     save figures to files instead of calling `plt.show()`.

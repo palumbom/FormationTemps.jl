@@ -9,13 +9,11 @@ Markdown.parse("```julia\n" * code * "\n```")
 ```
 ![formation_temps](static/temp_example_jl.png)
 
-The high-level convenience function ```calc_formation_temp``` provides a few optional arguments discussed below. 
+The high-level convenience function ```calc_formation_temp``` provides a few optional arguments discussed below.
 
 ## Convolution vs. Integration
 
-> `convolve=false`
-
-At low spectral resolving power, convolutions can be used to approximate the effects of macroturbulent and rotational broadening. As shown in Section 2.1.4 of the [paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), this approximation can fail at higher resolution. By default, ```calc_formation_temp``` performs an explicit disk integration to evaluate model spectra and formation temperatures. Though more accurate, this approach is slower. To use the convolution approximation, ```convolve=true``` can be supplied to ```calc_formation_temp```. A plot comparing the convolution and integration fluxes and temperatures is shown below for a solar-like model star. As shown in the [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), the error incurred by the convolution approximation grows with $v \sin i$. 
+At low spectral resolving power, convolutions can be used to approximate the effects of macroturbulent and rotational broadening. As shown in Section 2.1.4 of the [paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), this approximation can fail at higher resolution. By default, ```calc_formation_temp``` performs an explicit disk integration to evaluate model spectra and formation temperatures. Though more accurate, this approach is slower. To use the convolution approximation, pass ```convolve=true``` to ```calc_formation_temp```. A plot comparing the convolution and integration fluxes and temperatures is shown below for a solar-like model star. As shown in the [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), the error incurred by the convolution approximation grows with $v \sin i$.
 
 ![convolution_vs_integration](static/convolution_vs_integration.png)
 
@@ -39,12 +37,6 @@ No code changes are required — `calc_formation_temp` detects the available thr
 
 ### GPU acceleration
 
-> `use_gpu=true`
-
-By default, ```calc_formation_temp``` will use an NVIDIA GPU to accelerate the computation of spectra, if one is present and configured. The [CUDA.jl documentation](https://cuda.juliagpu.org/stable/) provides installation instructions, though it is fortunately fairly autonomous. Pass `use_gpu=false` to force the CPU path.
-
-> `gpu_precision=Float32`
-
-Pass `gpu_precision=Float32` to run GPU computations at single precision. This roughly halves GPU memory and can improve throughput on consumer GPUs. Absorption coefficients are always computed at Float64 (a Korg requirement) and converted before GPU upload. The default is `Float64`.
+By default, ```calc_formation_temp``` will use an NVIDIA GPU to accelerate the computation of spectra, if one is present and configured. The [CUDA.jl documentation](https://cuda.juliagpu.org/stable/) provides installation instructions. Pass `use_gpu=false` to force the CPU path. Pass `gpu_precision=Float32` to run GPU computations at single precision, which roughly halves GPU memory and can improve throughput on consumer GPUs. Absorption coefficients are always computed at Float64 (a Korg requirement) and converted before GPU upload.
 
 For details on what gets accelerated, memory layout, benchmarks, and CPU/GPU numerical differences, see the [Parallelization](parallelization.md) guide.

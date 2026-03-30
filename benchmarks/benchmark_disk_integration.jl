@@ -11,7 +11,7 @@ datadir = joinpath(FT.moddir, "benchmarks", "data")
 # ── setup ──────────────────────────────────────────────────────────────────────
 use_gpu = FT.GPU_DEFAULT
 run_pertile = true
-run_e2e = false
+run_e2e = true
 println("GPU available: ", use_gpu)
 
 # Fe I 6301 & 6302 lines

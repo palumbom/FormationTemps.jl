@@ -4,7 +4,7 @@
 CurrentModule = FormationTemps
 ```
 
-FormationTemps.jl parallelizes the disk integration pipeline in two complementary ways: **CPU multithreading** across stellar surface tiles, and **GPU acceleration** via [CUDA.jl](https://cuda.juliagpu.org/stable/). Both target the same bottleneck — the per-tile radiative transfer loop that dominates wall-clock time when `convolve=false`.
+FormationTemps.jl parallelizes the disk integration pipeline in two complementary ways: CPU multithreading across stellar surface tiles, and GPU acceleration via [CUDA.jl](https://cuda.juliagpu.org/stable/). Both target the same bottleneck — the per-tile radiative transfer loop that dominates wall-clock time when `convolve=false`.
 
 ## CPU Multithreading
 
@@ -15,22 +15,12 @@ julia -t auto           # use all available cores
 julia -t 8              # use 8 threads
 ```
 
-Or set the environment variable before launching Julia:
+The environment variable `JULIA_NUM_THREADS` can also be set before launching Julia.
 
-```bash
-export JULIA_NUM_THREADS=8
-```
+!!! warning "Python interoperability"
+    CPU multithreading is not compatible with calling FormationTemps.jl from Python via juliacall/PythonCall. Julia's multi-threaded garbage collector can conflict with PythonCall's runtime bridge, causing hard crashes (SIGBUS/segfault). When calling from Python, `JULIA_NUM_THREADS` must be set to `1`. See the [Python Tutorial](@ref "Python Tutorial") for details.
 
-You can verify the thread count from within Julia:
-
-```julia
-Threads.nthreads()
-```
-
-!!! warning "Python interop"
-    CPU multithreading is **not compatible** with calling FormationTemps.jl from Python via juliacall/PythonCall. Julia's multi-threaded garbage collector can conflict with PythonCall's runtime bridge, causing hard crashes (SIGBUS/segfault). When calling from Python, `JULIA_NUM_THREADS` must be set to `1`. See the [Python Tutorial](@ref "Python Tutorial") for details.
-
-    If you need both Python interop and parallelism, use the GPU path (`use_gpu=True`) or run the computation in pure Julia and load the results in Python.
+    If you need both parallelism and Python, use the GPU path (`use_gpu=True`) or run the computation in Julia and load the results in Python.
 
 ## GPU Acceleration
 
@@ -42,7 +32,7 @@ GPU support requires an NVIDIA GPU and a working CUDA toolkit. CUDA.jl handles d
 
 ```julia
 using CUDA
-CUDA.functional()  # should return true
+CUDA.functional()   # should return true
 CUDA.versioninfo()  # check device and toolkit details
 ```
 
@@ -60,14 +50,7 @@ Absorption coefficients are always computed at Float64 (a Korg requirement) and 
 
 ### What gets accelerated
 
-The disk integration pipeline repeats the full radiative transfer calculation for every visible tile on the stellar surface — typically thousands of tiles for `Nϕ = 128`. Each tile requires:
-
-1. **Microturbulent broadening** — FFT-based Gaussian convolution of the absorption coefficient matrix along the wavelength axis, per atmosphere layer.
-2. **Optical depth integration** — cumulative integration of absorption coefficients through the atmosphere to build `τ(λ)` at each layer.
-3. **Contribution function** — Intensity contribution per layer, combined with `dτ`.
-4. **Macroturbulent broadening** — Radial-tangential macroturbulence convolution of the contribution function.
-
-On the GPU, tiles are processed in batches and steps 1–3 use batched CUDA kernels. Step 4 uses a separate FFT-based convolution kernel per tile. All GPU memory is pre-allocated at the start of the call and reused throughout.
+The disk integration pipeline repeats the full radiative transfer calculation for every visible tile on the stellar surface — typically thousands of tiles for `Nϕ = 128`. Each tile requires microturbulent broadening (FFT-based Gaussian convolution of the absorption coefficient matrix along the wavelength axis, per atmosphere layer), optical depth integration through the atmosphere to build `τ(λ)` at each layer, computation of the intensity contribution function per layer, and radial-tangential macroturbulence convolution of the contribution function. On the GPU, tiles are processed in batches and the first three steps use batched CUDA kernels. The macroturbulence convolution uses a separate FFT-based kernel per tile. All GPU memory is pre-allocated at the start of the call and reused throughout.
 
 ## Benchmarks
 
@@ -101,15 +84,13 @@ Individual broadening kernel timings for each convolution type (CPU vs GPU Float
 
 The CPU and GPU paths use slightly different algorithms in a few places, leading to small numerical differences:
 
-- **Microturbulence**: the GPU applies an analytical Fourier-domain Gaussian; the CPU samples a real-space kernel. Flux differences are ~4×10⁻⁴ at typical parameters.
-- **RT macroturbulence kernels**: GPU `erfc` vs. CPU `erfc` differ at ~10⁻⁴ relative to peak.
-- **Rotation kernels**: the CPU uses unpadded circular FFT; the GPU uses padded linear convolution. This produces edge effects in the first and last few pixels of the spectrum. Interior pixels agree to machine precision.
+- Microturbulence: the GPU applies an analytical Fourier-domain Gaussian; the CPU samples a real-space kernel. Flux differences are ~4×10⁻⁴ at typical parameters.
+- RT macroturbulence kernels: GPU `erfc` vs. CPU `erfc` differ at ~10⁻⁴ relative to peak.
+- Rotation kernels: the CPU uses unpadded circular FFT; the GPU uses padded linear convolution. This produces edge effects in the first and last few pixels of the spectrum. Interior pixels agree to machine precision.
 
 ### Float32 vs. Float64 accuracy
 
-The figures below compare flux and formation temperature spectra for two Fe I lines near 6300 Å, computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra (visually indistinguishable); the bottom row shows residuals relative to the CPU Float64 reference on a symmetric log scale, with both GPU precisions overplotted.
-
-GPU Float64 residuals (orange squares) are small — dominated by the algorithmic differences described above. GPU Float32 residuals (green triangles) are orders of magnitude larger but still modest: flux residuals at the ~10⁻³ level and formation temperature differences of ~1–5 K.
+The figures below compare flux and formation temperature spectra for two Fe I lines near 6300 Å, computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra (visually indistinguishable); the bottom row shows residuals relative to the CPU Float64 reference on a symmetric log scale. GPU Float64 residuals are small, dominated by the algorithmic differences described above. GPU Float32 residuals are orders of magnitude larger but still modest: flux residuals at the ~10⁻³ level and formation temperature differences of ~1–5 K.
 
 ![GPU precision: convolution path](static/gpu_precision_convolve.png)
 

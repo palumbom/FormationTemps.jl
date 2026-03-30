@@ -48,7 +48,7 @@ rebin_spectrum
 
 ## Convolutions & Kernels
 
-Convolutions operations are often used in the modeling of spectra, even when explicit disk-integration is performed (e.g., for microturbulent broadening). FormationTemps.jl implements methods implements these convolutions. 
+Convolution operations are often used in the modeling of spectra, even when explicit disk integration is performed (e.g., for microturbulent broadening). FormationTemps.jl exposes these convolution methods.
 
 ```@docs
 convolve_gray_rotation
