@@ -48,9 +48,9 @@ Introduction = "Quickstart" => "index.md"
 License = "License" => "license.md"
 Index = "Full Index" => "longlist.md"
 Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
-                      "Parallelization" => "parallelization.md",
                       "Contribution Functions" => "cont_func.md",
                       "Broadening & Convolutions" => "convolutions.md",
+                      "Parallelization" => "parallelization.md",
                       "Python Tutorial" => "python.md"]
 Internals = "Public Functions" => "internals.md"
 

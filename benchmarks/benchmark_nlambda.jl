@@ -27,14 +27,15 @@ cpu_worker_code = """
 using FormationTemps; FT = FormationTemps
 using Korg, Statistics
 
-linelist_full = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
-linelist_full = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist_full]
-specs = [string(l.species) for l in linelist_full]
-linelist_fe = linelist_full[specs .== "Fe I"]
-wls_all = [l.wl * 1e8 for l in linelist_fe]
-idx_start = findfirst(x -> x >= 6298.0, wls_all)
-idx_end = findfirst(x -> x >= 6304.0, wls_all)
-linelist = linelist_fe[idx_start:idx_end]
+# Fe I 6301 & 6302 lines
+linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
+linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
+specs = [string(l.species) for l in linelist]
+linelist = linelist[specs .== "Fe I"]
+wls = [l.wl for l in linelist]
+idx1 = findfirst(x -> x * 1e8 >= 6301, wls)
+idx2 = findfirst(x -> x * 1e8 >= 6302, wls)
+linelist = vcat([linelist[idx1], linelist[idx2]])
 
 star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0,
                     v_macro=3500.0, v_micro=850.0)
@@ -72,14 +73,15 @@ if !CUDA.functional()
     exit()
 end
 
-linelist_full = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
-linelist_full = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist_full]
-specs = [string(l.species) for l in linelist_full]
-linelist_fe = linelist_full[specs .== "Fe I"]
-wls_all = [l.wl * 1e8 for l in linelist_fe]
-idx_start = findfirst(x -> x >= 6298.0, wls_all)
-idx_end = findfirst(x -> x >= 6304.0, wls_all)
-linelist = linelist_fe[idx_start:idx_end]
+# Fe I 6301 & 6302 lines
+linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
+linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
+specs = [string(l.species) for l in linelist]
+linelist = linelist[specs .== "Fe I"]
+wls = [l.wl for l in linelist]
+idx1 = findfirst(x -> x * 1e8 >= 6301, wls)
+idx2 = findfirst(x -> x * 1e8 >= 6302, wls)
+linelist = vcat([linelist[idx1], linelist[idx2]])
 
 star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0,
                     v_macro=3500.0, v_micro=850.0)

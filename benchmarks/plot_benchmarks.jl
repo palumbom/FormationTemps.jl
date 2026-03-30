@@ -103,7 +103,17 @@ try
     ax.set_xticks(collect(x))
     ax.set_xticklabels(["{\\rm " * k * "}" for k in kernels], rotation=20, ha="right")
     ax.set_ylabel("{\\rm Time [ms]}")
-    ax.set_title("{\\rm Convolution kernel timings}")
+    # read Nλ from convolution metadata
+    Nλ_conv = 0
+    try
+        _, meta = read_csv(joinpath(DATADIR, "convolution_meta.csv"))
+        Nλ_conv = parse(Int, meta[1][1])
+    catch; end
+    if Nλ_conv > 0
+        ax.set_title(@sprintf("{\\rm Convolution kernel timings (}\$N_\\lambda\${\\rm =%d)}", Nλ_conv))
+    else
+        ax.set_title("{\\rm Convolution kernel timings}")
+    end
     ax.legend(fontsize=9)
     ax.set_yscale("log")
     ax.grid(false)
@@ -123,162 +133,150 @@ end
 # 2. Per-tile breakdown + end-to-end timing
 # ══════════════════════════════════════════════════════════════════════════════
 try
-    # read per-tile data (new format: step,cpu_ms,gpu64_ms,gpu32_ms)
+    # read per-tile data
     _, pt_rows = read_csv(joinpath(DATADIR, "pertile_timings.csv"))
     steps = [r[1] for r in pt_rows]
-    cpu_ms = [parse(Float64, r[2]) for r in pt_rows]
-    gpu_ms = [parse(Float64, r[3]) for r in pt_rows]  # gpu64 for the breakdown plot
+    # detect old (4-col: step,cpu,gpu64,gpu32) vs new (7-col: step,cpu_med,cpu_iqr,gpu64_med,...)
+    has_iqr = length(pt_rows[1]) >= 7
+    cpu_ms   = [parse(Float64, r[2]) for r in pt_rows]
+    gpu64_ms = [parse(Float64, r[has_iqr ? 4 : 3]) for r in pt_rows]
+    gpu32_ms = [parse(Float64, r[has_iqr ? 6 : 4]) for r in pt_rows]
 
-    # read end-to-end data (new format: backend,precision,time_s,...)
-    _, e2e_rows = read_csv(joinpath(DATADIR, "e2e_timings.csv"))
+    # read metadata (Nλ, Natm, etc.)
+    _, meta_rows = read_csv(joinpath(DATADIR, "pertile_meta.csv"))
+    Nλ = parse(Int, meta_rows[1][1])
+    Natm = parse(Int, meta_rows[1][2])
+    B_gpu = parse(Int, meta_rows[1][5])
 
-    # detect CSV format: new has "precision" as column 2
-    has_precision_col = length(e2e_rows[1]) >= 8
-
-    e2e = Dict{String, NamedTuple{(:time_s, :Nphi, :Natm, :Nlambda), NTuple{4, Float64}}}()
-    for r in e2e_rows
-        if has_precision_col
-            key = r[1] == "cpu" ? "cpu" : r[1] * "_" * r[2]  # "gpu_float64", "gpu_float32"
-            e2e[key] = (time_s=parse(Float64, r[3]), Nphi=parse(Float64, r[4]),
-                        Natm=parse(Float64, r[5]), Nlambda=parse(Float64, r[6]))
-        else
-            e2e[r[1]] = (time_s=parse(Float64, r[2]), Nphi=parse(Float64, r[3]),
-                         Natm=parse(Float64, r[4]), Nlambda=parse(Float64, r[5]))
-        end
-    end
-
-    has_gpu = any(k -> startswith(k, "gpu"), keys(e2e)) && any(g -> g > 0.0, gpu_ms)
+    has_gpu = any(g -> g > 0.0, gpu64_ms)
+    has_gpu32 = has_gpu && any(g -> g > 0.0, gpu32_ms)
     if !has_gpu
         println("Skipping per-tile plot: no GPU data")
     else
-        Nλ = Int(e2e["cpu"].Nlambda)
-        Natm = Int(e2e["cpu"].Natm)
 
-        cpu_total = sum(cpu_ms)
-        gpu_total = sum(gpu_ms)
-        cpu_pct = cpu_ms ./ cpu_total .* 100.0
-        gpu_pct = gpu_ms ./ gpu_total .* 100.0
+        cpu_total   = sum(cpu_ms)
+        gpu64_total = sum(gpu64_ms)
+        cpu_pct   = cpu_ms   ./ cpu_total   .* 100.0
+        gpu64_pct = gpu64_ms ./ gpu64_total .* 100.0
+        if has_gpu32
+            gpu32_total = sum(gpu32_ms)
+            gpu32_pct = gpu32_ms ./ gpu32_total .* 100.0
+        end
 
-        pe = PythonPlot.pyimport("matplotlib.patheffects")
-        bar_stroke = [pe.withStroke(linewidth=0.0, foreground="black")]
-
-        fig, ax_brk = plt.subplots(figsize=(7, 3.2))
+        fig, ax_brk = plt.subplots(figsize=(7, has_gpu32 ? 7.0 : 4.0))
 
         step_labels = ["{\\rm Microturbulence}", "{\\rm Optical depth}",
                        "{\\rm Contribution fn.}", "{\\rm Macroturbulence}"]
-        colors_cpu = ["#B8DFFB", COL_CPU_1T, COL_CPU_MT, "#1A7AB5"]
-        colors_gpu = [COL_GPU64, "#F5A66E", "#FFD3A6", "#B8432E"]
+        colors_cpu  = ["#B8DFFB", COL_CPU_1T, COL_CPU_MT, "#1A7AB5"]
+        colors_g64  = ["#FFD3A6", "#F5A66E", COL_GPU64, "#B8432E"]
+        colors_g32  = ["#66D9B2", COL_GPU32, "#007A59", "#004D38"]
 
         bar_h = 0.55
-        y_cpu = 0
-        y_gpu = 1
-        pct_min_inside = 12
+        y_cpu   = 0
+        y_gpu64 = has_gpu32 ? 2.0 : 1.0
+        y_gpu32 = has_gpu32 ? 4.0 : -1.0
+        y_top   = has_gpu32 ? y_gpu32 : y_gpu64
 
         ax_brk.set_axisbelow(true)
         ax_brk.grid(true, axis="x", color="#DDDDDD", lw=0.5)
         ax_brk.grid(false, axis="y")
 
-        # CPU row
-        cpu_left = 0.0
-        for (i, (label, pct, ms)) in enumerate(zip(step_labels, cpu_pct, cpu_ms))
-            ax_brk.barh(y_cpu, pct, left=cpu_left, color=colors_cpu[i],
+        # helper: draw one stacked bar row (no inside labels)
+        function draw_row!(ax, y, pcts, colors)
+            left = 0.0
+            for (i, pct) in enumerate(pcts)
+                ax.barh(y, pct, left=left, color=colors[i],
                         edgecolor="white", height=bar_h, zorder=3)
-            if pct > pct_min_inside
-                ax_brk.text(cpu_left + pct / 2, y_cpu, @sprintf("{\\rm %.1f ms}", ms),
-                            ha="center", va="center", fontsize=8, color="white",
-                            fontweight="bold", zorder=4, path_effects=bar_stroke)
+                left += pct
             end
-            cpu_left += pct
         end
 
-        # GPU row
-        gpu_left = 0.0
-        for (i, (label, pct, ms)) in enumerate(zip(step_labels, gpu_pct, gpu_ms))
-            ax_brk.barh(y_gpu, pct, left=gpu_left, color=colors_gpu[i],
-                        edgecolor="white", height=bar_h, zorder=3)
-            if pct > pct_min_inside
-                ax_brk.text(gpu_left + pct / 2, y_gpu, @sprintf("{\\rm %.2f ms}", ms),
-                            ha="center", va="center", fontsize=8, color="white",
-                            fontweight="bold", zorder=4, path_effects=bar_stroke)
-            end
-            gpu_left += pct
+        draw_row!(ax_brk, y_cpu,   cpu_pct,   colors_cpu)
+        draw_row!(ax_brk, y_gpu64, gpu64_pct, colors_g64)
+        if has_gpu32
+            draw_row!(ax_brk, y_gpu32, gpu32_pct, colors_g32)
         end
 
-        # total time annotations
+        # total time annotations (below each bar label)
         ax_brk.text(-0.01, y_cpu - 0.22, @sprintf("{\\rm (%.1f ms)}", cpu_total),
                     ha="right", va="top", fontsize=7, color="#555555",
                     transform=ax_brk.get_yaxis_transform(), zorder=4)
-        ax_brk.text(-0.01, y_gpu - 0.22, @sprintf("{\\rm (%.2f ms)}", gpu_total),
+        ax_brk.text(-0.01, y_gpu64 - 0.22, @sprintf("{\\rm (%.2f ms)}", gpu64_total),
                     ha="right", va="top", fontsize=7, color="#555555",
                     transform=ax_brk.get_yaxis_transform(), zorder=4)
+        if has_gpu32
+            ax_brk.text(-0.01, y_gpu32 - 0.22, @sprintf("{\\rm (%.2f ms)}", gpu32_total),
+                        ha="right", va="top", fontsize=7, color="#555555",
+                        transform=ax_brk.get_yaxis_transform(), zorder=4)
+        end
 
-        # segment annotations
+        # leader-line annotations: step name + timing for each bar
         ann_color = "#000000"
         ann_fs = 7
         min_sep = 15.0
         base_dy = 0.3
         stagger_dy = 0.35
-
-        cpu_x_mids = Float64[]
-        cpu_cum = 0.0
-        for pct in cpu_pct
-            push!(cpu_x_mids, cpu_cum + pct / 2)
-            cpu_cum += pct
-        end
-
-        cpu_dy = fill(base_dy, length(cpu_pct))
-        for i in 2:length(cpu_pct)
-            if abs(cpu_x_mids[i] - cpu_x_mids[i-1]) < min_sep
-                cpu_dy[i] = cpu_dy[i-1] + stagger_dy
-            end
-        end
-
         ann_bbox = Dict("boxstyle" => "square,pad=0.05", "facecolor" => "white",
                          "edgecolor" => "none", "alpha" => 1.0)
 
-        for (i, x_mid) in enumerate(cpu_x_mids)
-            ax_brk.plot([x_mid, x_mid],
-                        [y_cpu - bar_h / 2, y_cpu - bar_h / 2 - cpu_dy[i]],
-                        color="#999999", lw=0.5, zorder=4)
-        end
-        for (i, (label, x_mid)) in enumerate(zip(step_labels, cpu_x_mids))
-            ax_brk.text(x_mid, y_cpu - bar_h / 2 - cpu_dy[i],
-                        label, ha="center", va="top", fontsize=ann_fs,
-                        color=ann_color, bbox=ann_bbox, zorder=5)
-        end
+        fmt_cpu = ms -> @sprintf("{\\rm %.2f ms}", ms)
+        fmt_gpu = ms -> @sprintf("{\\rm %.2f ms}", ms)
 
-        # GPU annotations (above GPU bar)
-        gpu_x_mids = Float64[]
-        gpu_cum = 0.0
-        for pct in gpu_pct
-            push!(gpu_x_mids, gpu_cum + pct / 2)
-            gpu_cum += pct
-        end
-
-        gpu_dy = fill(base_dy, length(gpu_pct))
-        for i in 2:length(gpu_pct)
-            if abs(gpu_x_mids[i] - gpu_x_mids[i-1]) < min_sep
-                gpu_dy[i] = gpu_dy[i-1] + stagger_dy
+        # helper: compute segment midpoints and staggered offsets
+        function calc_mids_dy(pcts)
+            x_mids = Float64[]
+            cum = 0.0
+            for pct in pcts
+                push!(x_mids, cum + pct / 2)
+                cum += pct
             end
+            dy = fill(base_dy, length(pcts))
+            for i in 2:length(pcts)
+                if abs(x_mids[i] - x_mids[i-1]) < min_sep
+                    dy[i] = dy[i-1] + stagger_dy
+                end
+            end
+            return x_mids, dy
         end
 
-        for (i, x_mid) in enumerate(gpu_x_mids)
-            ax_brk.plot([x_mid, x_mid],
-                        [y_gpu + bar_h / 2, y_gpu + bar_h / 2 + gpu_dy[i]],
+        # helper: draw leader-line annotations above a bar
+        function annotate_above!(ax, y, pcts, vals, fmt_fn, show_names)
+            x_mids, dy = calc_mids_dy(pcts)
+            for (i, x_mid) in enumerate(x_mids)
+                ax.plot([x_mid, x_mid],
+                        [y + bar_h / 2, y + bar_h / 2 + dy[i]],
                         color="#999999", lw=0.5, zorder=4)
-        end
-        for (i, (label, x_mid)) in enumerate(zip(step_labels, gpu_x_mids))
-            ax_brk.text(x_mid, y_gpu + bar_h / 2 + gpu_dy[i],
+                label = show_names ? step_labels[i] * "\n" * fmt_fn(vals[i]) :
+                                     fmt_fn(vals[i])
+                ax.text(x_mid, y + bar_h / 2 + dy[i],
                         label, ha="center", va="bottom", fontsize=ann_fs,
                         color=ann_color, bbox=ann_bbox, zorder=5)
+            end
+            return maximum(dy)
         end
 
-        max_below = maximum(cpu_dy) + 0.5
-        max_above = maximum(gpu_dy) + 0.7
-        ax_brk.set_yticks([y_cpu, y_gpu])
-        ax_brk.set_yticklabels(["{\\rm CPU}", "{\\rm GPU (Float64)}"])
+        # all annotations above their respective bars, all with step names
+        max_cpu_dy = annotate_above!(ax_brk, y_cpu, cpu_pct, cpu_ms, fmt_cpu, true)
+        max_g64_dy = annotate_above!(ax_brk, y_gpu64, gpu64_pct, gpu64_ms, fmt_gpu, true)
+
+        if has_gpu32
+            max_top_dy = annotate_above!(ax_brk, y_gpu32, gpu32_pct, gpu32_ms, fmt_gpu, true)
+        else
+            max_top_dy = max_g64_dy
+        end
+
+        max_below = 0.5
+        max_above = max_top_dy + 1.0
+        yticks = [y_cpu, y_gpu64]
+        ylabels = ["{\\rm CPU}", "{\\rm GPU (Float64)}"]
+        if has_gpu32
+            push!(yticks, y_gpu32)
+            push!(ylabels, "{\\rm GPU (Float32)}")
+        end
+        ax_brk.set_yticks(yticks)
+        ax_brk.set_yticklabels(ylabels)
         ax_brk.set_xlim(-0.2, 100.3)
-        ax_brk.set_ylim(y_cpu - max_below, y_gpu + max_above)
+        ax_brk.set_ylim(y_cpu - max_below, y_top + max_above)
         ax_brk.set_xlabel("{\\rm Fraction of per-tile time [\\%]}")
         ax_brk.set_title(@sprintf("{\\rm Per-tile breakdown (}\$N_\\lambda\${\\rm =%d, }\$N_{\\rm atm}\${\\rm =%d)}", Nλ, Natm))
 
@@ -303,13 +301,13 @@ try
     max_s = [parse(Float64, r[4]) for r in rows]
     speedups = [parse(Float64, r[5]) for r in rows]
 
-    # read Nϕ from e2e CSV if available
+    # read Nϕ and Nλ from metadata
     Nϕ = 128
+    Nλ_thread = 0
     try
-        _, e2e_rows = read_csv(joinpath(DATADIR, "e2e_timings.csv"))
-        # handle both old (col 3) and new (col 4) CSV formats
-        Nϕ = length(e2e_rows[1]) >= 8 ? Int(parse(Float64, e2e_rows[1][4])) :
-                                         Int(parse(Float64, e2e_rows[1][3]))
+        _, meta = read_csv(joinpath(DATADIR, "pertile_meta.csv"))
+        Nλ_thread = parse(Int, meta[1][1])
+        Nϕ = parse(Int, meta[1][3])
     catch; end
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
@@ -330,7 +328,11 @@ try
                  fmt="s-", color=COL_CPU_MT, lw=2, ms=6, capsize=3, ecolor=COL_CPU_MT)
     ax2.set_xlabel("{\\rm Number of threads}")
     ax2.set_ylabel("{\\rm Wall-clock time [s]}")
-    ax2.set_title(@sprintf("{\\rm Disk integration (}\$N_\\phi\${\\rm =%d)}", Nϕ))
+    if Nλ_thread > 0
+        ax2.set_title(@sprintf("{\\rm Disk integration (}\$N_\\phi\${\\rm =%d, }\$N_\\lambda\${\\rm =%d)}", Nϕ, Nλ_thread))
+    else
+        ax2.set_title(@sprintf("{\\rm Disk integration (}\$N_\\phi\${\\rm =%d)}", Nϕ))
+    end
 
     fig.tight_layout()
     fig.savefig(joinpath(PLOTDIR, "benchmark_threading.png"), dpi=150, bbox_inches="tight")

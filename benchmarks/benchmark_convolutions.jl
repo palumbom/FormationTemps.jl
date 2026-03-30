@@ -1,4 +1,3 @@
-using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -20,9 +19,10 @@ linelist = vcat([linelist[idx1], linelist[idx2]])
 
 wls = [l.wl * 1e8 for l in linelist]
 
-# wavelength grid
-buffer = 0.5
-λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=0.005)
+# wavelength grid (Δλ matches all other benchmark scripts)
+Δλ = 0.005
+buffer = 2.0
+λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=Δλ)
 
 # atmosphere + absorption
 A_X = Korg.asplund_2020_solar_abundances
@@ -30,7 +30,7 @@ atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(5777.0, 4.44, A_X))
 zs = atm_gpu.zs
 Natm = length(zs)
 Nλ = length(λs_korg)
-Npad = 2400
+Npad = 512
 
 αs = zeros(Natm, Nλ)
 αs_cont = zeros(Natm, Nλ)
@@ -47,11 +47,11 @@ cmem_mac32 = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=Float32)
 
 # velocities — Float64
 μ_v_rot64 = CUDA.zeros(Float64, Natm)
-σ_v_mic64 = CUDA.zeros(Float64, Natm) .+ 1200.0
+σ_v_mic64 = CUDA.zeros(Float64, Natm) .+ 850.0
 
 # velocities — Float32
 μ_v_rot32 = CUDA.zeros(Float32, Natm)
-σ_v_mic32 = CUDA.zeros(Float32, Natm) .+ Float32(1200.0)
+σ_v_mic32 = CUDA.zeros(Float32, Natm) .+ Float32(850.0)
 
 # pre-allocate GPU arrays for microturbulence (avoid H2D transfer in loop)
 λs_gpu64 = CuArray(collect(Float64, λs_korg))
@@ -66,10 +66,10 @@ tbc32 = Float32.(tbc64)
 λs_korg_f32 = Float32.(collect(λs_korg))
 
 # broadening params
-vsini = 4200.0
+vsini = 2100.0
 u1 = 0.4
 u2 = 0.26
-ζ_rt = 1200.0
+ζ_rt = 3500.0
 
 const N_REPEAT = 20
 
@@ -199,6 +199,11 @@ open(joinpath(datadir, "convolution_timings.csv"), "w") do io
                 gpu64_median_ms[i], gpu64_iqr_ms[i],
                 gpu32_median_ms[i], gpu32_iqr_ms[i])
     end
+end
+
+open(joinpath(datadir, "convolution_meta.csv"), "w") do io
+    println(io, "Nlambda,Natm,Npad")
+    @printf(io, "%d,%d,%d\n", Nλ, Natm, Npad)
 end
 println("\nData written to: ", joinpath(datadir, "convolution_timings.csv"))
 

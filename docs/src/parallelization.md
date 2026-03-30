@@ -64,24 +64,24 @@ The disk integration pipeline repeats the full radiative transfer calculation fo
 
 1. **Microturbulent broadening** — FFT-based Gaussian convolution of the absorption coefficient matrix along the wavelength axis, per atmosphere layer.
 2. **Optical depth integration** — cumulative integration of absorption coefficients through the atmosphere to build `τ(λ)` at each layer.
-3. **Contribution function** — Planck-weighted intensity contribution per layer, combined with `dτ`.
-4. **Macroturbulent broadening** — radial-tangential convolution of the contribution function.
+3. **Contribution function** — Intensity contribution per layer, combined with `dτ`.
+4. **Macroturbulent broadening** — Radial-tangential macroturbulence convolution of the contribution function.
 
 On the GPU, tiles are processed in batches and steps 1–3 use batched CUDA kernels. Step 4 uses a separate FFT-based convolution kernel per tile. All GPU memory is pre-allocated at the start of the call and reused throughout.
 
 ## Benchmarks
 
-The results below were obtained on an Intel Xeon w5-3435X (16 cores / 32 threads) with an NVIDIA RTX 6000 Ada (48 GB). To reproduce, run `julia --project=. benchmarks/run_all.jl` — see the [`benchmarks/`](https://github.com/palumbom/FormationTemps.jl/tree/main/benchmarks) directory for individual scripts.
+The results below were obtained on an Intel Xeon w5-3435X (16 cores / 32 threads) with an NVIDIA RTX 6000 Ada (48 GB). All benchmarks use a two-line Fe I test spectrum near 6300 Å with `Δλ = 0.005` Å, solar stellar parameters (`vsini = 2100` m/s, `ζ_RT = 3500` m/s, `ξ = 850` m/s), and `Nϕ = 128`. To reproduce, run `julia --project=. benchmarks/run_all.jl` — see the [`benchmarks/`](https://github.com/palumbom/FormationTemps.jl/tree/main/benchmarks) directory for individual scripts.
 
 ### Per-tile breakdown
 
-The figure below shows the normalized per-tile timing breakdown for CPU and GPU.
+Per-tile timing breakdown for CPU (single tile) and GPU (per tile from a batch of 8). GPU times include both total and continuum absorption paths running on dual CUDA streams.
 
 ![per-tile benchmark](static/benchmark_pertile.png)
 
 ### CPU thread scaling
 
-Speedup and wall-clock time as a function of the number of Julia threads for a full `calc_formation_temp` call with disk integration (`Nϕ = 128`).
+Speedup and wall-clock time as a function of the number of Julia threads for a full `calc_formation_temp` call with disk integration.
 
 ![threading benchmark](static/benchmark_threading.png)
 
@@ -93,7 +93,7 @@ End-to-end wall-clock time as a function of `Nλ` (varied by changing `Δλ` ove
 
 ### Convolution kernels
 
-Individual broadening kernel comparisons on a two-line Fe I test spectrum (`Nλ ≈ 400`, `Npad = 2400`).
+Individual broadening kernel timings for each convolution type (CPU vs GPU Float64 vs GPU Float32).
 
 ![convolution benchmark](static/benchmark_convolutions.png)
 
