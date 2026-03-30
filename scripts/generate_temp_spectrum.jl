@@ -24,13 +24,17 @@ plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
+# vacuum or air wavelengths
+vacuum_wavs = false
+wav_label = vacuum_wavs ? "vacuum" : "air"
+
 # set directory
 cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
-outfile = joinpath(outdir, "temp_spectrum_hires_chunks.h5")
-outfile_1d = joinpath(outdir, "temp_spectrum_hires_1D.h5")
+outfile = joinpath(outdir, "temp_spectrum_$(wav_label)_chunks.h5")
+outfile_1d = joinpath(outdir, "temp_spectrum_$(wav_label)_1D.h5")
 
 # get the linelist
 linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
@@ -39,8 +43,10 @@ linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_
 # idx2 = findfirst(wls .>= 5050.0)
 # linelist = linelist[idx1:idx2]
 
-# convert to air wavelengths (if necessary)
-# linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
+# convert to air wavelengths
+if !vacuum_wavs
+    linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
+end
 
 # parse values values
 wls = [l.wl * 1e8 for l in linelist]
@@ -74,6 +80,8 @@ Ts = atm_cpu.Ts
 chunksize = 400
 overlap_lines = 100
 Δλ = 0.001
+Nϕ = 128
+buffer = 3.0
 @assert 0 <= overlap_lines < chunksize "overlap_lines must satisfy 0 <= overlap_lines < chunksize."
 chunk_step = chunksize - overlap_lines
 
@@ -92,6 +100,7 @@ h5open(outfile, "w") do h5
     HDF5.attributes(h5)["xi"] = star_props.ξ
     HDF5.attributes(h5)["rho_star"] = star_props.ρstar
     HDF5.attributes(h5)["i_star"] = star_props.istar
+    HDF5.attributes(h5)["wavelength_frame"] = wav_label
 
     # include atmosphere data in the same output file
     g_atm = create_group(h5, "model_atmosphere")
@@ -109,8 +118,8 @@ h5open(outfile, "w") do h5
 
         # high-level formation temperature calculation
         form_temp_result = FT.calc_formation_temp(star_props, ll; Δλ=Δλ,
-                                                  convolve=false, Nϕ=128,
-                                                  buffer=3.0,
+                                                  convolve=false, Nϕ=Nϕ,
+                                                  buffer=buffer,
                                                   ne_warn_thresh=Inf,
                                                   showprogress=false)
 
@@ -181,6 +190,7 @@ h5open(outfile, "r") do h5in
         HDF5.attributes(h5out)["xi"] = star_props.ξ
         HDF5.attributes(h5out)["rho_star"] = star_props.ρstar
         HDF5.attributes(h5out)["i_star"] = star_props.istar
+        HDF5.attributes(h5out)["wavelength_frame"] = wav_label
 
         # include atmosphere data in the same output file
         g_atm = create_group(h5out, "model_atmosphere")

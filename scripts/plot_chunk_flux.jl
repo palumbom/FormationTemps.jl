@@ -25,11 +25,15 @@ plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
+# vacuum or air wavelengths
+vacuum_wavs = true
+wav_label = vacuum_wavs ? "vacuum" : "air"
+
 # set directory
 cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
-h5path_chunks = joinpath(outdir, "temp_spectrum_chunks.h5")
-h5path_splice = joinpath(outdir, "temp_spectrum_1D.h5")
+h5path_chunks = joinpath(outdir, "temp_spectrum_$(wav_label)_chunks.h5")
+h5path_splice = joinpath(outdir, "temp_spectrum_$(wav_label)_1D.h5")
 
 # h5path_chunks = joinpath(outdir, "temp_spectrum_chunks_debug.h5")
 # h5path_splice = joinpath(outdir, "temp_spectrum_1D_debug.h5")
