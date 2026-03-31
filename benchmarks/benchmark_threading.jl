@@ -46,7 +46,7 @@ Nphi = parse(Int, ARGS[1])
 dlambda = parse(Float64, ARGS[2])
 n_repeat = parse(Int, ARGS[3])
 
-# warmup
+# warmup at target Δλ to cover FFTW plan creation and JIT
 calc_formation_temp(star, linelist; Δλ=dlambda, Nϕ=16,
                     use_gpu=false, showprogress=false, ne_warn_thresh=Inf)
 

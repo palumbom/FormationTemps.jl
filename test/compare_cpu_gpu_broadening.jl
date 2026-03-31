@@ -109,10 +109,13 @@ end
     for i in eachindex(steps)
         @testset "step = $(steps[i]) Å" begin
             @test αs_error[i]       < 1e-10
-            @test rot_error[i]      < 1e-2
-            @test rt_error[i]       < 1e-2
-            @test rt_aniso_error[i] < 1e-2
-            @test rotmacro_error[i] < 1e-2
+            # CPU and GPU both use padded linear convolution with edge replication;
+            # agreement is at floating-point precision
+            @test rot_error[i]      < 1e-8
+            @test rt_error[i]       < 1e-8
+            @test rt_aniso_error[i] < 1e-8
+            # Hirano chains two FFT convolutions (rotation + macro), ~2× single-kernel error
+            @test rotmacro_error[i] < 5e-8
         end
     end
 end

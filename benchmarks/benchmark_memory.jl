@@ -1,4 +1,3 @@
-using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA

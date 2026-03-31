@@ -45,13 +45,19 @@ gpu_mem = FT.GPUMemory(collect(λs_korg), atm_gpu)
 cmem32 = FT.ConvolutionMemory(Nλ, Natm, Npad; T=Float32)
 cmem_mac32 = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=Float32)
 
-# velocities — Float64
+# velocities — Float64 (vector, for GPU per-row path)
 μ_v_rot64 = CUDA.zeros(Float64, Natm)
 σ_v_mic64 = CUDA.zeros(Float64, Natm) .+ 850.0
 
-# velocities — Float32
+# velocities — Float32 (vector, for GPU per-row path)
 μ_v_rot32 = CUDA.zeros(Float32, Natm)
 σ_v_mic32 = CUDA.zeros(Float32, Natm) .+ Float32(850.0)
+
+# scalar σ_v for production-matching CPU in-place path
+σ_v_scalar = 850.0
+
+# CPU tile workspace (matches production in-place path)
+cpu_ws = FT.CPUTileWorkspace(Float64, Natm, Nλ)
 
 # pre-allocate GPU arrays for microturbulence (avoid H2D transfer in loop)
 λs_gpu64 = CuArray(collect(Float64, λs_korg))
@@ -124,11 +130,11 @@ function record!(label, cpu_times, gpu64_times, gpu32_times)
             median(cpu_ms), median(g64_ms), sp64, median(g32_ms), sp32)
 end
 
-# microturbulence
+# microturbulence (CPU uses production in-place scalar-σ path)
 println("Microturbulence...")
 record!("Microturbulence",
     time_cpu() do
-        FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot64), Array(σ_v_mic64))
+        FT._convolve_micro_inplace!(cpu_ws.αs_broad, λs_korg, αs, 0.0, σ_v_scalar, cpu_ws)
     end,
     time_gpu() do
         FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, μ_v_rot64, σ_v_mic64)

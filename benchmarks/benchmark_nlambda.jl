@@ -44,8 +44,8 @@ Nphi = parse(Int, ARGS[1])
 dlambda = parse(Float64, ARGS[2])
 n_repeat = parse(Int, ARGS[3])
 
-# warmup with coarse grid
-calc_formation_temp(star, linelist; Δλ=0.1, Nϕ=16,
+# warmup at target Δλ to cover FFTW plan creation and JIT for this grid size
+calc_formation_temp(star, linelist; Δλ=dlambda, Nϕ=16,
                     use_gpu=false, showprogress=false, ne_warn_thresh=Inf)
 
 times = zeros(n_repeat)
@@ -92,8 +92,8 @@ n_repeat = parse(Int, ARGS[3])
 precision_str = ARGS[4]  # "float64" or "float32"
 gpu_prec = precision_str == "float32" ? Float32 : Float64
 
-# warmup
-calc_formation_temp(star, linelist; Δλ=0.1, Nϕ=16,
+# warmup at target Δλ to cover cuFFT plan creation and JIT for this grid size
+calc_formation_temp(star, linelist; Δλ=dlambda, Nϕ=16,
                     use_gpu=true, gpu_precision=gpu_prec,
                     showprogress=false, ne_warn_thresh=Inf)
 CUDA.synchronize()
