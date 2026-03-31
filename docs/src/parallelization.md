@@ -89,7 +89,9 @@ The CPU and GPU paths use slightly different algorithms in a few places, leading
 
 ### Float32 vs. Float64 accuracy
 
-The figures below compare flux and formation temperature spectra for two Fe I lines near 6300 Å, computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra (visually indistinguishable); the bottom row shows residuals relative to the CPU Float64 reference on a symmetric log scale. GPU Float64 residuals are small, dominated by the algorithmic differences described above. GPU Float32 residuals are orders of magnitude larger but still modest: flux residuals at the ~10⁻³ level and formation temperature differences of ~1–5 K.
+The figures below compare flux and formation temperature spectra for two Fe I lines near 6300 Å, computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra (visually indistinguishable); the bottom row shows residuals relative to the CPU Float64 reference on a symmetric log scale. GPU Float64 residuals are small, dominated by the algorithmic differences described above. GPU Float32 residuals are orders of magnitude larger but still modest: flux residuals at the ~10⁻⁴ level and formation temperature differences of ~1 K.
+
+The dominant source of Float32 precision loss is the R2C/C2R FFT roundtrip in the per-tile microturbulent convolution: absorption coefficients span ~5 orders of magnitude across the wavelength grid, and Float32 FFT arithmetic distributes absolute rounding error proportional to the largest (line-core) values across all wavelengths. The tile accumulation kernels use Kahan compensated summation to prevent additional O(N) rounding from the ~10⁴ tile sum, and the Gaussian kernel construction avoids catastrophic cancellation in the Doppler-shifted center wavelength. See `debug/diagnose_f32_residuals.jl` for a stage-by-stage precision breakdown.
 
 ![GPU precision: convolution path](static/gpu_precision_convolve.png)
 

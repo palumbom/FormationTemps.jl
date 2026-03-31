@@ -28,7 +28,7 @@ See also: [`calc_flux_quantities`](@ref)
 """
 function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
                                    cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
-                                   σ_v::CA{T,1}) where T<:AF
+                                   σ_v) where T<:AF
     # get contribution function
     calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
 
@@ -43,7 +43,7 @@ end
 # (copy or pass to a function that copies internally) before the next call that shares mem.
 function calc_intensity_quantities_inplace!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
                                             cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
-                                            σ_v::CA{T,1}) where T<:AF
+                                            σ_v) where T<:AF
     # micro-broadening + tau (same as calc_intensity_cfunc!)
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
@@ -87,7 +87,7 @@ Returns:
 See also: [`calc_intensity_quantities`](@ref)
 """
 function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                              cmem::AbstractConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+                              cmem::AbstractConvolutionMemory, σ_v) where T<:AF
     # micro-broadening + tau
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     fill!(atm.μ_v, zero(T))
@@ -112,7 +112,7 @@ end
 
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
                                cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
-                               σ_v::CA{T,1}) where T<:AF
+                               σ_v) where T<:AF
     # copy opacities (skip when signal FFT is cached — αs unchanged)
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
@@ -136,7 +136,7 @@ end
 # Does NOT populate mem.cfunc — use calc_intensity_cfunc! if you need the cfunc matrix.
 function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::AtmosphereGPU{T},
                                 mem::GPUMemory, cmem::AbstractConvolutionMemory, μ_tile::T,
-                                μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
+                                μ_v::CA{T,1}, σ_v) where T<:AF
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
     if mem.use_anchored
@@ -150,7 +150,7 @@ function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::Atmosphere
 end
 
 function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                         cmem::AbstractConvolutionMemory, σ_v::CA{T,1}) where T<:AF
+                         cmem::AbstractConvolutionMemory, σ_v) where T<:AF
     # move alphas to reusable buffers and zero mean velocity in-place
     cmem.signal_cached || copyto!(mem.αs, αs_init)
     fill!(atm.μ_v, zero(T))
@@ -617,7 +617,9 @@ function calc_intensity_cfunc_dt_batched!(cfunc_dt::CA{T,2}, τs::CA{T,2},
 end
 
 # batched accumulation: one thread per wavelength, loops over B tiles and Natm-1 layers
-function accumulate_batch_kernel!(flux_acc, cfunc_acc, cfunc_dt, dA_tiles, Natm1, Nλ, Bcur)
+# uses Kahan compensated summation to keep O(ε) accuracy across ~10^4 tile additions
+function accumulate_batch_kernel!(flux_acc, cfunc_acc, flux_comp, cfunc_comp,
+                                  cfunc_dt, dA_tiles, Natm1, Nλ, Bcur)
     j = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     j > Nλ && return nothing
     T = eltype(flux_acc)
@@ -625,23 +627,40 @@ function accumulate_batch_kernel!(flux_acc, cfunc_acc, cfunc_dt, dA_tiles, Natm1
         dA_i = dA_tiles[b]
         off = (b - 1) * Natm1
         s = zero(T)
+        s_comp = zero(T)
         for k in 1:Natm1
             val = cfunc_dt[off + k, j] * dA_i
-            cfunc_acc[k, j] += val
-            s += val
+
+            # Kahan step for cfunc_acc
+            y = val - cfunc_comp[k, j]
+            t = cfunc_acc[k, j] + y
+            cfunc_comp[k, j] = (t - cfunc_acc[k, j]) - y
+            cfunc_acc[k, j] = t
+
+            # Kahan step for local flux sum
+            y_s = val - s_comp
+            t_s = s + y_s
+            s_comp = (t_s - s) - y_s
+            s = t_s
         end
-        flux_acc[j] += s
+        # Kahan step for flux_acc
+        y_f = s - flux_comp[j]
+        t_f = flux_acc[j] + y_f
+        flux_comp[j] = (t_f - flux_acc[j]) - y_f
+        flux_acc[j] = t_f
     end
     return nothing
 end
 
 function accumulate_batch!(flux_acc::CA{T,1}, cfunc_acc::CA{T,2},
+                           flux_comp::CA{T,1}, cfunc_comp::CA{T,2},
                            cfunc_dt::CA{T,2}, dA_tiles::CA{T,1},
                            Natm1::Int, Bcur::Int) where T<:AF
     Nλ = Int32(size(cfunc_acc, 2))
     threads = 256
     blocks = cld(Nλ, threads)
     @cuda threads=threads blocks=blocks accumulate_batch_kernel!(
-        flux_acc, cfunc_acc, cfunc_dt, dA_tiles, Int32(Natm1), Nλ, Int32(Bcur))
+        flux_acc, cfunc_acc, flux_comp, cfunc_comp,
+        cfunc_dt, dA_tiles, Int32(Natm1), Nλ, Int32(Bcur))
     return nothing
 end

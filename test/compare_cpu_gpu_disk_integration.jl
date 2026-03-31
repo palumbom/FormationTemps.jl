@@ -30,10 +30,8 @@ Nϕ = 16
 
     @test length(result_gpu.wavs) == length(result_cpu.wavs)
 
-    # flux agreement (CPU microturbulence uses sampled kernel; GPU uses analytical
-    # Fourier-domain Gaussian — systematic difference ~4e-4 at ξ ≈ 850 m/s)
-    @test maximum(abs.(result_gpu.flux .- result_cpu.flux)) < 1e-3
-    @test mean(abs.(result_gpu.flux .- result_cpu.flux)) < 1e-4
+    @test maximum(abs.(result_gpu.flux .- result_cpu.flux)) < 1e-6
+    @test mean(abs.(result_gpu.flux .- result_cpu.flux)) < 1e-7
 
     # formation temperatures: exclude edges where CPU circular FFT and GPU padded
     # linear convolution diverge
@@ -41,7 +39,7 @@ Nϕ = 16
     edge_px = ceil(Int, max(vsini, ζ_RT) * 3 / (FT.c_ms * Δλ / λ0_val)) + 10
     interior = (edge_px+1):(length(result_cpu.wavs) - edge_px)
     if length(interior) > 10
-        @test maximum(abs.(result_gpu.form_temps[interior] .- result_cpu.form_temps[interior])) < 5.0
+        @test maximum(abs.(result_gpu.form_temps[interior] .- result_cpu.form_temps[interior])) < 0.01
     end
 
     # contribution function shapes should agree

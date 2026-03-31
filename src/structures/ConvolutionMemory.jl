@@ -43,6 +43,13 @@ mutable struct ConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     # 2D batched FFT plans (along dim=2, wavelength axis)
     plan_fwd::CUDA.CUFFT.CuFFTPlan
     plan_bwd::AbstractFFTs.ScaledPlan
+
+    # 1D R2C FFT for real-space micro kernel (Tier 1: uniform σ_v)
+    xs_gpu::CA{T,1}                        # wavelength grid (Nλ)
+    kr_1d::CA{T,1}                         # real kernel buffer (L)
+    kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
+    plan_fwd_1d::CUDA.CUFFT.CuFFTPlan     # 1D R2C plan on kr_1d
+    kernel_cached::Bool                     # base kernel FT is valid
 end
 
 """
@@ -87,6 +94,7 @@ mutable struct MacroConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D kernel (nfreq)
     plan_fwd_1d::CUDA.CUFFT.CuFFTPlan
+    kernel_cached::Bool                     # micro base kernel FT is valid
 
     # 1D C2C infrastructure for Hirano kernel
     kc_1d::CuVector{Complex{T}}            # complex buffer (Nλ)
@@ -249,11 +257,18 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     plan_fwd = CUDA.CUFFT.plan_rfft(signal_gpu, 2)
     plan_bwd = CUDA.CUFFT.plan_irfft(conv_ft_gpu, L, 2)
 
+    # 1D kernel infrastructure
+    xs_gpu           = CUDA.zeros(T, Nλ)
+    kr_1d            = CUDA.zeros(T, L)
+    kernel_row_ft_1d = CuVector{Complex{T}}(undef, nfreq)
+    plan_fwd_1d      = CUDA.CUFFT.plan_rfft(kr_1d)
+
     return ConvolutionMemory{T}(Nλ, Natm, Npad_eff, L, pad_left, pad_right,
                                 zero(T), false, false,
                                 ys_gpu, signal_gpu,
                                 kernel_ft_gpu, signal_ft_gpu, conv_ft_gpu, conv_gpu,
-                                plan_fwd, plan_bwd)
+                                plan_fwd, plan_bwd,
+                                xs_gpu, kr_1d, kernel_row_ft_1d, plan_fwd_1d, false)
 end
 
 """
@@ -298,6 +313,6 @@ function MacroConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                                      kernel_ft_gpu, signal_ft_gpu, conv_ft_gpu, conv_gpu,
                                      plan_fwd, plan_bwd,
                                      xs_gpu, padded_kernel_gpu, shift_kernel_gpu, out_gpu,
-                                     kr_1d, kernel_row_ft_1d, plan_fwd_1d,
+                                     kr_1d, kernel_row_ft_1d, plan_fwd_1d, false,
                                      kc_1d, plan_bwd_1d)
 end

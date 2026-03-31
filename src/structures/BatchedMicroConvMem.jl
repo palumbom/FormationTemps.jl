@@ -34,6 +34,16 @@ mutable struct BatchedMicroConvMem{T<:AF} <: AbstractConvolutionMemory{T}
     conv_ft_gpu::CuMatrix{Complex{T}}      # (B*Natm, nfreq) convolution product
     conv_gpu::CuMatrix{T}                  # (B*Natm, L) inverse FFT result
     plan_bwd::AbstractFFTs.ScaledPlan      # C2R on (B*Natm, L)
+
+    # ── 1D R2C for real-space micro kernel (Tier 1: uniform σ_v) ──
+    xs_gpu::CA{T,1}                        # wavelength grid (Nλ)
+    kr_1d::CA{T,1}                         # real kernel buffer (L)
+    kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
+    plan_fwd_1d::CUDA.CUFFT.CuFFTPlan     # 1D R2C plan on kr_1d
+    kernel_cached::Bool                     # base kernel FT is valid
+
+    # ── batched R2C for per-row kernels (Tier 2: varying σ_v) ──
+    plan_fwd_kernel::CUDA.CUFFT.CuFFTPlan  # R2C on (B*Natm, L)
 end
 
 """
@@ -61,8 +71,19 @@ function BatchedMicroConvMem(Nλ::Int, Natm::Int, B::Int, Npad::Int; T=Float64)
     conv_gpu      = CuMatrix{T}(undef, BNatm, L)
     plan_bwd      = CUDA.CUFFT.plan_irfft(conv_ft_gpu, L, 2)
 
+    # 1D kernel infrastructure (Tier 1)
+    xs_gpu           = CUDA.zeros(T, Nλ)
+    kr_1d            = CUDA.zeros(T, L)
+    kernel_row_ft_1d = CuVector{Complex{T}}(undef, nfreq)
+    plan_fwd_1d      = CUDA.CUFFT.plan_rfft(kr_1d)
+
+    # batched kernel FFT (Tier 2)
+    plan_fwd_kernel = CUDA.CUFFT.plan_rfft(conv_gpu, 2)
+
     return BatchedMicroConvMem{T}(Nλ, Natm, B, Npad_eff, L, pad_left, pad_right,
                                    zero(T), false, false,
                                    ys_gpu, signal_gpu, signal_ft_gpu, plan_fwd,
-                                   kernel_ft_gpu, conv_ft_gpu, conv_gpu, plan_bwd)
+                                   kernel_ft_gpu, conv_ft_gpu, conv_gpu, plan_bwd,
+                                   xs_gpu, kr_1d, kernel_row_ft_1d, plan_fwd_1d, false,
+                                   plan_fwd_kernel)
 end

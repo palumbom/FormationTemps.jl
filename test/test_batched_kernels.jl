@@ -155,7 +155,9 @@ Natm1 = Natm - 1
         # batched accumulation
         flux_b = CUDA.zeros(Float64, Nλ)
         cfunc_b = CUDA.zeros(Float64, Natm1, Nλ)
-        FT.accumulate_batch!(flux_b, cfunc_b, cfdt_data, dA, Natm1, B)
+        flux_bc = CUDA.zeros(Float64, Nλ)
+        cfunc_bc = CUDA.zeros(Float64, Natm1, Nλ)
+        FT.accumulate_batch!(flux_b, cfunc_b, flux_bc, cfunc_bc, cfdt_data, dA, Natm1, B)
 
         # sequential accumulation
         flux_s = CUDA.zeros(Float64, Nλ)

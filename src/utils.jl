@@ -173,27 +173,48 @@ end
 
 # fused tile accumulation: replaces copyto! + sum! + two broadcast .+= per tile
 # one thread per wavelength; serial loop over Natm-1 layers
-function accumulate_tile_kernel!(flux_acc, cfunc_acc, src, dA_i, Natm1, Nλ)
+# uses Kahan compensated summation to keep O(ε) accuracy across ~10^4 tile additions
+function accumulate_tile_kernel!(flux_acc, cfunc_acc, flux_comp, cfunc_comp,
+                                 src, dA_i, Natm1, Nλ)
     j = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     j > Nλ && return nothing
     T = eltype(flux_acc)
     s = zero(T)
+    s_comp = zero(T)
     @inbounds for k in 1:Natm1
         val = src[k, j] * dA_i
-        cfunc_acc[k, j] += val
-        s += val
+
+        # Kahan step for cfunc_acc
+        y = val - cfunc_comp[k, j]
+        t = cfunc_acc[k, j] + y
+        cfunc_comp[k, j] = (t - cfunc_acc[k, j]) - y
+        cfunc_acc[k, j] = t
+
+        # Kahan step for local flux sum
+        y_s = val - s_comp
+        t_s = s + y_s
+        s_comp = (t_s - s) - y_s
+        s = t_s
     end
-    @inbounds flux_acc[j] += s
+    # Kahan step for flux_acc
+    @inbounds begin
+        y_f = s - flux_comp[j]
+        t_f = flux_acc[j] + y_f
+        flux_comp[j] = (t_f - flux_acc[j]) - y_f
+        flux_acc[j] = t_f
+    end
     return nothing
 end
 
 function accumulate_tile!(flux_acc::CA{T,1}, cfunc_acc::CA{T,2},
+                          flux_comp::CA{T,1}, cfunc_comp::CA{T,2},
                           src::CA{T,2}, dA_i::T) where T<:AF
     Natm1, Nλ = size(cfunc_acc)
     ts = 256
     bs = cld(Nλ, ts)
-    @cuda threads=ts blocks=bs accumulate_tile_kernel!(flux_acc, cfunc_acc, src,
-                                                       dA_i, Int32(Natm1), Int32(Nλ))
+    @cuda threads=ts blocks=bs accumulate_tile_kernel!(flux_acc, cfunc_acc,
+                                                       flux_comp, cfunc_comp,
+                                                       src, dA_i, Int32(Natm1), Int32(Nλ))
     return nothing
 end
 

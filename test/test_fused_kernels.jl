@@ -74,33 +74,6 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
         @test cfunc_dt_f == cfunc_dt_nf
     end
 
-    @testset "Fused Doppler filter vs separate precompute+build" begin
-        scale = cmem.doppler_scale
-        s_max = Float64(cmem.pad_left - 1)
-        invL = inv(Float64(cmem.L))
-        nfreq = size(cmem.kernel_ft_gpu, 2)
-
-        # non-fused: two kernels
-        shift_pix = CUDA.zeros(Float64, Natm)
-        sigma_pix = CUDA.zeros(Float64, Natm)
-        filter_nf = CUDA.zeros(ComplexF64, Natm, nfreq)
-        ts_params = 256
-        bs_params = cld(Natm, ts_params)
-        @cuda threads=ts_params blocks=bs_params FT.precompute_doppler_params!(
-            shift_pix, sigma_pix, μ_v_rot, σ_v, scale, s_max)
-        ts2 = (32, 32)
-        bs2 = (cld(nfreq, ts2[1]), cld(Natm, ts2[2]))
-        @cuda threads=ts2 blocks=bs2 FT.build_doppler_filter!(
-            filter_nf, shift_pix, sigma_pix, invL, nfreq)
-
-        # fused: one kernel
-        filter_f = CUDA.zeros(ComplexF64, Natm, nfreq)
-        @cuda threads=ts2 blocks=bs2 FT.build_doppler_filter_direct!(
-            filter_f, μ_v_rot, σ_v, scale, s_max, invL, nfreq)
-
-        @test Array(filter_f) == Array(filter_nf)
-    end
-
     @testset "Fused accumulation vs separate copyto+sum+broadcast" begin
         # create a source matrix (use cfunc_dt from a real computation)
         cmem.signal_cached = false
@@ -123,7 +96,9 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
         # fused: one kernel
         flux_f = CUDA.zeros(Float64, Nλ)
         cfunc_f = CUDA.zeros(Float64, Natm1, Nλ)
-        FT.accumulate_tile!(flux_f, cfunc_f, src, dA_i)
+        flux_c = CUDA.zeros(Float64, Nλ)
+        cfunc_c = CUDA.zeros(Float64, Natm1, Nλ)
+        FT.accumulate_tile!(flux_f, cfunc_f, flux_c, cfunc_c, src, dA_i)
 
         @test Array(flux_f) ≈ Array(flux_nf)
         @test Array(cfunc_f) ≈ Array(cfunc_nf)

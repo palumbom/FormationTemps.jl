@@ -50,16 +50,15 @@ rotmacro_error = zeros(length(steps))
     cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
     gpu_mem  = FT.GPUMemory(λs_korg, atm_gpu)
 
-    μ_v_rot = CUDA.zeros(Float64, length(zs))
-    σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+    σ_v_val = 1200.0
 
-    # microturbulence broadening
-    αs_cpu_new = FT.convolve_wavelength_axis(λs_korg, αs, Array(μ_v_rot), Array(σ_v_mic))
-    αs_gpu_new = FT.convolve_wavelength_axis_gpu(cmem, CuArray(collect(λs_korg)), CuArray(αs), μ_v_rot, σ_v_mic)
+    # microturbulence broadening (scalar overload)
+    αs_cpu_new = FT.convolve_wavelength_axis(λs_korg, αs, 0.0, σ_v_val)
+    αs_gpu_new = FT.convolve_wavelength_axis_gpu(cmem, CuArray(collect(λs_korg)), CuArray(αs), 0.0, σ_v_val)
     αs_error[i] = maximum(abs.((Array(αs_gpu_new) .- αs_cpu_new) ./ αs_cpu_new))
 
     # contribution function for convolution tests
-    cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_val)
     tbc = Array(cfunc_flux_stationary.cfunc_dt)
 
     # Edge exclusion for compact-support (rotation) kernels: CPU uses circular FFT, GPU uses
@@ -107,11 +106,9 @@ if make_plots
 end
 
 @testset "CPU/GPU broadening agreement across wavelength spacings" begin
-    # αs, rot, rotmacro: CPU and GPU use the same kernel (or compact-support); agree to float precision
-    # rt, rt_aniso: GPU evaluates erfc in a CUDA kernel; CPU uses Julia erfc; ~1e-4 relative difference
     for i in eachindex(steps)
         @testset "step = $(steps[i]) Å" begin
-            @test αs_error[i]       < 1e-2
+            @test αs_error[i]       < 1e-10
             @test rot_error[i]      < 1e-2
             @test rt_error[i]       < 1e-2
             @test rt_aniso_error[i] < 1e-2

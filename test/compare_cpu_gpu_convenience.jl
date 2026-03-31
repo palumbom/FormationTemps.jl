@@ -43,17 +43,13 @@ end
     @test length(result_gpu.wavs) == length(result_cpu.wavs)
     @test maximum(abs.(result_gpu.wavs .- result_cpu.wavs)) == 0.0
     @test size(result_gpu.cont_func) == size(result_cpu.cont_func)
-    # GPU uses analytical Fourier-domain Gaussian for microturbulence; CPU uses sampled
-    # real-space kernel.  At ξ ≈ 850 m/s (σ ≈ 1.8 px) the max difference is ~4e-4.
-    @test maximum(abs.(result_gpu.flux .- result_cpu.flux))       < 1e-3
-    @test mean(abs.(result_gpu.flux .- result_cpu.flux))          < 1e-4
-    # Hirano CPU uses circular FFT; GPU uses padded linear convolution. They differ at
-    # the spectrum edges (first/last ~3ζ_RT/c * λ0/Δλ pixels). Compare only the interior.
+    @test maximum(abs.(result_gpu.flux .- result_cpu.flux))       < 1e-6
+    @test mean(abs.(result_gpu.flux .- result_cpu.flux))          < 1e-7
     λ0_val = mean(result_cpu.wavs)
     edge_px = ceil(Int, 3 * ζ_RT / FT.c_ms * λ0_val / Δλ) + 10
     interior = (edge_px+1):(length(result_cpu.wavs) - edge_px)
-    @test maximum(abs.(result_gpu.form_temps[interior] .- result_cpu.form_temps[interior])) < 1.0
-    @test mean(abs.(result_gpu.form_temps[interior] .- result_cpu.form_temps[interior]))    < 0.5
+    @test maximum(abs.(result_gpu.form_temps[interior] .- result_cpu.form_temps[interior])) < 0.01
+    @test mean(abs.(result_gpu.form_temps[interior] .- result_cpu.form_temps[interior]))    < 0.01
     # formation temperatures should be within the atmospheric temperature range
     atm_cpu = result_cpu.atmosphere
     T_min = minimum(FT.get_Ts(atm_cpu))

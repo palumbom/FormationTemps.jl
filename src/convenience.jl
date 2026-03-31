@@ -87,9 +87,9 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
                    linelist, atm_cpu, star.A_X;
                    α_ref_out=α_ref, kwargs...)
 
-    # set microturbulent broadening
     σ_v = fill(star.ξ, Natm)
     μ_v = zeros(T, Natm)
+    σ_v_scalar = star.ξ
 
     # convolve absorption coefficients with microturbulence
     αs_broad = convolve_wavelength_axis(λs_korg, αs, μ_v, σ_v)
@@ -148,10 +148,10 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
             ws = workspaces[Threads.threadid()]
             μ_tile = μs_cpu[i]
             dA_i = dA_cpu[i]
-            ws.μ_v_buf .= z_rot_cpu[i] * c_ms
+            μ_v_tile = T(z_rot_cpu[i] * c_ms)
 
             # total absorption → macro_out → accumulate immediately
-            _convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, ws.μ_v_buf, σ_v, ws)
+            _convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, μ_v_tile, σ_v_scalar, ws)
             _calc_tau_cpu!(μ_tile, ws.αs_broad, ws.τs_int)
             calc_intensity_cfunc_cpu!(ws.cfunc_int, Ts, λs_korg, ws.τs_int)
             @views ws.cfunc_dt_int .= ws.cfunc_int .* (ws.τs_int[2:end, :] .- ws.τs_int[1:end-1, :])
@@ -159,7 +159,7 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
             ws.cfunc_flux_acc .+= ws.macro_out .* dA_i
 
             # continuum absorption → macro_out → accumulate immediately
-            _convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, ws.μ_v_buf, σ_v, ws)
+            _convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, μ_v_tile, σ_v_scalar, ws)
             _calc_tau_cpu!(μ_tile, ws.αs_cont_broad, ws.τs_int_cont)
             calc_intensity_cfunc_cpu!(ws.cfunc_int_cont, Ts, λs_korg, ws.τs_int_cont)
             @views ws.cfunc_dt_int_cont .= ws.cfunc_int_cont .* (ws.τs_int_cont[2:end, :] .- ws.τs_int_cont[1:end-1, :])
@@ -250,8 +250,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     cmem_mac = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
     cmem_mac_cont = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
 
-    # set microturbulent broadening
-    σ_v = CUDA.zeros(G, length(atm_gpu.zs)) .+ G(star.ξ)
+    σ_v = G(star.ξ)
 
     # get the "stationary" flux
     cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
@@ -337,11 +336,15 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             alphaC_batch_cont = CUDA.zeros(G, B * Natm)
         end
 
-        # accumulators
+        # accumulators + Kahan compensation arrays
         flux_integration = CUDA.zeros(G, Nλ)
         flux_cont_integration = CUDA.zeros(G, Nλ)
         cfunc_flux_integration = CUDA.zeros(G, Natm1, Nλ)
         cfunc_flux_cont_integration = CUDA.zeros(G, Natm1, Nλ)
+        flux_comp = CUDA.zeros(G, Nλ)
+        flux_cont_comp = CUDA.zeros(G, Nλ)
+        cfunc_comp = CUDA.zeros(G, Natm1, Nλ)
+        cfunc_cont_comp = CUDA.zeros(G, Natm1, Nλ)
 
         # tau integration constants (shared across tiles)
         log_τ_ref    = gpu_mem.log_τ_ref
@@ -405,6 +408,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
 
                 if iszero(star.ζ)
                     accumulate_batch!(flux_integration, cfunc_flux_integration,
+                        flux_comp, cfunc_comp,
                         cfdt_batch, dA_tiles_gpu, Natm1, Bcur)
                 else
                     # per-tile macro convolution (Phase 5 will batch this);
@@ -416,6 +420,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                         src = convolve_rt_macro_gpu_cached(cmem_mac, tile_cfdt,
                                                            macro_kernel_cache[G(μs_cpu[i])])
                         accumulate_tile!(flux_integration, cfunc_flux_integration,
+                            flux_comp, cfunc_comp,
                             src, G(dA_cpu[i]))
                     end
                 end
@@ -437,6 +442,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
 
                 if iszero(star.ζ)
                     accumulate_batch!(flux_cont_integration, cfunc_flux_cont_integration,
+                        flux_cont_comp, cfunc_cont_comp,
                         cfdt_batch_cont, dA_tiles_gpu, Natm1, Bcur)
                 else
                     for bi in 1:Bcur
@@ -445,6 +451,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                         src_c = convolve_rt_macro_gpu_cached(cmem_mac_cont, tile_cfdt_c,
                                                               macro_kernel_cache[G(μs_cpu[i])])
                         accumulate_tile!(flux_cont_integration, cfunc_flux_cont_integration,
+                            flux_cont_comp, cfunc_cont_comp,
                             src_c, G(dA_cpu[i]))
                     end
                 end

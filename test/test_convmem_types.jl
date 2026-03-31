@@ -107,9 +107,11 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
         @test !hasproperty(cmem_micro, :padded_kernel_gpu)
         @test !hasproperty(cmem_micro, :shift_kernel_gpu)
         @test !hasproperty(cmem_micro, :out_gpu)
-        @test !hasproperty(cmem_micro, :xs_gpu)
-        @test !hasproperty(cmem_micro, :kr_1d)
-        @test !hasproperty(cmem_micro, :plan_fwd_1d)
+        # xs_gpu, kr_1d, plan_fwd_1d now exist on both (micro kernel infrastructure)
+        @test hasproperty(cmem_micro, :xs_gpu)
+        @test hasproperty(cmem_micro, :kr_1d)
+        @test hasproperty(cmem_micro, :plan_fwd_1d)
+        @test hasproperty(cmem_micro, :kernel_cached)
     end
 
     @testset "removed fields are absent" begin

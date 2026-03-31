@@ -164,8 +164,10 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
         # batched accumulation
         flux_acc = CUDA.zeros(Float32, Nλ)
         cfunc_acc = CUDA.zeros(Float32, Natm1, Nλ)
+        flux_comp = CUDA.zeros(Float32, Nλ)
+        cfunc_comp = CUDA.zeros(Float32, Natm1, Nλ)
         dA_tiles = CuArray{Float32}([0.001f0, 0.002f0, 0.0015f0])
-        FT.accumulate_batch!(flux_acc, cfunc_acc, cfdt_batch, dA_tiles, Natm1, B)
+        FT.accumulate_batch!(flux_acc, cfunc_acc, flux_comp, cfunc_comp, cfdt_batch, dA_tiles, Natm1, B)
         @test eltype(Array(flux_acc)) == Float32
         @test all(isfinite, Array(flux_acc))
     end

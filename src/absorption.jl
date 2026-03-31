@@ -23,11 +23,12 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist,
                         atm::Atmosphere{T}, A_X::AA{T,1};
                         α_ref_out=nothing, vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs,
-                        ne_warn_thresh=0.1) where T<:AF
+                        ne_warn_thresh=0.1, ne_warn_min=1e-4) where T<:AF
     compute_alpha!(αs, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ,
                    A_X; α_ref_out=α_ref_out, ref_wl_cm=atm.reference_wavelength,
                    vmic_ref_cms=vmic_ref_cms,
-                   partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh)
+                   partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh,
+                   ne_warn_min=ne_warn_min)
     return nothing
 end
 
@@ -54,7 +55,8 @@ Returns:
 function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X;
                         α_ref_out=nothing, ref_wl_cm::Float64=5000.0/1e8,
                         vmic_ref_cms::Float64=0.0,
-                        partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+                        partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
+                        ne_warn_min=1e-4)
     # deal with abundances
     abs_abundances = @. 10^(A_X - 12) # n(X) / n_tot
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
@@ -87,7 +89,8 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
                                                Korg.ionization_energies,
                                                partition_funcs,
                                                Korg.default_log_equilibrium_constants,
-                                               electron_number_density_warn_threshold=ne_warn_thresh)
+                                               electron_number_density_warn_threshold=ne_warn_thresh,
+                                               electron_number_density_warn_min_value=ne_warn_min)
 
         # continuum absorption at reference wavelength — reuses (nₑ, n_dict), no extra solver call
         if !isnothing(α_ref_out)
@@ -130,7 +133,7 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
     if !isnothing(α_ref_out)
         linelist5 = Korg._alpha_5000_default_linelist  # synthesize.jl:195-198
         α_cntm_ref = [_ -> a for a in copy(α_ref_out)]  # synthesize.jl:255
-        Korg.line_absorption!(reshape(α_ref_out, :, 1), linelist5,
+        Korg.line_absorption!(view(α_ref_out, :, 1:1), linelist5,
                               Korg.Wavelengths([ref_wl_cm * 1e8]),
                               Ts, nₑs, nds, partition_funcs,
                               vmic_ref_cms, α_cntm_ref; cutoff_threshold=3e-4)
@@ -141,18 +144,21 @@ end
 
 function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, atm, A_X;
                         α_ref_out=nothing, vmic_ref_cms::Float64=0.0,
-                        partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+                        partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
+                        ne_warn_min=1e-4)
     compute_alpha!(αs, αs_cont, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ,
                    A_X; α_ref_out=α_ref_out, ref_wl_cm=atm.reference_wavelength,
                    vmic_ref_cms=vmic_ref_cms,
-                   partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh)
+                   partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh,
+                   ne_warn_min=ne_warn_min)
     return nothing
 end
 
 function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X;
                         α_ref_out=nothing, ref_wl_cm::Float64=5000.0/1e8,
                         vmic_ref_cms::Float64=0.0,
-                        partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1)
+                        partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
+                        ne_warn_min=1e-4)
     # deal with abundances
     abs_abundances = @. 10^(A_X - 12) # n(X) / n_tot
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
@@ -185,7 +191,8 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
                                                Korg.ionization_energies,
                                                partition_funcs,
                                                Korg.default_log_equilibrium_constants,
-                                               electron_number_density_warn_threshold=ne_warn_thresh)
+                                               electron_number_density_warn_threshold=ne_warn_thresh,
+                                               electron_number_density_warn_min_value=ne_warn_min)
 
         # continuum absorption at reference wavelength — reuses (nₑ, n_dict), no extra solver call
         if !isnothing(α_ref_out)
@@ -229,7 +236,7 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
     if !isnothing(α_ref_out)
         linelist5 = Korg._alpha_5000_default_linelist  # synthesize.jl:195-198
         α_cntm_ref = [_ -> a for a in copy(α_ref_out)]  # synthesize.jl:255
-        Korg.line_absorption!(reshape(α_ref_out, :, 1), linelist5,
+        Korg.line_absorption!(view(α_ref_out, :, 1:1), linelist5,
                               Korg.Wavelengths([ref_wl_cm * 1e8]),
                               Ts, nₑs, nds, partition_funcs,
                               vmic_ref_cms, α_cntm_ref; cutoff_threshold=3e-4)
