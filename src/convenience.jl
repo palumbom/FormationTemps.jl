@@ -292,6 +292,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         L_est = next_fft_friendly_len(Nλ + Npad)
         bytes_per_tile = Natm * (L_est * sizeof(G) + nfreq * sizeof(Complex{G}) * 2)
         bytes_work = Natm * Nλ * sizeof(G) + Natm1 * Nλ * sizeof(G)
+
         # shared signal buffers (ys_gpu + signal_gpu + signal_ft_gpu), paid once per stream
         bytes_shared = Natm * (Nλ * sizeof(G) + L_est * sizeof(G) + nfreq * sizeof(Complex{G}))
         bytes_per_tile_total = 2 * (bytes_per_tile + bytes_work)  # dual-stream, scales with B
@@ -360,24 +361,33 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         log_τ_ref    = gpu_mem.log_τ_ref
         ifactor_base = gpu_mem.ifactor_base
 
-        # precompute macro kernel FFTs for unique μ values
-        macro_kernel_cache = Dict{G, CuVector{Complex{G}}}()
+        # precompute macro kernel FFTs for all unique μ values (batched)
         if !iszero(star.ζ)
-            unique_μ_vals = unique(μs_cpu)
-            for μ_val in unique_μ_vals
-                macro_kernel_cache[G(μ_val)] = precompute_rt_macro_kernel_ft(cmem_mac, λs_G, G(star.ζ), G(μ_val))
-            end
-
-            # flatten kernel cache into 2D CuArray for GPU-side indexing
-            unique_μ_sorted = sort(collect(keys(macro_kernel_cache)))
-            μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
             L_mac = cmem_mac.L
             pad_left_mac = cmem_mac.pad_left
             nfreq_mac = fld(L_mac, 2) + 1
-            kernel_cache_flat = CUDA.zeros(Complex{G}, length(unique_μ_sorted), nfreq_mac)
-            for (i, μ) in enumerate(unique_μ_sorted)
-                copyto!(view(kernel_cache_flat, i, :), macro_kernel_cache[μ])
-            end
+            i0_mac = Nλ ÷ 2 + 1
+
+            unique_μ_sorted = sort(unique(G.(μs_cpu)))
+            N_unique = length(unique_μ_sorted)
+            μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
+            μ_vals_gpu = CuArray(unique_μ_sorted)
+
+            # evaluate all kernels in DFT layout with one 2D kernel launch
+            kbuf_mac = CUDA.zeros(G, N_unique, L_mac)
+            ts_kc = (32, 32)
+            bs_kc = (cld(Nλ, ts_kc[1]), cld(N_unique, ts_kc[2]))
+            @cuda threads=ts_kc blocks=bs_kc compute_rt_macro_dft_layout_2d!(
+                kbuf_mac, gpu_mem.λs, μ_vals_gpu, Int32(i0_mac), G(star.ζ),
+                Int32(Nλ), Int32(L_mac))
+            kbuf_mac ./= sum(kbuf_mac, dims=2)
+
+            # batched R2C FFT → kernel_cache_flat
+            plan_kc = CUDA.CUFFT.plan_rfft(kbuf_mac, 2)
+            kernel_cache_flat = CUDA.zeros(Complex{G}, N_unique, nfreq_mac)
+            mul!(kernel_cache_flat, plan_kc, kbuf_mac)
+
+            # per-tile μ index
             μ_idx_gpu = CuArray(Int32[μ_to_idx[G(μs_cpu[i])] for i in 1:Ntiles])
 
             # batched macro buffers + cuFFT plans

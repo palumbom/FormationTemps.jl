@@ -1,6 +1,7 @@
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
+using LinearAlgebra
 using BenchmarkTools
 using Printf, Statistics
 using DelimitedFiles
@@ -146,19 +147,20 @@ end
 
 # ── GPU batched kernel benchmark ──────────────────────────────────────────────
 # mirrors the production GPU tile loop in convenience.jl: dual-stream total +
-# continuum, separate bcmem/cmem per stream, precomputed macro kernel cache
+# continuum, pre-uploaded tile params with tile_offset, batched Fourier-domain
+# macro accumulation, batched macro kernel precomputation
 function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu;
                                n_repeat=10, B=8, gpu_precision::Type{<:AbstractFloat}=Float64)
     T = gpu_precision
     A_X = star.A_X
     korg_atm = Korg.interpolate_marcs(star.Teff, star.logg, A_X)
 
-    # absorption at Float64 (Korg requirement), then convert
     atm_f64 = FT.AtmosphereGPU(korg_atm; T=Float64)
     Natm = length(atm_f64.zs)
     Nλ = length(λs_korg)
     Natm1 = Natm - 1
     Npad = 512
+    Ntiles = length(μs_cpu)
 
     α_ref_f64 = zeros(Natm)
     αs_f64 = copy(αs)
@@ -171,39 +173,30 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     αs_cont_T = T.(αs_cont_f64)
     α_ref_T = T.(α_ref_f64)
 
-    # GPU memory (shared)
     λs_T = T.(collect(λs_korg))
     λs_gpu = CuArray(λs_T)
-    σ_v = CUDA.zeros(T, Natm) .+ T(star.ξ)
+    σ_v = T(star.ξ)
     log_τ_ref = CuArray{T}(log.(atm_gpu.τs))
     ifactor_base = CuArray{T}(atm_gpu.τs ./ α_ref_T)
     Ts_gpu = CuArray{T}(atm_gpu.Ts)
 
-    # separate memory for total and continuum streams (mirrors production)
+    # separate memory for total and continuum streams
     bcmem      = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad; T=T)
     bcmem_cont = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad; T=T)
-    cmem_mac      = FT.MacroConvolutionMemory(Nλ, Natm1, Npad; T=T)
-    cmem_mac_cont = FT.MacroConvolutionMemory(Nλ, Natm1, Npad; T=T)
+    cmem_mac   = FT.MacroConvolutionMemory(Nλ, Natm1, Npad; T=T)
 
-    # batch parameters
-    μ_tiles = CuArray{T}(T.(μs_cpu[1:B]))
-    μ_v_batch_cpu = zeros(T, B * Natm)
-    for bi in 1:B
-        v = T(z_rot_cpu[min(bi, length(z_rot_cpu))] * FT.c_ms)
-        for k in 1:Natm
-            μ_v_batch_cpu[(bi-1)*Natm+k] = v
-        end
-    end
-    μ_v_batch      = CuArray{T}(μ_v_batch_cpu)
-    μ_v_batch_cont = CuArray{T}(μ_v_batch_cpu)
+    # pre-upload all tile parameters (matches production)
+    all_μ_tiles_gpu = CuArray(T.(μs_cpu))
+    all_dA_tiles_gpu = CuArray(T.(ones(Ntiles) .* 0.001))  # dummy dA for timing
+    all_μ_v_gpu = CuArray(repeat(T.(z_rot_cpu .* FT.c_ms), inner=Natm))
 
-    # working arrays (total + continuum)
+    # working arrays
     τs_batch      = CUDA.zeros(T, B * Natm, Nλ)
     τs_batch_cont = CUDA.zeros(T, B * Natm, Nλ)
     cfdt_batch      = CUDA.zeros(T, B * Natm1, Nλ)
     cfdt_batch_cont = CUDA.zeros(T, B * Natm1, Nλ)
 
-    # prime signal caches (total and continuum use different absorption)
+    # prime signal caches
     μ_v_prime = CUDA.zeros(T, Natm)
     bcmem.signal_cached = false
     FT.convolve_wavelength_axis_batched!(bcmem, λs_T, αs_T, μ_v_prime, σ_v, 1)
@@ -212,15 +205,42 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     FT.convolve_wavelength_axis_batched!(bcmem_cont, λs_T, αs_cont_T, μ_v_prime, σ_v, 1)
     bcmem_cont.signal_cached = true
 
-    # precompute macro kernel (production caches per unique μ; use first tile)
-    macro_kft = FT.precompute_rt_macro_kernel_ft(cmem_mac, λs_T, T(star.ζ), T(μs_cpu[1]))
+    # batched macro kernel precomputation (matches production)
+    L_mac = cmem_mac.L
+    pad_left_mac = cmem_mac.pad_left
+    nfreq_mac = fld(L_mac, 2) + 1
+    i0_mac = Nλ ÷ 2 + 1
+    unique_μ_sorted = sort(unique(T.(μs_cpu)))
+    N_unique = length(unique_μ_sorted)
+    μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
+    μ_vals_gpu = CuArray(unique_μ_sorted)
+    kbuf_mac = CUDA.zeros(T, N_unique, L_mac)
+    ts_kc = (32, 32)
+    bs_kc = (cld(Nλ, ts_kc[1]), cld(N_unique, ts_kc[2]))
+    @cuda threads=ts_kc blocks=bs_kc FT.compute_rt_macro_dft_layout_2d!(
+        kbuf_mac, λs_gpu, μ_vals_gpu, Int32(i0_mac), T(star.ζ),
+        Int32(Nλ), Int32(L_mac))
+    kbuf_mac ./= sum(kbuf_mac, dims=2)
+    plan_kc = CUDA.CUFFT.plan_rfft(kbuf_mac, 2)
+    kernel_cache_flat = CUDA.zeros(Complex{T}, N_unique, nfreq_mac)
+    mul!(kernel_cache_flat, plan_kc, kbuf_mac)
+    μ_idx_gpu = CuArray(Int32[μ_to_idx[T(μs_cpu[i])] for i in 1:Ntiles])
 
-    # dual CUDA streams (mirrors production)
+    # batched macro buffers + plans
+    mac_pad      = CUDA.zeros(T, B * Natm1, L_mac)
+    mac_pad_cont = CUDA.zeros(T, B * Natm1, L_mac)
+    mac_ft_buf      = CUDA.zeros(Complex{T}, B * Natm1, nfreq_mac)
+    mac_ft_buf_cont = CUDA.zeros(Complex{T}, B * Natm1, nfreq_mac)
+    plan_mac_fwd      = CUDA.CUFFT.plan_rfft(mac_pad, 2)
+    plan_mac_fwd_cont = CUDA.CUFFT.plan_rfft(mac_pad_cont, 2)
+    acc_ft      = CUDA.zeros(Complex{T}, Natm1, nfreq_mac)
+    acc_ft_cont = CUDA.zeros(Complex{T}, Natm1, nfreq_mac)
+
     stream_total = CUDA.CuStream()
     stream_cont  = CUDA.CuStream()
     CUDA.synchronize()
 
-    # timing — measures wall time of both streams (total + continuum overlap)
+    # timing per batch (dual-stream overlap)
     t_micro = zeros(n_repeat)
     t_tau = zeros(n_repeat)
     t_cfunc = zeros(n_repeat)
@@ -229,26 +249,28 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
 
     for r in 1:n_repeat
         CUDA.synchronize()
+        fill!(acc_ft, zero(Complex{T}))
+        fill!(acc_ft_cont, zero(Complex{T}))
 
         t_micro[r] = CUDA.@elapsed begin
             CUDA.stream!(stream_total) do
                 αs_conv = FT.convolve_wavelength_axis_batched!(bcmem, λs_T, αs_T,
-                    μ_v_batch, σ_v, B)
+                    all_μ_v_gpu, σ_v, B; tile_offset=0)
             end
             CUDA.stream!(stream_cont) do
                 αs_conv_c = FT.convolve_wavelength_axis_batched!(bcmem_cont, λs_T, αs_cont_T,
-                    μ_v_batch_cont, σ_v, B)
+                    all_μ_v_gpu, σ_v, B; tile_offset=0)
             end
         end
 
         t_tau[r] = CUDA.@elapsed begin
             CUDA.stream!(stream_total) do
-                FT.calc_tau_anchored_batched!(μ_tiles, log_τ_ref, ifactor_base,
-                    αs_conv, τs_batch, Natm, B)
+                FT.calc_tau_anchored_batched!(all_μ_tiles_gpu, log_τ_ref, ifactor_base,
+                    αs_conv, τs_batch, Natm, B; tile_offset=0)
             end
             CUDA.stream!(stream_cont) do
-                FT.calc_tau_anchored_batched!(μ_tiles, log_τ_ref, ifactor_base,
-                    αs_conv_c, τs_batch_cont, Natm, B)
+                FT.calc_tau_anchored_batched!(all_μ_tiles_gpu, log_τ_ref, ifactor_base,
+                    αs_conv_c, τs_batch_cont, Natm, B; tile_offset=0)
             end
         end
 
@@ -265,16 +287,22 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
 
         t_macro[r] = CUDA.@elapsed begin
             CUDA.stream!(stream_total) do
-                for bi in 1:B
-                    tile_cfdt = @view cfdt_batch[(bi-1)*Natm1+1 : bi*Natm1, :]
-                    FT.convolve_rt_macro_gpu_cached(cmem_mac, tile_cfdt, macro_kft)
-                end
+                ts_pad = (32, 32)
+                bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
+                @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(mac_pad, cfdt_batch,
+                    Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
+                mul!(mac_ft_buf, plan_mac_fwd, mac_pad)
+                FT.batched_macro_multiply_accumulate!(acc_ft, mac_ft_buf, kernel_cache_flat,
+                    μ_idx_gpu, all_dA_tiles_gpu, Natm1, B; tile_offset=0)
             end
             CUDA.stream!(stream_cont) do
-                for bi in 1:B
-                    tile_cfdt_c = @view cfdt_batch_cont[(bi-1)*Natm1+1 : bi*Natm1, :]
-                    FT.convolve_rt_macro_gpu_cached(cmem_mac_cont, tile_cfdt_c, macro_kft)
-                end
+                ts_pad = (32, 32)
+                bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
+                @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(mac_pad_cont, cfdt_batch_cont,
+                    Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
+                mul!(mac_ft_buf_cont, plan_mac_fwd_cont, mac_pad_cont)
+                FT.batched_macro_multiply_accumulate!(acc_ft_cont, mac_ft_buf_cont, kernel_cache_flat,
+                    μ_idx_gpu, all_dA_tiles_gpu, Natm1, B; tile_offset=0)
             end
         end
     end

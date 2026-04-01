@@ -383,3 +383,40 @@ function batched_macro_multiply_accumulate!(acc_ft::CA{Complex{T},2},
         Int32(tile_offset), Int32(Natm1), Int32(Bcur))
     return nothing
 end
+
+# ── batched macro kernel precomputation ───────────────────────────────────────
+
+"""
+    compute_rt_macro_dft_layout_2d!(kbuf, xs, μ_vals, i0, ζ_rt, Nλ, L)
+
+CUDA kernel: evaluate the RT macroturbulence kernel for multiple μ values in parallel,
+writing directly in DFT layout (zero-lag at index 1). Each row of `kbuf` (N_unique, L)
+corresponds to one unique μ value. Skips the roll + ifftshift needed by the serial path.
+"""
+function compute_rt_macro_dft_layout_2d!(kbuf, xs, μ_vals, i0, ζ_rt, Nλ, L)
+    j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    Nrows = size(kbuf, 1)
+    (row > Nrows || j > Nλ) && return nothing
+    T = eltype(kbuf)
+
+    xj = @inbounds xs[j]
+    λ0 = @inbounds xs[i0]
+    v = c_ms * (xj - λ0) / λ0
+    μ = @inbounds μ_vals[row]
+
+    ϵ = T(1e-6)
+    cosθ = max(μ, ϵ)
+    s2 = one(T) - μ * μ
+    sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ * ϵ))
+
+    invR = T(0.5) / (sqrt(T(π)) * ζ_rt * cosθ)
+    invT_val = T(0.5) / (sqrt(T(π)) * ζ_rt * sinθ)
+    t1 = exp(-(v / (ζ_rt * cosθ))^2) * invR
+    t2 = exp(-(v / (ζ_rt * sinθ))^2) * invT_val
+
+    d = j - i0
+    idx = d > 0 ? d : L + d
+    @inbounds kbuf[row, idx] = t1 + t2
+    return nothing
+end

@@ -43,8 +43,8 @@ end
     @test length(result_gpu.wavs) == length(result_cpu.wavs)
     @test maximum(abs.(result_gpu.wavs .- result_cpu.wavs)) == 0.0
     @test size(result_gpu.cont_func) == size(result_cpu.cont_func)
-    @test maximum(abs.(result_gpu.flux .- result_cpu.flux))       < 1e-6
-    @test mean(abs.(result_gpu.flux .- result_cpu.flux))          < 1e-7
+    @test maximum(abs.(result_gpu.flux .- result_cpu.flux))       < 1e-10
+    @test mean(abs.(result_gpu.flux .- result_cpu.flux))          < 1e-10
     λ0_val = mean(result_cpu.wavs)
     edge_px = ceil(Int, 3 * ζ_RT / FT.c_ms * λ0_val / Δλ) + 10
     interior = (edge_px+1):(length(result_cpu.wavs) - edge_px)

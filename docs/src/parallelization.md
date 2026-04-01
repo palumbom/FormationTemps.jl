@@ -50,7 +50,16 @@ Absorption coefficients are always computed at Float64 (a Korg requirement) and 
 
 ### What gets accelerated
 
-The disk integration pipeline repeats the full radiative transfer calculation for every visible tile on the stellar surface — typically thousands of tiles for `Nϕ = 128`. Each tile requires microturbulent broadening (FFT-based Gaussian convolution of the absorption coefficient matrix along the wavelength axis, per atmosphere layer), optical depth integration through the atmosphere to build `τ(λ)` at each layer, computation of the intensity contribution function per layer, and radial-tangential macroturbulence convolution of the contribution function. On the GPU, tiles are processed in batches and the first three steps use batched CUDA kernels. The macroturbulence convolution uses a separate FFT-based kernel per tile. All GPU memory is pre-allocated at the start of the call and reused throughout.
+The disk integration pipeline repeats the full radiative transfer calculation for every visible tile on the stellar surface — typically thousands of tiles for `Nϕ = 128`. Each tile requires:
+
+1. **Microturbulent broadening**: FFT-based Gaussian convolution of the absorption coefficient matrix along the wavelength axis. The absorption signal FFT is tile-independent and computed once; only the per-tile Doppler kernel varies.
+2. **Optical depth integration**: builds `τ(λ)` at each atmosphere layer.
+3. **Contribution function**: intensity contribution per layer.
+4. **Macroturbulent broadening**: radial-tangential convolution of the contribution function, weighted by the tile's solid angle.
+
+On the GPU, tiles are processed in batches of `B` (up to 64). Steps 1–3 use batched CUDA kernels operating on all `B` tiles simultaneously via 2D cuFFT plans. Step 4 uses Fourier-domain accumulation: each batch's contribution functions are forward-FFT'd together, multiplied by per-tile macro kernel FFTs (precomputed for each unique μ), and accumulated in a single complex-valued accumulator. One inverse FFT at the end of the tile loop recovers the real-space result. This avoids ~10⁴ per-tile inverse FFTs.
+
+All tile parameters (μ, dA, velocity) are uploaded to the GPU once before the tile loop — there are no host-device transfers during the loop. GPU memory is pre-allocated at the start of the call and reused throughout. The macro kernel FFTs for all unique μ values are precomputed in a single batched operation.
 
 ## Benchmarks
 
@@ -58,7 +67,7 @@ The results below were obtained on an Intel Xeon w5-3435X (16 cores / 32 threads
 
 ### Per-tile breakdown
 
-Per-tile timing breakdown for CPU (single tile) and GPU (per tile from a batch of 8). GPU times include both total and continuum absorption paths running on dual CUDA streams.
+Amortized per-tile timing for CPU (single tile, both total + continuum paths) and GPU (per tile from a batch of `B = 8`). GPU times include dual-stream overlap of total and continuum paths. The GPU macro convolution uses batched Fourier-domain accumulation — the reported per-tile cost is the batch wall time divided by `B`, not a per-tile serial operation.
 
 ![per-tile benchmark](static/benchmark_pertile.png)
 
@@ -70,15 +79,21 @@ Speedup and wall-clock time as a function of the number of Julia threads for a f
 
 ### Performance vs. wavelength grid size
 
-End-to-end wall-clock time as a function of `Nλ` (varied by changing `Δλ` over a fixed wavelength window) for single-threaded CPU, multi-threaded CPU, and GPU.
+End-to-end wall-clock time as a function of `Nλ` (varied by changing `Δλ` over a fixed wavelength window) for single-threaded CPU, multi-threaded CPU, and GPU. Note that the FFT-padded length (not `Nλ` itself) determines FFT cost — non-monotonic performance at certain `Nλ` values reflects jumps to less efficient FFT-friendly lengths (e.g., `Nλ + 512` landing on a pure power-of-5 vs. a power-of-2 composite).
 
 ![Nlambda benchmark](static/benchmark_nlambda.png)
 
 ### Convolution kernels
 
-Individual broadening kernel timings for each convolution type (CPU vs GPU Float64 vs GPU Float32).
+Individual broadening kernel timings for each convolution type (CPU vs GPU Float64 vs GPU Float32). The "Micro (scalar)" and "Aniso. RT (in-place)" entries reflect the production disk integration path; the "Micro (per-row)" and "Aniso. RT (alloc.)" entries show the alternative dispatch variants for comparison.
 
 ![convolution benchmark](static/benchmark_convolutions.png)
+
+## Performance tips
+
+- **GPU memory**: the first call to `calc_formation_temp` with `use_gpu=true` allocates GPU buffers and cuFFT plans. Subsequent calls with different parameters re-allocate. If GPU memory is tight, use `gpu_precision=Float32` to roughly halve usage.
+- **CPU threads**: CPU disk integration scales well to ~16 threads. Beyond that, FFTW plan contention and memory bandwidth limit gains. FFTW internal threading is disabled during the tile loop — parallelism comes from distributing tiles across Julia threads.
+- **Absorption cost**: the `compute_alpha!` call (Korg chemical equilibrium + line absorption) runs on CPU for both paths and scales with the number of spectral lines × `Nλ`. For large linelists, this can dominate total time regardless of GPU acceleration.
 
 ## CPU vs. GPU numerical differences
 
@@ -90,8 +105,6 @@ The CPU and GPU paths use slightly different algorithms in a few places, leading
 ### Float32 vs. Float64 accuracy
 
 The figures below compare flux and formation temperature spectra for two Fe I lines near 6300 Å, computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra (visually indistinguishable); the bottom row shows residuals relative to the CPU Float64 reference on a symmetric log scale. GPU Float64 residuals are small, dominated by the algorithmic differences described above. GPU Float32 residuals are orders of magnitude larger but still modest: flux residuals at the ~10⁻⁴ level and formation temperature differences of ~1 K.
-
-The dominant source of Float32 precision loss is the R2C/C2R FFT roundtrip in the per-tile microturbulent convolution: absorption coefficients span ~5 orders of magnitude across the wavelength grid, and Float32 FFT arithmetic distributes absolute rounding error proportional to the largest (line-core) values across all wavelengths. The tile accumulation kernels use Kahan compensated summation to prevent additional O(N) rounding from the ~10⁴ tile sum, and the Gaussian kernel construction avoids catastrophic cancellation in the Doppler-shifted center wavelength. See `debug/diagnose_f32_residuals.jl` for a stage-by-stage precision breakdown.
 
 ![GPU precision: convolution path](static/gpu_precision_convolve.png)
 
