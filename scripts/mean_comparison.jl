@@ -128,8 +128,8 @@ end
 # read pre-computed 1D formation temperature spectrum
 cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outfile_1d = joinpath(cephdir, "formation_temps", "temp_spectrum_air_1D.h5")
-λ_min = 5000.0  # Å
-λ_max = 8000.0  # Å
+λ_min = 5500.0  # Å
+λ_max = 6400.0  # Å
 
 λs_korg = Float64[]
 flux = Float64[]
@@ -324,40 +324,67 @@ cfunc_list = []
 cfunc_cum_list = []
 best_local_idx = Int[]  # local index of the pixel that matched ftemp in each window
 
-# buffer extends until T₁/₂ recovers to near-continuum on both sides
-cont_thresh = 0.95  # fraction of local max T₁/₂ to count as "continuum reached"
+# buffer extends until dT/dλ flattens on both sides of the line
+# smooth the T₁/₂ curve to avoid noise triggering early flattening
+smooth_win = ceil(Int, 0.05 / mean(diff(λs_korg)))  # ~0.05 Å smoothing
+dT_global = diff(form_temps_flux)
+flat_thresh = 0.3  # K per pixel — derivative below this counts as flat
 min_buffer = ceil(Int, 0.3 / mean(diff(λs_korg)))
-offset_scale = 0.725
+max_buffer = ceil(Int, 3.0 / mean(diff(λs_korg)))  # hard cap at ±3 Å
+gap = 0.08  # Å gap between adjacent cutouts
 Nλ_total = length(λs_korg)
+Δλ_mean = mean(diff(λs_korg))
+
+# first pass: compute each line's buffer
+buffers = Int[]
 for i in eachindex(selected_line_ids)
     idx_λs = findfirst(x -> x >= wls_interest[i], λs_korg)
     bp = best_pixel[selected_line_ids[i]]
 
-    # find where T₁/₂ recovers to near-continuum on the red side
-    local_max_T = maximum(form_temps_flux[max(1,idx_λs-min_buffer):min(Nλ_total,idx_λs+min_buffer)])
-    thresh_T = cont_thresh * local_max_T
+    # walk redward: stop when derivative flattens OR turns negative (entering next line)
     red_buf = min_buffer
-    for k in 1:Nλ_total-idx_λs
-        if form_temps_flux[idx_λs + k] >= thresh_T
-            red_buf = k + ceil(Int, 0.1 * k)  # 10% padding beyond recovery
+    for k in min_buffer:min(max_buffer, Nλ_total - idx_λs - 1)
+        lo = max(1, idx_λs + k - smooth_win)
+        hi = min(length(dT_global), idx_λs + k + smooth_win)
+        avg_dT = mean(view(dT_global, lo:hi))
+        if avg_dT < flat_thresh  # flat or descending into next line
+            red_buf = k
             break
         end
     end
-    # same for the blue side
+    # walk blueward: stop when derivative flattens OR turns positive (entering next line)
+    # note: blueward walk goes left, so rising wing has negative dT/dλ
     blue_buf = min_buffer
-    for k in 1:idx_λs-1
-        if form_temps_flux[idx_λs - k] >= thresh_T
-            blue_buf = k + ceil(Int, 0.1 * k)
+    for k in min_buffer:min(max_buffer, idx_λs - 2)
+        lo = max(1, idx_λs - k - smooth_win)
+        hi = min(length(dT_global), idx_λs - k + smooth_win)
+        avg_dT = mean(view(dT_global, lo:hi))
+        if avg_dT > -flat_thresh  # flat or descending into next line
+            blue_buf = k
             break
         end
     end
 
     buffer = max(min_buffer, red_buf, blue_buf, ceil(Int, 1.2 * abs(bp - idx_λs)))
     buffer = min(buffer, idx_λs - 1, Nλ_total - idx_λs)
-    offset = offset_scale * (i - 1)
+    push!(buffers, buffer)
+end
+
+# compute cumulative offsets so each cutout is placed after the previous one's right edge
+offsets = zeros(length(selected_line_ids))
+for i in 2:length(selected_line_ids)
+    prev_half = buffers[i-1] * Δλ_mean  # right half of previous window
+    curr_half = buffers[i] * Δλ_mean    # left half of current window
+    offsets[i] = offsets[i-1] + prev_half + curr_half + gap
+end
+
+# second pass: extract windows using computed buffers and offsets
+for i in eachindex(selected_line_ids)
+    idx_λs = findfirst(x -> x >= wls_interest[i], λs_korg)
+    buffer = buffers[i]
 
     win_start = idx_λs - buffer
-    λs_view = view(λs_korg, win_start:idx_λs+buffer) .- wls_interest[i] .+ offset
+    λs_view = view(λs_korg, win_start:idx_λs+buffer) .- wls_interest[i] .+ offsets[i]
     flux_view = view(flux, win_start:idx_λs+buffer)
     temp_view = view(form_temps_flux, win_start:idx_λs+buffer)
     cfunc_view = view(cfunc_flux, :, win_start:idx_λs+buffer)
@@ -368,7 +395,7 @@ for i in eachindex(selected_line_ids)
     push!(temp_list, collect(temp_view))
     push!(cfunc_list, collect(cfunc_view))
     push!(cfunc_cum_list, collect(cfunc_cum_view))
-    push!(best_local_idx, bp - win_start + 1)
+    push!(best_local_idx, best_pixel[selected_line_ids[i]] - win_start + 1)
 end
 
 # find temperatures to loop over
@@ -399,9 +426,14 @@ function find_nearest_pixel(temps, target)
     return best_idx == 0 ? argmin(abs.(temps .- target)) : best_idx
 end
 
-# loop over ftemps; save the frame closest to the target formation temperature
-jsave = argmin(abs.(ftemps .- ftemp))
+# temperature at which to save the PDF
+save_temp = 5000.0
+save_atol = 10.0
+
+# loop over ftemps
 for j in eachindex(ftemps)
+    is_save = abs(ftemps[j] - save_temp) <= save_atol
+
     # make figure objects
     fig, ax1 = plt.subplots(figsize=(9.2,4.8))
 
@@ -413,14 +445,11 @@ for j in eachindex(ftemps)
     for i in eachindex(idx_wls)
         # plot the lines
         ax1.plot(wavs_list[i], temp_list[i], zorder=0, c=ncolors[i])
-        the_xticks[i] = offset_scale * (i - 1)
+        the_xticks[i] = offsets[i]
 
-        if j == jsave
-            # use precomputed pixel — guaranteed valid, skip tolerance check
-            this_idx = best_local_idx[i]
-        else
-            this_idx = find_nearest_pixel(temp_list[i], ftemps[j])
-            abs(temp_list[i][this_idx] - ftemps[j]) > atol && continue
+        this_idx = find_nearest_pixel(temp_list[i], ftemps[j])
+        if !is_save && abs(temp_list[i][this_idx] - ftemps[j]) > atol
+            continue
         end
 
         ax1.scatter([wavs_list[i][this_idx]], [temp_list[i][this_idx]], c="k", zorder=1)
@@ -428,43 +457,38 @@ for j in eachindex(ftemps)
     ax1.set_xticks(the_xticks)
     ax1.set_xticklabels(specs_interest_latex, rotation=45, ha="right")
 
-    # ax1.set_xlabel(L"{\rm Air\ Wavelength\ +\ Offset\ [\AA]}")
     ax1.set_ylabel(L"T_{1/2}\ {\rm [K]}")
     fig.tight_layout()
     fig.savefig(joinpath(framedir, "line_lineup_$j.png"), bbox_inches="tight")
-    if j == jsave
+    if is_save
         fig.savefig("figures/line_lineup.pdf", bbox_inches="tight")
     end
     plt.clf(); plt.close()
 
     # now do each contribution slice
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(9.2, 4.8), sharex=true)
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(9.2, 4.8), sharex=true,
+                             gridspec_kw=Dict("width_ratios" => [1, 1]))
     ax1 = axes[0]
     ax2 = axes[1]
 
     # get exponent for units
-    max_val = maximum(abs.(vcat(cfunc_list...)))
+    max_val = maximum(maximum(abs.(c)) for c in cfunc_list)
     exponent = floor(Int, log10(max_val))
     the_ymin = 0.0
     the_ymax = max_val / 10^exponent + 0.5
-
-    this_ymax = [0.0]
+    frame_ymax = 0.0
 
     for i in eachindex(idx_wls)
-        if j == jsave
-            this_idx = best_local_idx[i]
-        else
-            this_idx = find_nearest_pixel(temp_list[i], ftemps[j])
-            abs(temp_list[i][this_idx] - ftemps[j]) > atol && continue
+        this_idx = find_nearest_pixel(temp_list[i], ftemps[j])
+        if !is_save && abs(temp_list[i][this_idx] - ftemps[j]) > atol
+            continue
         end
 
         # get views of cfuncs at indices of interest
         cfuncs_sim = cfunc_list[i][:, this_idx]
         cfuncs_cum_sim = cfunc_cum_list[i][:, this_idx]
 
-        if maximum(cfuncs_sim) / 10^exponent > this_ymax[1]
-            this_ymax[1] = maximum(cfuncs_sim) / 10^exponent
-        end
+        frame_ymax = max(frame_ymax, maximum(cfuncs_sim) / 10^exponent)
 
         ax1.plot(elav(Ts), cfuncs_sim / 10^exponent, c=ncolors[i])
         ax2.plot(elav(Ts), cfuncs_cum_sim, c=ncolors[i], label=specs_interest_latex[i])
@@ -477,15 +501,16 @@ for j in eachindex(ftemps)
 
     ax1.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ dt_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA\ ^{-1}]}")
     ax2.set_ylabel(L"{\rm Normalized\ Cumulative\ Flux\ Cont.\ Fn.}")
-    ax2.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
+    ax2.legend(loc="lower right", fontsize="small")
 
+    # fixed ylim for animation frames; tight ylim for saved PDF
     ax1.set_ylim(the_ymin, the_ymax)
 
-    fig.subplots_adjust(wspace=0.25)
+    fig.tight_layout()
     fig.savefig(joinpath(framedir, "cont_comparison_$j.png"), bbox_inches="tight")
-    if j == jsave
+    if is_save
         @show ftemps[j]
-        ax1.set_ylim(the_ymin, this_ymax[1] + 0.25)
+        ax1.set_ylim(the_ymin, frame_ymax * 1.05)
         fig.savefig("figures/cont_comparison.pdf", bbox_inches="tight")
     end
     plt.clf(); plt.close()
