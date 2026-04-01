@@ -331,3 +331,55 @@ function convolve_rt_macro_gpu_cached(cmem::MacroConvolutionMemory,
                                                  cmem.pad_left, cmem.Nλ)
     return cmem.out_gpu
 end
+
+# ── batched Fourier-domain macro accumulation ─────────────────────────────────
+
+"""
+    batched_macro_multiply_accumulate_kernel!(acc_ft, signal_ft, kernel_cache_flat,
+                                              μ_idx, dA_tiles, tile_offset, Natm1, Bcur)
+
+CUDA kernel: for each (layer k, frequency f), loop over B tiles in the batch, multiply
+the tile's forward-FFT'd signal by its cached macro kernel FFT, weight by dA, and
+accumulate into the Fourier-space accumulator.
+"""
+function batched_macro_multiply_accumulate_kernel!(acc_ft, signal_ft, kernel_cache_flat,
+                                                    μ_idx, dA_tiles, tile_offset,
+                                                    Natm1, Bcur)
+    k = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    f = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    nfreq = size(acc_ft, 2)
+    (k > Natm1 || f > nfreq) && return nothing
+
+    @inbounds for bi in 1:Bcur
+        row = (bi - 1) * Natm1 + k
+        ki = μ_idx[tile_offset + bi]
+        dA_i = dA_tiles[tile_offset + bi]
+        acc_ft[k, f] += signal_ft[row, f] * kernel_cache_flat[ki, f] * dA_i
+    end
+    return nothing
+end
+
+"""
+    batched_macro_multiply_accumulate!(acc_ft, signal_ft, kernel_cache_flat,
+                                       μ_idx, dA_tiles, Natm1, Bcur; tile_offset=0)
+
+Launch the batched macro multiply-accumulate kernel. `signal_ft` is `(Bcur*Natm1, nfreq)`
+from a batched forward FFT of padded cfdt. `kernel_cache_flat` is `(N_unique_μ, nfreq)`.
+`μ_idx` maps tile index → row in kernel_cache_flat. Result accumulates into `acc_ft`
+`(Natm1, nfreq)`.
+"""
+function batched_macro_multiply_accumulate!(acc_ft::CA{Complex{T},2},
+                                            signal_ft::CA{Complex{T},2},
+                                            kernel_cache_flat::CA{Complex{T},2},
+                                            μ_idx::CA{Int32,1},
+                                            dA_tiles::CA{T,1},
+                                            Natm1::Int, Bcur::Int;
+                                            tile_offset::Int=0) where T<:AF
+    nfreq = size(acc_ft, 2)
+    ts = (16, 16)
+    bs = (cld(Natm1, ts[1]), cld(nfreq, ts[2]))
+    @cuda threads=ts blocks=bs batched_macro_multiply_accumulate_kernel!(
+        acc_ft, signal_ft, kernel_cache_flat, μ_idx, dA_tiles,
+        Int32(tile_offset), Int32(Natm1), Int32(Bcur))
+    return nothing
+end

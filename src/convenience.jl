@@ -367,6 +367,40 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             for μ_val in unique_μ_vals
                 macro_kernel_cache[G(μ_val)] = precompute_rt_macro_kernel_ft(cmem_mac, λs_G, G(star.ζ), G(μ_val))
             end
+
+            # flatten kernel cache into 2D CuArray for GPU-side indexing
+            unique_μ_sorted = sort(collect(keys(macro_kernel_cache)))
+            μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
+            L_mac = cmem_mac.L
+            pad_left_mac = cmem_mac.pad_left
+            nfreq_mac = fld(L_mac, 2) + 1
+            kernel_cache_flat = CUDA.zeros(Complex{G}, length(unique_μ_sorted), nfreq_mac)
+            for (i, μ) in enumerate(unique_μ_sorted)
+                copyto!(view(kernel_cache_flat, i, :), macro_kernel_cache[μ])
+            end
+            μ_idx_gpu = CuArray(Int32[μ_to_idx[G(μs_cpu[i])] for i in 1:Ntiles])
+
+            # batched macro buffers + cuFFT plans
+            mac_pad      = CUDA.zeros(G, B * Natm1, L_mac)
+            mac_pad_cont = CUDA.zeros(G, B * Natm1, L_mac)
+            mac_ft      = CUDA.zeros(Complex{G}, B * Natm1, nfreq_mac)
+            mac_ft_cont = CUDA.zeros(Complex{G}, B * Natm1, nfreq_mac)
+            plan_mac_fwd      = CUDA.CUFFT.plan_rfft(mac_pad, 2)
+            plan_mac_fwd_cont = CUDA.CUFFT.plan_rfft(mac_pad_cont, 2)
+
+            # Fourier-space accumulators (Natm1 × nfreq, summed across all batches)
+            acc_ft      = CUDA.zeros(Complex{G}, Natm1, nfreq_mac)
+            acc_ft_cont = CUDA.zeros(Complex{G}, Natm1, nfreq_mac)
+
+            # final IFFT buffers
+            mac_ifft_buf      = CUDA.zeros(G, Natm1, L_mac)
+            mac_ifft_buf_cont = CUDA.zeros(G, Natm1, L_mac)
+            plan_mac_bwd      = CUDA.CUFFT.plan_irfft(CUDA.zeros(Complex{G}, Natm1, nfreq_mac), L_mac, 2)
+            plan_mac_bwd_cont = CUDA.CUFFT.plan_irfft(CUDA.zeros(Complex{G}, Natm1, nfreq_mac), L_mac, 2)
+
+            # real-space output after final IFFT + extract
+            mac_out      = CUDA.zeros(G, Natm1, Nλ)
+            mac_out_cont = CUDA.zeros(G, Natm1, Nλ)
         end
 
         # CUDA streams for overlapping total/continuum
@@ -379,6 +413,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             batch_end = min(batch_start + B - 1, Ntiles)
             Bcur = batch_end - batch_start + 1
             tile_offset = batch_start - 1
+            BNatm1 = Bcur * Natm1
 
             # total absorption on stream_total
             CUDA.stream!(stream_total) do
@@ -401,15 +436,15 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                         cfdt_batch, all_dA_tiles_gpu, Natm1, Bcur;
                         tile_offset=tile_offset)
                 else
-                    for bi in 1:Bcur
-                        i = batch_start + bi - 1
-                        tile_cfdt = @view cfdt_batch[(bi-1)*Natm1+1 : bi*Natm1, :]
-                        src = convolve_rt_macro_gpu_cached(cmem_mac, tile_cfdt,
-                                                           macro_kernel_cache[G(μs_cpu[i])])
-                        accumulate_tile!(flux_integration, cfunc_flux_integration,
-                            flux_comp, cfunc_comp,
-                            src, G(dA_cpu[i]))
-                    end
+                    # pad cfdt and batched forward FFT (full B*Natm1 buffer;
+                    # multiply-accumulate limits to Bcur via its loop bound)
+                    ts_pad = (32, 32)
+                    bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
+                    @cuda threads=ts_pad blocks=bs_pad pad_signal!(mac_pad, cfdt_batch,
+                                                                    Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
+                    mul!(mac_ft, plan_mac_fwd, mac_pad)
+                    batched_macro_multiply_accumulate!(acc_ft, mac_ft, kernel_cache_flat,
+                        μ_idx_gpu, all_dA_tiles_gpu, Natm1, Bcur; tile_offset=tile_offset)
                 end
             end
 
@@ -434,15 +469,13 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                         cfdt_batch_cont, all_dA_tiles_gpu, Natm1, Bcur;
                         tile_offset=tile_offset)
                 else
-                    for bi in 1:Bcur
-                        i = batch_start + bi - 1
-                        tile_cfdt_c = @view cfdt_batch_cont[(bi-1)*Natm1+1 : bi*Natm1, :]
-                        src_c = convolve_rt_macro_gpu_cached(cmem_mac_cont, tile_cfdt_c,
-                                                              macro_kernel_cache[G(μs_cpu[i])])
-                        accumulate_tile!(flux_cont_integration, cfunc_flux_cont_integration,
-                            flux_cont_comp, cfunc_cont_comp,
-                            src_c, G(dA_cpu[i]))
-                    end
+                    ts_pad = (32, 32)
+                    bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
+                    @cuda threads=ts_pad blocks=bs_pad pad_signal!(mac_pad_cont, cfdt_batch_cont,
+                                                                    Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
+                    mul!(mac_ft_cont, plan_mac_fwd_cont, mac_pad_cont)
+                    batched_macro_multiply_accumulate!(acc_ft_cont, mac_ft_cont, kernel_cache_flat,
+                        μ_idx_gpu, all_dA_tiles_gpu, Natm1, Bcur; tile_offset=tile_offset)
                 end
             end
 
@@ -452,8 +485,22 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             for _ in 1:Bcur; next!(prog); end
         end
 
-        cfunc_dt_flux = cfunc_flux_integration
-        cfunc_dt_flux_cont = cfunc_flux_cont_integration
+        if iszero(star.ζ)
+            cfunc_dt_flux = cfunc_flux_integration
+            cfunc_dt_flux_cont = cfunc_flux_cont_integration
+        else
+            # final IFFT of Fourier-space accumulators + extract valid region
+            mul!(mac_ifft_buf, plan_mac_bwd, acc_ft)
+            ts_ext = (32, 32)
+            bs_ext = (cld(Natm1, ts_ext[1]), cld(Nλ, ts_ext[2]))
+            @cuda threads=ts_ext blocks=bs_ext extract_valid!(mac_out, mac_ifft_buf, pad_left_mac, Nλ)
+
+            mul!(mac_ifft_buf_cont, plan_mac_bwd_cont, acc_ft_cont)
+            @cuda threads=ts_ext blocks=bs_ext extract_valid!(mac_out_cont, mac_ifft_buf_cont, pad_left_mac, Nλ)
+
+            cfunc_dt_flux = mac_out
+            cfunc_dt_flux_cont = mac_out_cont
+        end
     end
 
     # get the normalized cumulative contribution function
