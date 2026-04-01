@@ -1,7 +1,7 @@
-const intres_glob = 1024
+const HIRANO_QUADRATURE_NPTS = 1024
 
 """
-    hirano_rotmacro_ft_kernel(σs, vsini, ζ_rt; u1=0.43, u2=0.31, intres=intres_glob)
+    hirano_rotmacro_ft_kernel(σs, vsini, ζ_rt; u1=0.43, u2=0.31, intres=HIRANO_QUADRATURE_NPTS)
 
 Compute the Fourier transform of the Hirano et al. (2011) rotation+macroturbulence
 kernel (Eq. B12) by quadrature integration over the visible stellar disk.
@@ -12,14 +12,14 @@ Arguments:
 - `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
 - `u1::Real=0.43`: Linear limb-darkening coefficient.
 - `u2::Real=0.31`: Quadratic limb-darkening coefficient.
-- `intres::Int=intres_glob`: Number of quadrature points for the disk integral.
+- `intres::Int=HIRANO_QUADRATURE_NPTS`: Number of quadrature points for the disk integral.
 
 Returns:
 - `Kσ::Vector{<:Real}`: Fourier transform of the combined kernel, same length as `σs`.
 
 See also: [`convolve_hirano_rotmacro`](@ref)
 """
-function hirano_rotmacro_ft_kernel(σs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=intres_glob) where T<:AF
+function hirano_rotmacro_ft_kernel(σs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=HIRANO_QUADRATURE_NPTS) where T<:AF
     # quadrature grid in t∈[0,1]
     t = reshape(collect(range(zero(T), one(T), length=intres)), :, 1)
     dt = t[2] - t[1]
@@ -97,7 +97,7 @@ function hirano_rotmacro_ft_kernel_gpu!(Kσ, σs, vsini, ζ_rt, u1, u2, intres, 
 end
 
 """
-    convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2; intres=intres_glob)
+    convolve_hirano_rotmacro(xs, ys, vsini, ζ_rt, u1, u2; intres=HIRANO_QUADRATURE_NPTS)
 
 Convolve a spectrum with the Hirano et al. (2011) combined rotation+macroturbulence
 kernel. The kernel is computed analytically in the Fourier domain and applied via FFT.
@@ -109,7 +109,7 @@ Arguments:
 - `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
 - `u1::Real`: Linear limb-darkening coefficient.
 - `u2::Real`: Quadratic limb-darkening coefficient.
-- `intres::Int=intres_glob`: Number of quadrature points for the disk integral.
+- `intres::Int=HIRANO_QUADRATURE_NPTS`: Number of quadrature points for the disk integral.
 
 Returns:
 - `ys_out::AbstractArray{<:Real}`: Convolved spectrum with the same shape as `ys`.
@@ -118,7 +118,7 @@ See also: [`hirano_rotmacro_ft_kernel`](@ref), [`convolve_hirano_rotmacro_gpu`](
 """
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
                                   ζ_rt::T, u1::T, u2::T;
-                                  intres::Int=intres_glob) where T<:AF
+                                  intres::Int=HIRANO_QUADRATURE_NPTS) where T<:AF
     N = length(xs)
     i0 = N ÷ 2 + 1
     λ0 = xs[i0]
@@ -138,7 +138,7 @@ end
 
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
                                   ζ_rt::T, u1::T, u2::T;
-                                  intres::Int=intres_glob) where T<:AF
+                                  intres::Int=HIRANO_QUADRATURE_NPTS) where T<:AF
     N = length(xs)
     i0 = N ÷ 2 + 1
     λ0 = xs[i0]
@@ -156,7 +156,7 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     return _padded_convolve(collect(T, ys), kernel)
 end
 
-function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=intres_glob) where T<:AF
+function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=HIRANO_QUADRATURE_NPTS) where T<:AF
     N = length(xs)
     λ0 = mean(xs)
     vs = c_ms .* (xs .- λ0) ./ λ0
@@ -173,7 +173,7 @@ function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0
 end
 
 """
-    convolve_hirano_rotmacro_gpu(cmem, xs, ys, vsini, ζ_rt, u1, u2; intres=intres_glob)
+    convolve_hirano_rotmacro_gpu(cmem, xs, ys, vsini, ζ_rt, u1, u2; intres=HIRANO_QUADRATURE_NPTS)
 
 GPU implementation of [`convolve_hirano_rotmacro`](@ref). Convolves each row of `ys`
 with the Hirano et al. (2011) combined rotation+macroturbulence kernel using padded
@@ -187,7 +187,7 @@ Arguments:
 - `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
 - `u1::Real`: Linear limb-darkening coefficient.
 - `u2::Real`: Quadratic limb-darkening coefficient.
-- `intres::Int=intres_glob`: Quadrature resolution for the kernel integral.
+- `intres::Int=HIRANO_QUADRATURE_NPTS`: Quadrature resolution for the kernel integral.
 
 Returns:
 - `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
@@ -203,7 +203,7 @@ See also: [`convolve_hirano_rotmacro`](@ref), [`hirano_rotmacro_ft_kernel_gpu!`]
 """
 function convolve_hirano_rotmacro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                       ys::AA{T,2}, vsini::T, ζ_rt::T,
-                                      u1::T, u2::T; intres::Int=intres_glob) where {T<:AF}
+                                      u1::T, u2::T; intres::Int=HIRANO_QUADRATURE_NPTS) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
     if iszero(vsini) && iszero(ζ_rt)
         return CuArray(ys)

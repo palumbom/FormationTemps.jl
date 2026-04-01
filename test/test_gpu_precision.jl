@@ -66,7 +66,7 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
         atm_f64 = FT.AtmosphereGPU(korg_atm; T=Float64)
         Natm = length(atm_f64.zs)
 
-        wls = [l.wl * 1e8 for l in linelist]
+        wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
         λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
         Nλ = length(λs_korg)
         Npad = 512
@@ -107,7 +107,7 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
         atm_f64 = FT.AtmosphereGPU(korg_atm; T=Float64)
         Natm = length(atm32.zs)
 
-        wls = [l.wl * 1e8 for l in linelist]
+        wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
         λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
         Nλ = length(λs_korg)
         Npad = 512
@@ -286,7 +286,7 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
         Natm = length(atm_f64.zs)
         Natm1 = Natm - 1
 
-        wls = [l.wl * 1e8 for l in linelist]
+        wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
         λs = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
         Nλ = length(λs)
         Npad = 512

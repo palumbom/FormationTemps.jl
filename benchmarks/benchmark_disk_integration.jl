@@ -1,6 +1,7 @@
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
+using BenchmarkTools
 using Printf, Statistics
 using DelimitedFiles
 
@@ -20,8 +21,8 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 wls = [l.wl for l in linelist]
-idx1 = findfirst(x -> x * 1e8 >= 6301, wls)
-idx2 = findfirst(x -> x * 1e8 >= 6302, wls)
+idx1 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6301, wls)
+idx2 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
 
 # stellar params
@@ -37,7 +38,7 @@ Nϕ = 128
 star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
 # wavelength grid
-wls = [l.wl * 1e8 for l in linelist]
+wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 buffer = 2.0
 λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=Δλ)
 Nλ = length(λs_korg)
@@ -79,6 +80,7 @@ println("  Threads  = ", Threads.nthreads())
 println()
 
 iqr(x) = quantile(x, 0.75) - quantile(x, 0.25)
+iqr_ms(trial) = (quantile(trial.times, 0.75) - quantile(trial.times, 0.25)) / 2e6
 
 # ── CPU per-tile benchmark ────────────────────────────────────────────────────
 # mirrors the production tile loop in convenience.jl: uses CPUTileWorkspace with
@@ -97,7 +99,7 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
         _calc_tau_cpu! = (μ_i, αs_in, τs_out) -> FT.calc_tau_anchored_cpu!(μ_i, atm_cpu.τs, α_ref, αs_in, τs_out)
     end
 
-    σ_v = fill(star.ξ, Natm)
+    σ_v_scalar = star.ξ
     ws = FT.CPUTileWorkspace(T, Natm, Nλ)
 
     t_micro = zeros(n_repeat)
@@ -107,11 +109,11 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
 
     for r in 1:n_repeat
         μ_tile = μs_cpu[1]
-        ws.μ_v_buf .= z_rot_cpu[1] * FT.c_ms
+        μ_v_scalar = T(z_rot_cpu[1] * FT.c_ms)
 
-        # total path (in-place, matching production)
+        # total path (in-place, matching production scalar dispatch)
         t_micro[r] = @elapsed begin
-            FT._convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, ws.μ_v_buf, σ_v, ws)
+            FT._convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, μ_v_scalar, σ_v_scalar, ws)
         end
         t_tau[r] = @elapsed _calc_tau_cpu!(μ_tile, ws.αs_broad, ws.τs_int)
         t_cfunc[r] = @elapsed begin
@@ -122,9 +124,9 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
             FT._convolve_macro_inplace!(ws.macro_out, λs_korg, ws.cfunc_dt_int, star.ζ, μ_tile, ws)
         end
 
-        # continuum path (in-place, matching production)
+        # continuum path (in-place, matching production scalar dispatch)
         t_micro[r] += @elapsed begin
-            FT._convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, ws.μ_v_buf, σ_v, ws)
+            FT._convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, μ_v_scalar, σ_v_scalar, ws)
         end
         t_tau[r] += @elapsed _calc_tau_cpu!(μ_tile, ws.αs_cont_broad, ws.τs_int_cont)
         t_cfunc[r] += @elapsed begin
@@ -290,25 +292,13 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
 end
 
 # ── end-to-end benchmark ──────────────────────────────────────────────────────
-function benchmark_end_to_end(star, linelist; Δλ, Nϕ, use_gpu, n_repeat=3,
-                              gpu_precision=Float64)
-    # warmup
-    calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=16,
-                        use_gpu=use_gpu, gpu_precision=gpu_precision,
-                        ne_warn_thresh=Inf, showprogress=false)
-
-    times = zeros(n_repeat)
-    local result
-    for r in 1:n_repeat
-        if use_gpu; CUDA.synchronize(); end
-        times[r] = @elapsed begin
-            result = calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
-                                         use_gpu=use_gpu, gpu_precision=gpu_precision,
-                                         ne_warn_thresh=Inf, showprogress=false)
-        end
-        if use_gpu; CUDA.synchronize(); end
-    end
-    return median(times), result
+function benchmark_end_to_end(star, linelist; Δλ, Nϕ, use_gpu, gpu_precision=Float64)
+    f = () -> calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
+                                   use_gpu=use_gpu, gpu_precision=gpu_precision,
+                                   ne_warn_thresh=Inf, showprogress=false)
+    trial = use_gpu ? (@benchmark CUDA.@sync $f()) : (@benchmark $f())
+    result = f()
+    return median(trial).time / 1e9, result
 end
 
 # ── run benchmarks ─────────────────────────────────────────────────────────────

@@ -182,7 +182,7 @@ function kernel_to_dft_layout_1d_gpu!(kbuf, xs, λ0, μ_v_val, σ_v_val, σ_floo
 end
 
 # Build per-row kernels in DFT layout (vector μ_v, vector σ_v).
-function kernel_to_dft_layout_2d_gpu!(kbuf, xs, μ_v, σ_v, σ_floor, i0, Nλ, L)
+function kernel_to_dft_layout_2d_gpu!(kbuf, xs, μ_v, μ_v_off, σ_v, σ_floor, i0, Nλ, L)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     Nrows = size(kbuf, 1)
@@ -191,7 +191,7 @@ function kernel_to_dft_layout_2d_gpu!(kbuf, xs, μ_v, σ_v, σ_floor, i0, Nλ, L
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
     σx = max(xj * (@inbounds σ_v[row]) / T(c_ms), σ_floor)
-    Δx = (xj - λ0) - (@inbounds μ_v[row]) / T(c_ms) * λ0
+    Δx = (xj - λ0) - (@inbounds μ_v[μ_v_off + row]) / T(c_ms) * λ0
     val = exp(-(Δx / σx)^2)
     d = j - i0
     idx = d >= 0 ? d + 1 : L + d + 1
@@ -200,7 +200,7 @@ function kernel_to_dft_layout_2d_gpu!(kbuf, xs, μ_v, σ_v, σ_floor, i0, Nλ, L
 end
 
 # Build per-row kernels in DFT layout (vector μ_v, scalar σ_v).
-function kernel_to_dft_layout_2d_scalar_σ_gpu!(kbuf, xs, μ_v, σ_v_val, σ_floor, i0, Nλ, L)
+function kernel_to_dft_layout_2d_scalar_σ_gpu!(kbuf, xs, μ_v, μ_v_off, σ_v_val, σ_floor, i0, Nλ, L)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     Nrows = size(kbuf, 1)
@@ -209,7 +209,7 @@ function kernel_to_dft_layout_2d_scalar_σ_gpu!(kbuf, xs, μ_v, σ_v_val, σ_flo
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
     σx = max(xj * (σ_v_val / T(c_ms)), σ_floor)
-    Δx = (xj - λ0) - (@inbounds μ_v[row]) / T(c_ms) * λ0
+    Δx = (xj - λ0) - (@inbounds μ_v[μ_v_off + row]) / T(c_ms) * λ0
     val = exp(-(Δx / σx)^2)
     d = j - i0
     idx = d >= 0 ? d + 1 : L + d + 1
@@ -294,7 +294,7 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     ts = (32, 32)
     bs = (cld(cmem.Nλ, ts[1]), cld(Nrows, ts[2]))
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_scalar_σ_gpu!(
-        cmem.conv_gpu, cmem.xs_gpu, μ_v, σ_v, σ_floor,
+        cmem.conv_gpu, cmem.xs_gpu, μ_v, Int32(0), σ_v, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L))
     cmem.conv_gpu ./= sum(cmem.conv_gpu, dims=2)
     return nothing
@@ -311,7 +311,7 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     ts = (32, 32)
     bs = (cld(cmem.Nλ, ts[1]), cld(Nrows, ts[2]))
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_gpu!(
-        cmem.conv_gpu, cmem.xs_gpu, μ_v, σ_v, σ_floor,
+        cmem.conv_gpu, cmem.xs_gpu, μ_v, Int32(0), σ_v, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L))
     cmem.conv_gpu ./= sum(cmem.conv_gpu, dims=2)
     return nothing
@@ -427,7 +427,7 @@ Returns a view of the valid region `(Bcur*Natm, Nλ)`.
 function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
                                            xs::AA{T,1}, ys::AA{T,2},
                                            μ_v_batch::CA{T,1}, σ_v::T,
-                                           Bcur::Int) where {T<:AF}
+                                           Bcur::Int; tile_offset::Int=0) where {T<:AF}
     Natm = bcmem.Natm
     BNatm = Bcur * Natm
     xs_h = xs isa CuArray ? Array(xs) : collect(T, xs)
@@ -453,8 +453,9 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     fill!(bcmem.conv_gpu, zero(T))
     bs_k = (cld(bcmem.Nλ, ts2[1]), cld(BNatm, ts2[2]))
+    μ_v_off = Int32(tile_offset * Natm)
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_scalar_σ_gpu!(
-        bcmem.conv_gpu, bcmem.xs_gpu, μ_v_batch, σ_v, σ_floor,
+        bcmem.conv_gpu, bcmem.xs_gpu, μ_v_batch, μ_v_off, σ_v, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L))
     bcmem.conv_gpu ./= sum(bcmem.conv_gpu, dims=2)
     mul!(bcmem.kernel_ft_gpu, bcmem.plan_fwd_kernel, bcmem.conv_gpu)
@@ -473,7 +474,7 @@ end
 function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
                                            xs::AA{T,1}, ys::AA{T,2},
                                            μ_v_batch::CA{T,1}, σ_v::CA{T,1},
-                                           Bcur::Int) where {T<:AF}
+                                           Bcur::Int; tile_offset::Int=0) where {T<:AF}
     Natm = bcmem.Natm
     BNatm = Bcur * Natm
     xs_h = xs isa CuArray ? Array(xs) : collect(T, xs)
@@ -500,8 +501,9 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     fill!(bcmem.conv_gpu, zero(T))
     bs_k = (cld(bcmem.Nλ, ts2[1]), cld(BNatm, ts2[2]))
     σ_v_tiled = repeat(σ_v, Bcur)
+    μ_v_off = Int32(tile_offset * Natm)
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_gpu!(
-        bcmem.conv_gpu, bcmem.xs_gpu, μ_v_batch, σ_v_tiled, σ_floor,
+        bcmem.conv_gpu, bcmem.xs_gpu, μ_v_batch, μ_v_off, σ_v_tiled, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L))
     bcmem.conv_gpu ./= sum(bcmem.conv_gpu, dims=2)
     mul!(bcmem.kernel_ft_gpu, bcmem.plan_fwd_kernel, bcmem.conv_gpu)

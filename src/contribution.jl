@@ -203,7 +203,7 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
     # loop over lambda
     for j in idx:sdx:length(λs)
         # convert to cm
-        λ_cm = λs[j] * T(1e-8)
+        λ_cm = λs[j] * T(ANGSTROM_TO_CM)
         λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
         bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
         bb_x = T(h) * T(c) / (λ_cm * T(kB))
@@ -232,7 +232,7 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             f2 = B2 * exp(-τp2)
 
             # store contribution
-            @inbounds cfunc[k, j] = T(0.5) * (f1 + f2) * T(1e-8)
+            @inbounds cfunc[k, j] = T(0.5) * (f1 + f2) * T(ANGSTROM_TO_CM)
         end
     end
     return nothing
@@ -252,7 +252,7 @@ function calc_intensity_cfunc_dt!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM,
     frac2 = T(0.5) * (one(T) + one_over_sqrt3)
 
     for j in idx:sdx:length(λs)
-        λ_cm = λs[j] * T(1e-8)
+        λ_cm = λs[j] * T(ANGSTROM_TO_CM)
         λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
         bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
         bb_x = T(h) * T(c) / (λ_cm * T(kB))
@@ -275,7 +275,7 @@ function calc_intensity_cfunc_dt!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM,
             f1 = B1 * exp(-τp1)
             f2 = B2 * exp(-τp2)
 
-            cf = T(0.5) * (f1 + f2) * T(1e-8)
+            cf = T(0.5) * (f1 + f2) * T(ANGSTROM_TO_CM)
             @inbounds cfunc[k, j] = cf
             @inbounds cfunc_dt[k, j] = cf * Δτ
         end
@@ -303,7 +303,7 @@ function cfunc_reduce_intensity_kernel!(out::CDV{T}, Ts::CDV, λs::CDV,
 
     partial = zero(T)
     if j <= Nλ
-        λ_cm = λs[j] * T(1e-8)
+        λ_cm = λs[j] * T(ANGSTROM_TO_CM)
         λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
         bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
         bb_x = T(h) * T(c) / (λ_cm * T(kB))
@@ -328,7 +328,7 @@ function cfunc_reduce_intensity_kernel!(out::CDV{T}, Ts::CDV, λs::CDV,
                 f1 = B1 * exp(-τp1)
                 f2 = B2 * exp(-τp2)
 
-                cfunc_val = T(0.5) * (f1 + f2) * T(1e-8)
+                cfunc_val = T(0.5) * (f1 + f2) * T(ANGSTROM_TO_CM)
                 partial = muladd(cfunc_val, Δτ, partial)
             end
             k += bdy
@@ -415,7 +415,7 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
 
     # loop over lambda
     for j in idx:sdx:length(λs)
-        λ_cm = λs[j] * T(1e-8)
+        λ_cm = λs[j] * T(ANGSTROM_TO_CM)
         λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
         bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
         bb_x = T(h) * T(c) / (λ_cm * T(kB))
@@ -444,7 +444,7 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             f2 = B2 * E_2(τp2)
 
             # store contribution
-            @inbounds cfunc[k, j] = T(0.5) * (f1 + f2) * T(1e-8)
+            @inbounds cfunc[k, j] = T(0.5) * (f1 + f2) * T(ANGSTROM_TO_CM)
         end
     end
     return nothing
@@ -463,7 +463,7 @@ function calc_flux_cfunc_dt!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM, cfunc_dt::
     frac2 = T(0.5) * (one(T) + one_over_sqrt3)
 
     for j in idx:sdx:length(λs)
-        λ_cm = λs[j] * T(1e-8)
+        λ_cm = λs[j] * T(ANGSTROM_TO_CM)
         λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
         bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
         bb_x = T(h) * T(c) / (λ_cm * T(kB))
@@ -486,7 +486,7 @@ function calc_flux_cfunc_dt!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM, cfunc_dt::
             f1 = B1 * E_2(τp1)
             f2 = B2 * E_2(τp2)
 
-            cf = T(0.5) * (f1 + f2) * T(1e-8)
+            cf = T(0.5) * (f1 + f2) * T(ANGSTROM_TO_CM)
             @inbounds cfunc[k, j] = cf
             @inbounds cfunc_dt[k, j] = cf * Δτ
         end
@@ -501,7 +501,7 @@ function calc_intensity_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
     frac1 = T(0.5) * (one(T) - one_over_sqrt3)
     frac2 = T(0.5) * (one(T) + one_over_sqrt3)
     @inbounds for j in 1:length(λs)
-        λ_cm = λs[j] * T(1e-8)
+        λ_cm = λs[j] * T(ANGSTROM_TO_CM)
         for k in 1:Natm-1
             τ0 = τs[k, j]
             τ1 = τs[k+1, j]
@@ -517,7 +517,7 @@ function calc_intensity_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
 
             f1 = Korg.blackbody(T1, λ_cm) * exp(-τp1)
             f2 = Korg.blackbody(T2, λ_cm) * exp(-τp2)
-            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * T(1e-8)
+            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * T(ANGSTROM_TO_CM)
         end
     end
     return nothing
@@ -531,7 +531,7 @@ function calc_flux_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
     frac2 = T(0.5) * (one(T) + one_over_sqrt3)
     E2 = Korg.RadiativeTransfer.exponential_integral_2
     @inbounds for j in 1:length(λs)
-        λ_cm = λs[j] * T(1e-8)
+        λ_cm = λs[j] * T(ANGSTROM_TO_CM)
         for k in 1:Natm-1
             τ0 = τs[k, j]
             τ1 = τs[k+1, j]
@@ -547,7 +547,7 @@ function calc_flux_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
 
             f1 = Korg.blackbody(T1, λ_cm) * E2(τp1)
             f2 = Korg.blackbody(T2, λ_cm) * E2(τp2)
-            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * T(1e-8)
+            @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * T(ANGSTROM_TO_CM)
         end
     end
     return nothing
@@ -574,7 +574,7 @@ function calc_intensity_cfunc_dt_batched_kernel!(cfunc_dt, τs, Ts, λs,
         off_τ  = (b - 1) * Natm   # row offset in τs
         off_cf = (b - 1) * Natm1  # row offset in cfunc_dt
 
-        λ_cm = @inbounds λs[j] * T(1e-8)
+        λ_cm = @inbounds λs[j] * T(ANGSTROM_TO_CM)
         λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
         bb_num = T(2.0) * T(h) * T(c)^2 / λ5
         bb_x = T(h) * T(c) / (λ_cm * T(kB))
@@ -597,7 +597,7 @@ function calc_intensity_cfunc_dt_batched_kernel!(cfunc_dt, τs, Ts, λs,
             f1 = B1 * exp(-τp1)
             f2 = B2 * exp(-τp2)
 
-            cf = T(0.5) * (f1 + f2) * T(1e-8)
+            cf = T(0.5) * (f1 + f2) * T(ANGSTROM_TO_CM)
             cfunc_dt[off_cf + k, j] = cf * Δτ
         end
     end
@@ -619,12 +619,12 @@ end
 # batched accumulation: one thread per wavelength, loops over B tiles and Natm-1 layers
 # uses Kahan compensated summation to keep O(ε) accuracy across ~10^4 tile additions
 function accumulate_batch_kernel!(flux_acc, cfunc_acc, flux_comp, cfunc_comp,
-                                  cfunc_dt, dA_tiles, Natm1, Nλ, Bcur)
+                                  cfunc_dt, dA_tiles, dA_off, Natm1, Nλ, Bcur)
     j = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     j > Nλ && return nothing
     T = eltype(flux_acc)
     @inbounds for b in 1:Bcur
-        dA_i = dA_tiles[b]
+        dA_i = dA_tiles[dA_off + b]
         off = (b - 1) * Natm1
         s = zero(T)
         s_comp = zero(T)
@@ -655,12 +655,12 @@ end
 function accumulate_batch!(flux_acc::CA{T,1}, cfunc_acc::CA{T,2},
                            flux_comp::CA{T,1}, cfunc_comp::CA{T,2},
                            cfunc_dt::CA{T,2}, dA_tiles::CA{T,1},
-                           Natm1::Int, Bcur::Int) where T<:AF
+                           Natm1::Int, Bcur::Int; tile_offset::Int=0) where T<:AF
     Nλ = Int32(size(cfunc_acc, 2))
     threads = 256
     blocks = cld(Nλ, threads)
     @cuda threads=threads blocks=blocks accumulate_batch_kernel!(
         flux_acc, cfunc_acc, flux_comp, cfunc_comp,
-        cfunc_dt, dA_tiles, Int32(Natm1), Nλ, Int32(Bcur))
+        cfunc_dt, dA_tiles, Int32(tile_offset), Int32(Natm1), Nλ, Int32(Bcur))
     return nothing
 end

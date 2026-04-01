@@ -42,6 +42,7 @@ scripts_inprocess = [
 scripts_subprocess = [
     (joinpath(BENCH_DIR, "benchmark_threading.jl"), [max_threads]),
     (joinpath(BENCH_DIR, "benchmark_nlambda.jl"),   [max_threads]),
+    (joinpath(BENCH_DIR, "benchmark_nphi.jl"),      [max_threads]),
 ]
 
 println("=" ^ 70)

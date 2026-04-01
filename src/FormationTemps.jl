@@ -54,7 +54,6 @@ include("macroturbulence/rad_tan.jl")
 include("macroturbulence/rad_tan_two.jl")
 include("macroturbulence/iso_rad_tan.jl")
 include("macroturbulence/hirano.jl")
-# include("macroturbulence/iso_gaussian.jl")
 
 # instrumental profile
 include("instrumental.jl")
@@ -63,7 +62,7 @@ include("instrumental.jl")
 include("absorption.jl")
 include("structures/AlphaCache.jl")
 
-# radaiative transport
+# radiative transport
 include("contribution.jl")
 include("tau.jl")
 

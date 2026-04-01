@@ -14,7 +14,7 @@ A_X = Korg.format_A_X(0.0)
 atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(Teff, logg, A_X))
 Natm = length(atm_gpu.zs)
 
-wls = [l.wl * 1e8 for l in linelist]
+wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=0.01)
 Nλ = length(λs_korg)
 xs = collect(Float64, λs_korg)

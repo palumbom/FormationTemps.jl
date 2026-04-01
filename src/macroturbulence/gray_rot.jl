@@ -23,8 +23,7 @@ function gray_rot_kernel(vs::AA{T,1}, vsini::T, u1::T) where T<:AF
     # evaluate the kernel
     xs = vs ./ vsini
     omx2 = abs.(one(T) .- xs .^ 2.0)
-    kernel = (ld1 .* sqrt.(omx2) .+ ld2 .* omx2) ./ ld3
-    kernel[abs.(xs) .> one(T)] .= zero(T)
+    kernel = @. ifelse(abs(xs) > one(T), zero(T), (ld1 * sqrt(omx2) + ld2 * omx2) / ld3)
     return kernel ./ sum(kernel)
 end
 

@@ -89,20 +89,20 @@ Fields:
 
 See also: [`AtmosphereGPU(atm_korg)`](@ref)
 """
-mutable struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
+struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
     Natm::Int
-    τs::AA{T,1}
-    zs::AA{T,1}
-    Ts::AA{T,1}
-    nₑ::AA{T,1}
-    nd::AA{T,1}
+    τs::Vector{T}
+    zs::Vector{T}
+    Ts::Vector{T}
+    nₑ::Vector{T}
+    nd::Vector{T}
     reference_wavelength::T  # cm; MARCS reference wavelength for τ_ref (typically 5000 Å)
 
-    zs_gpu::AA{T,1}
-    Ts_gpu::AA{T,1}
-    nd_gpu::CA{T,1}
-    σ_v::CA{T,1}
-    μ_v::CA{T,1}
+    zs_gpu::CuVector{T}
+    Ts_gpu::CuVector{T}
+    nd_gpu::CuVector{T}
+    σ_v::CuVector{T}
+    μ_v::CuVector{T}
 end
 
 """
@@ -149,20 +149,20 @@ Fields:
 
 See also: [`AtmosphereCPU(atm_korg)`](@ref)
 """
-mutable struct AtmosphereCPU{T<:AF} <: Atmosphere{T}
+struct AtmosphereCPU{T<:AF} <: Atmosphere{T}
     Natm::Int
-    τs::AA{T,1}
-    zs::AA{T,1}
-    Ts::AA{T,1}
-    nₑ::AA{T,1}
-    nd::AA{T,1}
+    τs::Vector{T}
+    zs::Vector{T}
+    Ts::Vector{T}
+    nₑ::Vector{T}
+    nd::Vector{T}
     reference_wavelength::T  # cm; MARCS reference wavelength for τ_ref (typically 5000 Å)
 
-    vx::AA{T,1}
-    vy::AA{T,1}
-    vz::AA{T,1}
-    σ_v::AA{T,1}
-    μ_v::AA{T,1}
+    vx::Vector{T}
+    vy::Vector{T}
+    vz::Vector{T}
+    σ_v::Vector{T}
+    μ_v::Vector{T}
 end
 
 """

@@ -65,6 +65,6 @@ function rotation_period(ϕ, A, B, C)
 end
 
 function calc_dA(ρs, ϕc, dϕ, dθ)
-    return ρs^2.0 * sin(π/2.0 - ϕc) * dϕ * dθ
+    return ρs^2.0 * cos(ϕc) * dϕ * dθ
 end
 

@@ -14,3 +14,10 @@ const c_Rsun_day = 37230.42169210867
 # for unit conversions
 const rsun_au = 0.00465
 const sec_year = 3.154e7
+
+# wavelength unit conversions (Korg uses cm internally, public API uses Angstrom)
+const CM_TO_ANGSTROM = 1e8
+const ANGSTROM_TO_CM = 1e-8
+
+# optical depth floor (sentinel to avoid log(0) in τ integration)
+const TAU_FLOOR = 1e-5

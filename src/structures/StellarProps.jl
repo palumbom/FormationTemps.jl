@@ -2,7 +2,7 @@ struct StellarProps{T<:AF}
     Teff::T
     logg::T
     Fe_H::T
-    A_X::AA{T,1}
+    A_X::Vector{T}
     vsini::T
     ζ::T
     ξ::T

@@ -33,8 +33,8 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 wls = [l.wl for l in linelist]
-idx1 = findfirst(x -> x * 1e8 >= 6301, wls)
-idx2 = findfirst(x -> x * 1e8 >= 6302, wls)
+idx1 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6301, wls)
+idx2 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
 
 star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0,
@@ -44,8 +44,8 @@ Nphi = parse(Int, ARGS[1])
 dlambda = parse(Float64, ARGS[2])
 n_repeat = parse(Int, ARGS[3])
 
-# warmup at target Δλ to cover FFTW plan creation and JIT for this grid size
-calc_formation_temp(star, linelist; Δλ=dlambda, Nϕ=16,
+# warmup at target Δλ and Nϕ to cover FFTW plan creation and JIT for this grid size
+calc_formation_temp(star, linelist; Δλ=dlambda, Nϕ=Nphi,
                     use_gpu=false, showprogress=false, ne_warn_thresh=Inf)
 
 times = zeros(n_repeat)
@@ -79,8 +79,8 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 wls = [l.wl for l in linelist]
-idx1 = findfirst(x -> x * 1e8 >= 6301, wls)
-idx2 = findfirst(x -> x * 1e8 >= 6302, wls)
+idx1 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6301, wls)
+idx2 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
 
 star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0,
@@ -92,8 +92,8 @@ n_repeat = parse(Int, ARGS[3])
 precision_str = ARGS[4]  # "float64" or "float32"
 gpu_prec = precision_str == "float32" ? Float32 : Float64
 
-# warmup at target Δλ to cover cuFFT plan creation and JIT for this grid size
-calc_formation_temp(star, linelist; Δλ=dlambda, Nϕ=16,
+# warmup at target Δλ and Nϕ to cover cuFFT plan creation and JIT for this grid size
+calc_formation_temp(star, linelist; Δλ=dlambda, Nϕ=Nphi,
                     use_gpu=true, gpu_precision=gpu_prec,
                     showprogress=false, ne_warn_thresh=Inf)
 CUDA.synchronize()

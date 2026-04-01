@@ -16,7 +16,7 @@ A_X = Korg.format_A_X(0.0)
 atm_cpu = FT.AtmosphereCPU(Korg.interpolate_marcs(Teff, logg, A_X))
 Natm = length(atm_cpu.zs)
 
-wls = [l.wl * 1e8 for l in linelist]
+wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 Δλ = 0.01
 λs = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
 Nλ = length(λs)

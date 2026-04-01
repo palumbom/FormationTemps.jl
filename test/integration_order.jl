@@ -44,12 +44,12 @@ linelist = linelist[specs .== "Fe I"]
 
 # get the Fe I 6301 & 6302 lines (just cuz)
 wls = [l.wl for l in linelist] 
-idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
-idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
+idx1 = findfirst(x -> x * FT.CM_TO_ANGSTROM .>= 6301, wls)
+idx2 = findfirst(x -> x * FT.CM_TO_ANGSTROM .>= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
 
 # re-get values
-wls = [l.wl * 1e8 for l in linelist]
+wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 log_gf =  [l.log_gf for l in linelist]
 species =  [l.species for l in linelist]
 E_lower =  [l.E_lower for l in linelist]

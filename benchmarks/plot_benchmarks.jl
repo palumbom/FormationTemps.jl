@@ -46,7 +46,7 @@ try
         g32_iq = [parse(Float64, r[7]) for r in rows]
     end
 
-    fig, ax = plt.subplots(figsize=(9, 4))
+    fig, ax = plt.subplots(figsize=(11, 4.5))
     x = 0:length(kernels)-1
     nbar = has_gpu32 ? 3 : 2
     w = 0.8 / nbar
@@ -434,6 +434,195 @@ try
     println("Saved: benchmark_nlambda.png")
 catch e
     println("Skipping Nλ scaling plot: ", e)
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. Nϕ scaling (CPU 1T, CPU NT, GPU64, GPU32 + absorption floor)
+# ══════════════════════════════════════════════════════════════════════════════
+try
+    _, rows = read_csv(joinpath(DATADIR, "nphi_scaling.csv"))
+
+    # parse into per-series arrays
+    series = Dict{String, Tuple{Vector{Int}, Vector{Float64}, Vector{Float64}, Vector{Float64}}}()
+    alpha_times = Float64[]
+    for r in rows
+        backend = r[1]
+        threads = parse(Int, r[2])
+        Nphi = parse(Int, r[3])
+        med = parse(Float64, r[6])
+        mn = parse(Float64, r[7])
+        mx = parse(Float64, r[8])
+        alpha_s = parse(Float64, r[9])
+        push!(alpha_times, alpha_s)
+
+        if backend == "gpu_float32"
+            key = "GPU (Float32)"
+        elseif backend == "gpu_float64" || backend == "gpu"
+            key = "GPU (Float64)"
+        elseif threads == 1
+            key = "CPU (1 thread)"
+        else
+            key = @sprintf("CPU (%d threads)", threads)
+        end
+
+        if !haskey(series, key)
+            series[key] = (Int[], Float64[], Float64[], Float64[])
+        end
+        push!(series[key][1], Nphi)
+        push!(series[key][2], med)
+        push!(series[key][3], mn)
+        push!(series[key][4], mx)
+    end
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+
+    # styling per series
+    style = Dict(
+        "CPU (1 thread)" => (color=COL_CPU_1T, marker="^", ls="--"),
+        "GPU (Float64)"  => (color=COL_GPU64, marker="s", ls="-"),
+        "GPU (Float32)"  => (color=COL_GPU32, marker="D", ls="-"),
+    )
+    cpu_mt_key = ""
+    for k in keys(series)
+        if startswith(k, "CPU") && k != "CPU (1 thread)"
+            cpu_mt_key = k
+        end
+    end
+    if !isempty(cpu_mt_key)
+        style[cpu_mt_key] = (color=COL_CPU_MT, marker="o", ls="-")
+    end
+
+    plot_order = filter(k -> haskey(series, k),
+        ["CPU (1 thread)", cpu_mt_key, "GPU (Float64)", "GPU (Float32)"])
+
+    for key in plot_order
+        isempty(key) && continue
+        Nϕs, meds, mins, maxs = series[key]
+        idx = sortperm(Nϕs)
+        Nϕs, meds, mins, maxs = Nϕs[idx], meds[idx], mins[idx], maxs[idx]
+        s = style[key]
+        yerr_lo = meds .- mins
+        yerr_hi = maxs .- meds
+        ax.errorbar(Nϕs, meds, yerr=(yerr_lo, yerr_hi),
+                    fmt=string(s.marker, s.ls), color=s.color, lw=2, ms=7,
+                    capsize=3, ecolor=s.color, label="{\\rm " * key * "}")
+    end
+
+    # absorption floor line
+    if !isempty(alpha_times)
+        alpha_med = median(filter(!isnan, alpha_times))
+        ax.axhline(y=alpha_med, color="#999999", ls=":", lw=1.5, zorder=1)
+        ax.text(ax.get_xlim()[1] * 1.1, alpha_med * 1.08,
+                @sprintf("{\\rm absorption cost (%.1f s)}", alpha_med),
+                fontsize=7, color="#777777", va="bottom")
+    end
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("\$N_\\phi\$")
+    ax.set_ylabel("{\\rm Wall-clock time [s]}")
+
+    # read Nλ from data
+    Nλ_nphi = 0
+    if !isempty(rows)
+        Nλ_nphi = parse(Int, rows[1][4])
+    end
+    if Nλ_nphi > 0
+        ax.set_title(@sprintf("{\\rm Performance vs. }\$N_\\phi\$ {\\rm (}\$N_\\lambda\${\\rm =%d)}", Nλ_nphi))
+    else
+        ax.set_title("{\\rm Performance vs. }\$N_\\phi\$")
+    end
+    ax.legend()
+
+    ticker = PythonPlot.pyimport("matplotlib.ticker")
+    for a in [ax.xaxis, ax.yaxis]
+        a.set_major_formatter(ticker.ScalarFormatter())
+        a.get_major_formatter().set_scientific(false)
+    end
+    ax.grid(true, which="major", color="#DDDDDD", lw=0.5)
+    ax.grid(true, which="minor", color="#EEEEEE", lw=0.3)
+
+    fig.tight_layout()
+    fig.savefig(joinpath(PLOTDIR, "benchmark_nphi.png"), dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    println("Saved: benchmark_nphi.png")
+catch e
+    println("Skipping Nϕ scaling plot: ", e)
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. Dispatch comparison (scalar vs per-row micro, in-place vs allocating macro)
+# ══════════════════════════════════════════════════════════════════════════════
+try
+    csv = joinpath(DATADIR, "convolution_timings.csv")
+    header, rows = read_csv(csv)
+
+    # build lookup: kernel name → cpu median ms
+    kern_cpu = Dict(r[1] => parse(Float64, r[2]) for r in rows)
+
+    # find the paired entries
+    pairs = [
+        ("Microturbulence", "Micro (scalar)", "Micro (per-row)"),
+        ("Aniso. RT macro", "Aniso. RT (in-place)", "Aniso. RT (alloc.)"),
+    ]
+
+    # only plot pairs that exist in the data
+    groups = Tuple{String, Float64, Float64}[]
+    for (label, fast_key, slow_key) in pairs
+        if haskey(kern_cpu, fast_key) && haskey(kern_cpu, slow_key)
+            push!(groups, (label, kern_cpu[fast_key], kern_cpu[slow_key]))
+        end
+    end
+
+    if !isempty(groups)
+        fig, ax = plt.subplots(figsize=(6, 4))
+
+        x = 0:length(groups)-1
+        w = 0.35
+        fast_vals = [g[2] for g in groups]
+        slow_vals = [g[3] for g in groups]
+        labels_x = [g[1] for g in groups]
+
+        bars_fast = ax.bar(x .- w/2, fast_vals, w,
+                           label="{\\rm Production (scalar / in-place)}",
+                           color=COL_CPU_MT, edgecolor="none")
+        bars_slow = ax.bar(x .+ w/2, slow_vals, w,
+                           label="{\\rm Alternative (per-row / alloc.)}",
+                           color=COL_CPU_1T, edgecolor="none")
+
+        # annotate speedup ratio
+        for i in eachindex(groups)
+            xi = i - 1
+            ratio = slow_vals[i] / fast_vals[i]
+            y_top = max(fast_vals[i], slow_vals[i]) * 1.08
+            ax.text(xi, y_top, @sprintf("\$%.1f\\times\$", ratio),
+                    ha="center", va="bottom", fontsize=9, fontweight="bold")
+        end
+
+        ax.set_xticks(collect(x))
+        ax.set_xticklabels(["{\\rm " * l * "}" for l in labels_x])
+        ax.set_ylabel("{\\rm CPU time [ms]}")
+
+        Nλ_conv = 0
+        try
+            _, meta = read_csv(joinpath(DATADIR, "convolution_meta.csv"))
+            Nλ_conv = parse(Int, meta[1][1])
+        catch; end
+        if Nλ_conv > 0
+            ax.set_title(@sprintf("{\\rm Dispatch overhead (}\$N_\\lambda\${\\rm =%d)}", Nλ_conv))
+        else
+            ax.set_title("{\\rm Dispatch overhead}")
+        end
+        ax.legend(fontsize=8)
+        ax.grid(false)
+
+        fig.tight_layout()
+        fig.savefig(joinpath(PLOTDIR, "benchmark_dispatch_comparison.png"), dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        println("Saved: benchmark_dispatch_comparison.png")
+    end
+catch e
+    println("Skipping dispatch comparison plot: ", e)
 end
 
 println()

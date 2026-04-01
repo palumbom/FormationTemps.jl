@@ -6,7 +6,7 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 
 # wavelength grid
 Δλ = 0.01
-wls = [l.wl * 1e8 for l in linelist]
+wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=Δλ)
 
 # set parameters for synthesis

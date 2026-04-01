@@ -12,10 +12,10 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 wls = [l.wl for l in linelist]
-idx1 = findfirst(x -> x * 1e8 >= 6301, wls)
-idx2 = findfirst(x -> x * 1e8 >= 6302, wls)
+idx1 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6301, wls)
+idx2 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
-wls = [l.wl * 1e8 for l in linelist]
+wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 
 # wavelength grid
 buffer = 0.5
@@ -48,13 +48,13 @@ test_params = [
             # CPU reference
             Kσ_cpu = FT.hirano_rotmacro_ft_kernel(σs_cpu, p.vsini, p.ζ_rt;
                                                    u1=p.u1, u2=p.u2,
-                                                   intres=FT.intres_glob)
+                                                   intres=FT.HIRANO_QUADRATURE_NPTS)
 
             # GPU kernel (one block per frequency bin, 256 threads for shared-memory reduction)
             kernel_threads = 256
             @cuda threads=kernel_threads blocks=Nλ shmem=kernel_threads*sizeof(Float64) FT.hirano_rotmacro_ft_kernel_gpu!(
                 Kσ_gpu_buf, σs_gpu, p.vsini, p.ζ_rt, p.u1, p.u2,
-                FT.intres_glob, Nλ)
+                FT.HIRANO_QUADRATURE_NPTS, Nλ)
             CUDA.synchronize()
             Kσ_gpu = Array(Kσ_gpu_buf)
 
@@ -77,7 +77,7 @@ test_params = [
         kernel_threads = 256
         @cuda threads=kernel_threads blocks=Nλ shmem=kernel_threads*sizeof(Float64) FT.hirano_rotmacro_ft_kernel_gpu!(
             Kσ_gpu_buf, σs_gpu, 2100.0, 3500.0, 0.43, 0.31,
-            FT.intres_glob, Nλ)
+            FT.HIRANO_QUADRATURE_NPTS, Nλ)
         CUDA.synchronize()
         Kσ_gpu = Array(Kσ_gpu_buf)
 

@@ -1,6 +1,7 @@
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
+using BenchmarkTools
 using Printf, Statistics
 # output directory
 datadir = joinpath(FT.moddir, "benchmarks", "data")
@@ -13,11 +14,11 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 wls = [l.wl for l in linelist]
-idx1 = findfirst(x -> x * 1e8 >= 6301, wls)
-idx2 = findfirst(x -> x * 1e8 >= 6302, wls)
+idx1 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6301, wls)
+idx2 = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
 
-wls = [l.wl * 1e8 for l in linelist]
+wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 
 # wavelength grid (Δλ matches all other benchmark scripts)
 Δλ = 0.005
@@ -56,8 +57,15 @@ cmem_mac32 = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=Float32)
 # scalar σ_v for production-matching CPU in-place path
 σ_v_scalar = 850.0
 
+# vector σ_v / μ_v for per-row CPU dispatch comparison
+μ_v_vec = fill(0.0, Natm)
+σ_v_vec = fill(850.0, Natm)
+
 # CPU tile workspace (matches production in-place path)
 cpu_ws = FT.CPUTileWorkspace(Float64, Natm, Nλ)
+
+# separate workspace for macro in-place benchmark (avoids state coupling with micro)
+macro_ws = FT.CPUTileWorkspace(Float64, Natm, Nλ)
 
 # pre-allocate GPU arrays for microturbulence (avoid H2D transfer in loop)
 λs_gpu64 = CuArray(collect(Float64, λs_korg))
@@ -77,32 +85,16 @@ u1 = 0.4
 u2 = 0.26
 ζ_rt = 3500.0
 
-const N_REPEAT = 20
-
-println("Convolution benchmark: Nλ=", Nλ, ", Natm=", Natm, ", Npad=", Npad,
-        ", N_REPEAT=", N_REPEAT)
+println("Convolution benchmark: Nλ=", Nλ, ", Natm=", Natm, ", Npad=", Npad)
 println()
 
-# ── timing helper ──────────────────────────────────────────────────────────────
-function iqr(x)
-    q = quantile(x, [0.25, 0.75])
-    return (q[2] - q[1]) / 2.0
-end
+# ── timing helpers ─────────────────────────────────────────────────────────────
+# BenchmarkTools handles warmup, GC fencing, and result consumption automatically.
+# For GPU we use CUDA.@sync inside the benchmark to ensure kernel completion.
+iqr_ms(trial) = (quantile(trial.times, 0.75) - quantile(trial.times, 0.25)) / 2e6
 
-function time_cpu(f; n_repeat=N_REPEAT)
-    f()  # warmup
-    return [(@elapsed f()) for _ in 1:n_repeat]
-end
-
-function time_gpu(f; n_repeat=N_REPEAT)
-    f(); CUDA.synchronize()  # warmup
-    times = zeros(n_repeat)
-    for r in 1:n_repeat
-        CUDA.synchronize()
-        times[r] = CUDA.@elapsed f()
-    end
-    return times
-end
+bench_cpu(f) = @benchmark $f()
+bench_gpu(f) = @benchmark CUDA.@sync $f()
 
 # ── benchmark each kernel ──────────────────────────────────────────────────────
 kernels = String[]
@@ -113,88 +105,70 @@ cpu_iqr_ms = Float64[]
 gpu64_iqr_ms = Float64[]
 gpu32_iqr_ms = Float64[]
 
-function record!(label, cpu_times, gpu64_times, gpu32_times)
-    cpu_ms = cpu_times .* 1000
-    g64_ms = gpu64_times .* 1000
-    g32_ms = gpu32_times .* 1000
+function record!(label, cpu_trial, gpu64_trial, gpu32_trial)
+    c = median(cpu_trial).time / 1e6
+    g64 = median(gpu64_trial).time / 1e6
+    g32 = median(gpu32_trial).time / 1e6
     push!(kernels, label)
-    push!(cpu_median_ms, median(cpu_ms))
-    push!(gpu64_median_ms, median(g64_ms))
-    push!(gpu32_median_ms, median(g32_ms))
-    push!(cpu_iqr_ms, iqr(cpu_ms))
-    push!(gpu64_iqr_ms, iqr(g64_ms))
-    push!(gpu32_iqr_ms, iqr(g32_ms))
-    sp64 = median(cpu_ms) / median(g64_ms)
-    sp32 = median(cpu_ms) / median(g32_ms)
+    push!(cpu_median_ms, c)
+    push!(gpu64_median_ms, g64)
+    push!(gpu32_median_ms, g32)
+    push!(cpu_iqr_ms, iqr_ms(cpu_trial))
+    push!(gpu64_iqr_ms, iqr_ms(gpu64_trial))
+    push!(gpu32_iqr_ms, iqr_ms(gpu32_trial))
     @printf("  CPU: %.3f ms  GPU64: %.3f ms (%.0f×)  GPU32: %.3f ms (%.0f×)\n",
-            median(cpu_ms), median(g64_ms), sp64, median(g32_ms), sp32)
+            c, g64, c / g64, g32, c / g32)
 end
 
-# microturbulence (CPU uses production in-place scalar-σ path)
-println("Microturbulence...")
-record!("Microturbulence",
-    time_cpu() do
-        FT._convolve_micro_inplace!(cpu_ws.αs_broad, λs_korg, αs, 0.0, σ_v_scalar, cpu_ws)
-    end,
-    time_gpu() do
-        FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, μ_v_rot64, σ_v_mic64)
-    end,
-    time_gpu() do
-        FT.convolve_wavelength_axis_gpu(cmem32, λs_gpu32, αs_gpu32, μ_v_rot32, σ_v_mic32)
-    end)
+# microturbulence — scalar dispatch (production disk-integration path)
+println("Micro (scalar)...")
+record!("Micro (scalar)",
+    bench_cpu(() -> FT._convolve_micro_inplace!(cpu_ws.αs_broad, λs_korg, αs, 0.0, σ_v_scalar, cpu_ws)),
+    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, μ_v_rot64, σ_v_mic64)),
+    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem32, λs_gpu32, αs_gpu32, μ_v_rot32, σ_v_mic32)))
+
+# microturbulence — per-row dispatch (per-layer σ_v path)
+println("Micro (per-row)...")
+record!("Micro (per-row)",
+    bench_cpu(() -> FT._convolve_micro_inplace!(cpu_ws.αs_broad, λs_korg, αs, μ_v_vec, σ_v_vec, cpu_ws)),
+    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, μ_v_rot64, σ_v_mic64)),
+    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem32, λs_gpu32, αs_gpu32, μ_v_rot32, σ_v_mic32)))
 
 # gray rotation
 println("Gray rotation...")
 record!("Gray rotation",
-    time_cpu() do
-        FT.convolve_gray_rotation(λs_korg, tbc64, vsini, u1)
-    end,
-    time_gpu() do
-        FT.convolve_gray_rotation_gpu(cmem_mac64, λs_korg, tbc64, vsini, u1)
-    end,
-    time_gpu() do
-        FT.convolve_gray_rotation_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(vsini), Float32(u1))
-    end)
+    bench_cpu(() -> FT.convolve_gray_rotation(λs_korg, tbc64, vsini, u1)),
+    bench_gpu(() -> FT.convolve_gray_rotation_gpu(cmem_mac64, λs_korg, tbc64, vsini, u1)),
+    bench_gpu(() -> FT.convolve_gray_rotation_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(vsini), Float32(u1))))
 
 # isotropic RT macroturbulence
 println("Isotropic RT macro...")
 record!("Iso. RT macro",
-    time_cpu() do
-        FT.convolve_iso_rt_macro(λs_korg, tbc64, ζ_rt)
-    end,
-    time_gpu() do
-        FT.convolve_iso_rt_macro_gpu(cmem_mac64, λs_korg, tbc64, ζ_rt)
-    end,
-    time_gpu() do
-        FT.convolve_iso_rt_macro_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(ζ_rt))
-    end)
+    bench_cpu(() -> FT.convolve_iso_rt_macro(λs_korg, tbc64, ζ_rt)),
+    bench_gpu(() -> FT.convolve_iso_rt_macro_gpu(cmem_mac64, λs_korg, tbc64, ζ_rt)),
+    bench_gpu(() -> FT.convolve_iso_rt_macro_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(ζ_rt))))
 
-# anisotropic RT macroturbulence
-println("Anisotropic RT macro...")
-record!("Aniso. RT macro",
-    time_cpu() do
-        FT.convolve_rt_macro(λs_korg, tbc64, ζ_rt, 0.9)
-    end,
-    time_gpu() do
-        FT.convolve_rt_macro_gpu(cmem_mac64, λs_korg, tbc64, ζ_rt, 0.9)
-    end,
-    time_gpu() do
-        FT.convolve_rt_macro_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(ζ_rt), Float32(0.9))
-    end)
+# anisotropic RT macroturbulence — in-place (production disk-integration path)
+println("Aniso. RT (in-place)...")
+record!("Aniso. RT (in-place)",
+    bench_cpu(() -> FT._convolve_macro_inplace!(macro_ws.macro_out, λs_korg, tbc64, ζ_rt, 0.9, macro_ws)),
+    bench_gpu(() -> FT.convolve_rt_macro_gpu(cmem_mac64, λs_korg, tbc64, ζ_rt, 0.9)),
+    bench_gpu(() -> FT.convolve_rt_macro_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(ζ_rt), Float32(0.9))))
+
+# anisotropic RT macroturbulence — allocating (standalone API)
+println("Aniso. RT (alloc.)...")
+record!("Aniso. RT (alloc.)",
+    bench_cpu(() -> FT.convolve_rt_macro(λs_korg, tbc64, ζ_rt, 0.9)),
+    bench_gpu(() -> FT.convolve_rt_macro_gpu(cmem_mac64, λs_korg, tbc64, ζ_rt, 0.9)),
+    bench_gpu(() -> FT.convolve_rt_macro_gpu(cmem_mac32, λs_korg_f32, tbc32, Float32(ζ_rt), Float32(0.9))))
 
 # Hirano rotation+macro
 println("Hirano rot+macro...")
 record!("Hirano rot+macro",
-    time_cpu() do
-        FT.convolve_hirano_rotmacro(λs_korg, tbc64, vsini, ζ_rt, u1, u2)
-    end,
-    time_gpu() do
-        FT.convolve_hirano_rotmacro_gpu(cmem_mac64, λs_korg, tbc64, vsini, ζ_rt, u1, u2)
-    end,
-    time_gpu() do
-        FT.convolve_hirano_rotmacro_gpu(cmem_mac32, λs_korg_f32, tbc32,
-            Float32(vsini), Float32(ζ_rt), Float32(u1), Float32(u2))
-    end)
+    bench_cpu(() -> FT.convolve_hirano_rotmacro(λs_korg, tbc64, vsini, ζ_rt, u1, u2)),
+    bench_gpu(() -> FT.convolve_hirano_rotmacro_gpu(cmem_mac64, λs_korg, tbc64, vsini, ζ_rt, u1, u2)),
+    bench_gpu(() -> FT.convolve_hirano_rotmacro_gpu(cmem_mac32, λs_korg_f32, tbc32,
+        Float32(vsini), Float32(ζ_rt), Float32(u1), Float32(u2))))
 
 # ── save data ─────────────────────────────────────────────────────────────────
 open(joinpath(datadir, "convolution_timings.csv"), "w") do io

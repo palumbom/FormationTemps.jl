@@ -122,7 +122,7 @@ function calc_tau_bezier_cached_kernel!(αs::CDM{T}, τs::CDM{T},
         αmax = max(αmax, v)
     end
     hi = max(T(2) * αmax, zeroT)
-    @inbounds τs[1, j] = T(1e-5)
+    @inbounds τs[1, j] = T(TAU_FLOOR)
 
     # first iteration (c=2): load α1, α2, α3 fresh
     @inbounds ds_prev = ds[1]
@@ -221,7 +221,7 @@ function calc_tau_bezier!(μ_i, zs, αs, τs)
         hi = max(T(2) * αmax, zeroT)
 
         # init
-        τs[1, j] = T(1e-5)
+        τs[1, j] = T(TAU_FLOOR)
 
         # first iteration handle outside loop
         s_prev = zs[1] * inv_μ
@@ -286,14 +286,14 @@ end
 
 # batched anchored τ: one thread per (tile, wavelength), serial over layers
 function calc_tau_anchored_batched_kernel!(αs, τs, log_τ_ref, ifactor_base,
-                                           μ_tiles, Natm, Nλ, Bcur, total)
+                                           μ_tiles, μ_off, Natm, Nλ, Bcur, total)
     idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
     sdx = gridDim().x * blockDim().x
     for lin in idx:sdx:total
         b = ((lin - 1) ÷ Nλ) + 1
         j = ((lin - 1) % Nλ) + 1
         T = eltype(τs)
-        inv_μ = one(T) / @inbounds μ_tiles[b]
+        inv_μ = one(T) / @inbounds μ_tiles[μ_off + b]
         off = (b - 1) * Natm  # row offset for this tile
         @inbounds τs[off + 1, j] = zero(T)
         @inbounds for i in 2:Natm
@@ -308,19 +308,19 @@ end
 
 function calc_tau_anchored_batched!(μ_tiles::CA{T,1}, log_τ_ref::CA{T,1},
                                     ifactor_base::CA{T,1}, αs::AA{T,2}, τs::CA{T,2},
-                                    Natm::Int, Bcur::Int) where T<:AF
+                                    Natm::Int, Bcur::Int; tile_offset::Int=0) where T<:AF
     Nλ = size(αs, 2)
     total = Bcur * Nλ  # Int product — safe from Int32 overflow
     threads = 256
     blocks = cld(total, threads)
     @cuda threads=threads blocks=blocks calc_tau_anchored_batched_kernel!(
-        αs, τs, log_τ_ref, ifactor_base, μ_tiles, Int32(Natm), Int32(Nλ), Int32(Bcur),
-        Int32(total))
+        αs, τs, log_τ_ref, ifactor_base, μ_tiles, Int32(tile_offset),
+        Int32(Natm), Int32(Nλ), Int32(Bcur), Int32(total))
     return nothing
 end
 
 # batched Bezier geometry: precompute ds and alphaC for B tiles
-function precompute_bezier_geometry_batched!(μ_tiles, zs, ds, alphaC, Natm, Bcur)
+function precompute_bezier_geometry_batched!(μ_tiles, μ_off, zs, ds, alphaC, Natm, Bcur)
     idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
     sdx = gridDim().x * blockDim().x
     T = eltype(ds)
@@ -329,7 +329,7 @@ function precompute_bezier_geometry_batched!(μ_tiles, zs, ds, alphaC, Natm, Bcu
     for lin in idx:sdx:(Bcur * N)
         b = ((lin - 1) ÷ N) + 1
         p = ((lin - 1) % N) + 1
-        inv_μ = one(T) / @inbounds μ_tiles[b]
+        inv_μ = one(T) / @inbounds μ_tiles[μ_off + b]
         off = (b - 1) * N
         @inbounds if p <= (N - 1)
             ds[off + p] = (zs[p + 1] - zs[p]) * inv_μ
@@ -369,7 +369,7 @@ function calc_tau_bezier_batched_kernel!(αs, τs, ds, alphaC, Natm, Nλ, Bcur, 
             αmax = max(αmax, v)
         end
         hi = max(T(2) * αmax, zeroT)
-        @inbounds τs[off + 1, j] = T(1e-5)
+        @inbounds τs[off + 1, j] = T(TAU_FLOOR)
 
         # first iteration (c=2)
         @inbounds ds_prev = ds[off + 1]
@@ -424,7 +424,7 @@ end
 function calc_tau_bezier_batched!(μ_tiles::CA{T,1}, zs::CA{T,1},
                                   αs::AA{T,2}, τs::CA{T,2},
                                   ds::CA{T,1}, alphaC::CA{T,1},
-                                  Natm::Int, Bcur::Int) where T<:AF
+                                  Natm::Int, Bcur::Int; tile_offset::Int=0) where T<:AF
     Natm >= 3 || error("calc_tau_bezier_batched! requires Natm >= 3")
     Nλ = size(αs, 2)
 
@@ -432,7 +432,7 @@ function calc_tau_bezier_batched!(μ_tiles::CA{T,1}, zs::CA{T,1},
     t_geom = 256
     b_geom = cld(Bcur * Natm, t_geom)
     @cuda threads=t_geom blocks=b_geom precompute_bezier_geometry_batched!(
-        μ_tiles, zs, ds, alphaC, Int32(Natm), Int32(Bcur))
+        μ_tiles, Int32(tile_offset), zs, ds, alphaC, Int32(Natm), Int32(Bcur))
 
     # main Bezier integration
     total = Bcur * Nλ  # Int product — safe from Int32 overflow

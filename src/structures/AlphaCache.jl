@@ -1,8 +1,8 @@
 const _HIII_SPECIES = Korg.Species("H III")
 
 """
-    AlphaCache(wls, A_X, Nlayers; cntm_step=1e-8, line_buffer=10e-8)
-    AlphaCache(wls, A_X, atm; cntm_step=1e-8, line_buffer=10e-8)
+    AlphaCache(wls, A_X, Nlayers; cntm_step=ANGSTROM_TO_CM, line_buffer=10*ANGSTROM_TO_CM)
+    AlphaCache(wls, A_X, atm; cntm_step=ANGSTROM_TO_CM, line_buffer=10*ANGSTROM_TO_CM)
 
 Reusable cache for accelerated `compute_alpha!` calls.
 
@@ -15,8 +15,8 @@ Arguments:
 - `wls::Korg.Wavelengths`: Wavelength grid for line and continuum absorption.
 - `A_X::AbstractVector{<:Real}`: Elemental abundances on the usual astronomical scale.
 - `Nlayers::Int` or `atm::Atmosphere`: Number of atmosphere layers, or an atmosphere struct.
-- `cntm_step`: Continuum wavelength step (cm; default 1e-8).
-- `line_buffer`: Buffer around the wavelength range for line wings (cm; default 10e-8).
+- `cntm_step`: Continuum wavelength step (cm; default `ANGSTROM_TO_CM`, i.e. 1 Å).
+- `line_buffer`: Buffer around the wavelength range for line wings (cm; default 10 Å).
 
 See also: [`compute_alpha!`](@ref), [`set_abundances!`](@ref), [`reset_alpha_cache!`](@ref)
 """
@@ -45,7 +45,7 @@ function _normalize_abs_abundances(A_X::AA{T, 1}) where {T<:AF}
 end
 
 function AlphaCache(wls::Korg.Wavelengths, A_X::AA{T, 1}, Nlayers::Integer;
-                    cntm_step::Real=1e-8, line_buffer::Real=10e-8) where {T<:AF}
+                    cntm_step::Real=ANGSTROM_TO_CM, line_buffer::Real=10*ANGSTROM_TO_CM) where {T<:AF}
     cs = T(cntm_step)
     lb = T(line_buffer)
     cntm_wls = Korg.Wavelengths(range(first(wls) - lb, last(wls) + lb, step=cs))
@@ -69,7 +69,7 @@ function AlphaCache(wls::Korg.Wavelengths, A_X::AA{T, 1}, Nlayers::Integer;
 end
 
 function AlphaCache(wls::Korg.Wavelengths, A_X::AA{T, 1}, atm::Atmosphere{T};
-                    cntm_step::Real=1e-8, line_buffer::Real=10e-8) where {T<:AF}
+                    cntm_step::Real=ANGSTROM_TO_CM, line_buffer::Real=10*ANGSTROM_TO_CM) where {T<:AF}
     return AlphaCache(wls, A_X, length(atm.zs); cntm_step=cntm_step, line_buffer=line_buffer)
 end
 

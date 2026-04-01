@@ -53,7 +53,7 @@ Returns:
 """
 
 function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X;
-                        α_ref_out=nothing, ref_wl_cm::Float64=5000.0/1e8,
+                        α_ref_out=nothing, ref_wl_cm::Float64=5000.0*ANGSTROM_TO_CM,
                         vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
                         ne_warn_min=1e-4)
@@ -62,8 +62,8 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
 
     # work in cm
-    cntm_step = 1e-8
-    line_buffer = 10.0 * 1e-8
+    cntm_step = ANGSTROM_TO_CM             # 1 Å step for continuum grid
+    line_buffer = 10.0 * ANGSTROM_TO_CM    # 10 Å buffer around line list
 
     # wavelengths at which to calculate the continuum
     cntm_wls = range(first(wls) - line_buffer, last(wls) + line_buffer, step=cntm_step)
@@ -78,7 +78,6 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
 
     # loop over layers and do chemical equilibrium
     Threads.@threads for i in 1:N
-    # for i in 1:N
         # index the layers
         temp = Ts[i]
         nd = nds[i]
@@ -134,7 +133,7 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
         linelist5 = Korg._alpha_5000_default_linelist  # synthesize.jl:195-198
         α_cntm_ref = [_ -> a for a in copy(α_ref_out)]  # synthesize.jl:255
         Korg.line_absorption!(view(α_ref_out, :, 1:1), linelist5,
-                              Korg.Wavelengths([ref_wl_cm * 1e8]),
+                              Korg.Wavelengths([ref_wl_cm * CM_TO_ANGSTROM]),
                               Ts, nₑs, nds, partition_funcs,
                               vmic_ref_cms, α_cntm_ref; cutoff_threshold=3e-4)
     end
@@ -155,7 +154,7 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, atm, A_X
 end
 
 function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, A_X;
-                        α_ref_out=nothing, ref_wl_cm::Float64=5000.0/1e8,
+                        α_ref_out=nothing, ref_wl_cm::Float64=5000.0*ANGSTROM_TO_CM,
                         vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
                         ne_warn_min=1e-4)
@@ -164,8 +163,8 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
 
     # work in cm
-    cntm_step = 1e-8
-    line_buffer = 10.0 * 1e-8
+    cntm_step = ANGSTROM_TO_CM             # 1 Å step for continuum grid
+    line_buffer = 10.0 * ANGSTROM_TO_CM    # 10 Å buffer around line list
 
     # wavelengths at which to calculate the continuum
     cntm_wls = range(first(wls) - line_buffer, last(wls) + line_buffer, step=cntm_step)
@@ -180,7 +179,6 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
 
     # loop over layers and do chemical equilibrium
     Threads.@threads for i in 1:N
-    # for i in 1:N
         # index the layers
         temp = Ts[i]
         nd = nds[i]
@@ -237,7 +235,7 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
         linelist5 = Korg._alpha_5000_default_linelist  # synthesize.jl:195-198
         α_cntm_ref = [_ -> a for a in copy(α_ref_out)]  # synthesize.jl:255
         Korg.line_absorption!(view(α_ref_out, :, 1:1), linelist5,
-                              Korg.Wavelengths([ref_wl_cm * 1e8]),
+                              Korg.Wavelengths([ref_wl_cm * CM_TO_ANGSTROM]),
                               Ts, nₑs, nds, partition_funcs,
                               vmic_ref_cms, α_cntm_ref; cutoff_threshold=3e-4)
     end

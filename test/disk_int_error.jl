@@ -10,10 +10,10 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 specs    = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 wls      = [l.wl for l in linelist]
-idx1     = findfirst(x -> x * 1e8 >= 6301, wls)
-idx2     = findfirst(x -> x * 1e8 >= 6302, wls)
+idx1     = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6301, wls)
+idx2     = findfirst(x -> x * FT.CM_TO_ANGSTROM >= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
-wls      = [l.wl * 1e8 for l in linelist]
+wls      = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 
 λs_korg = range(first(wls) - 1.0, last(wls) + 1.0, step=0.01)
 

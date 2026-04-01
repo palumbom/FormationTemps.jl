@@ -11,9 +11,9 @@ Fields:
 - `atmosphere`: atmosphere structure used for the calculation.
 """
 struct FormTempResult{T<:AF}
-    wavs::AA{T,1}
-    flux::AA{T,1}
-    form_temps::AA{T,1}
-    cont_func::AA{T,2}
+    wavs::Vector{T}
+    flux::Vector{T}
+    form_temps::Vector{T}
+    cont_func::Matrix{T}
     atmosphere::Atmosphere{T}
 end

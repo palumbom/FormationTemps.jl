@@ -30,7 +30,7 @@ A_X = Korg.format_A_X(Fe_H)
 
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16100]
 linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
-wls = [l.wl * 1e8 for l in linelist]
+wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 
 Npad = 512
 

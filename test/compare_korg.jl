@@ -14,7 +14,7 @@ gamma_stark = exp10(-6.16)
 gamma_vdw   = log10(exp10(-7.69))
 linelist    = [Korg.Line(wl, log_gf, species, E_lower, gamma_rad, gamma_stark, gamma_vdw)]
 
-λ0      = linelist[1].wl * 1e8
+λ0      = linelist[1].wl * FT.CM_TO_ANGSTROM
 λs_korg = collect(range(λ0 - 0.25, λ0 + 0.25, step=0.001))
 
 A_X = Korg.asplund_2009_solar_abundances
