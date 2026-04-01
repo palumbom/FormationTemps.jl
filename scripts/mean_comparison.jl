@@ -125,137 +125,250 @@ function find_line_minima(λ::AbstractVector, f::AbstractVector;
 end
 
 
-function synth_given_linelist(linelist; δλ=0.005)
-    # re-get values
-    wls = [l.wl * 1e8 for l in linelist]
-    log_gf =  [l.log_gf for l in linelist]
-    species =  [l.species for l in linelist]
-    E_lower =  [l.E_lower for l in linelist]
-    gamma_rad =  [l.gamma_rad for l in linelist]
-    gamma_stark =  [l.gamma_stark for l in linelist]
+# read pre-computed 1D formation temperature spectrum
+cephdir = abspath("/mnt/home/mpalumbo/ceph/")
+outfile_1d = joinpath(cephdir, "formation_temps", "temp_spectrum_air_1D.h5")
+λ_min = 5000.0  # Å
+λ_max = 8000.0  # Å
 
-    # make the wavelength grid
-    λs_korg = range(first(wls) - 2.0, last(wls) + 2.0, step=δλ)
+λs_korg = Float64[]
+flux = Float64[]
+form_temps_flux = Float64[]
+cfunc_chunks = Matrix{Float64}[]
+line_centers_all = Float64[]
 
-    # get some abundances
-    A_X = Korg.asplund_2020_solar_abundances
+h5open(outfile_1d, "r") do h5
+    Ts = read(h5["model_atmosphere"]["Ts"])
 
-    # get the atmosphere
-    atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(5777.0, 4.44, A_X))
-    zs = atm_gpu.zs
-    Ts = atm_gpu.Ts
-    τ5000 = atm_gpu.τs
+    chunk_names = sort(filter(name -> startswith(name, "chunk_"), collect(keys(h5))))
+    for cn in chunk_names
+        g = h5[cn]
+        wavs_chunk = read(g["wavs"])
 
-    # synthesis to get the alphas
-    αs = zeros(length(atm_gpu.zs), length(λs_korg))
-    FT.compute_alpha!(αs, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X)
+        # skip chunks entirely outside the wavelength range
+        (last(wavs_chunk) < λ_min || first(wavs_chunk) > λ_max) && continue
 
-    # allocate on device
-    gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
-
-    # allocate memory for convolutions
-    Nλ = length(λs_korg)
-    Natm = size(αs, 1)
-    Npad = 100
-    cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-
-    # get disk integrated cfunc
-    μ_v = CUDA.zeros(Float64, length(zs))
-    σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-
-    cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
-    flux = Array(FT.get_flux(cfunc_flux_struct)')
-
-    # get formation temperature
-    cum_cfunc_flux_norm = Array(FT.get_cum_cfunc(cfunc_flux_struct))
-    form_temps_flux = zeros(length(λs_korg))
-    for i in eachindex(λs_korg)
-        local xs = view(cum_cfunc_flux_norm, :, i)
-        local itp = FT.linear_interp(xs, elav(Ts))
-        form_temps_flux[i] = itp(0.5)
+        keep = (wavs_chunk .>= λ_min) .& (wavs_chunk .<= λ_max)
+        append!(λs_korg, wavs_chunk[keep])
+        append!(flux, read(g["flux"])[keep])
+        append!(form_temps_flux, read(g["temp"])[keep])
+        push!(cfunc_chunks, read(g["cfunc"])[:, keep])
+        append!(line_centers_all, read(g["line_centers"]))
     end
-    return λs_korg, Array(cfunc_flux_struct.cfunc_dt), flux, cum_cfunc_flux_norm, form_temps_flux, Ts
+
+    global Ts = Ts
 end
+cfunc_flux = hcat(cfunc_chunks...)
+@info "read $(length(λs_korg)) pixels in [$(λ_min), $(λ_max)] Å"
 
-# get the linelist
-linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
-linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist][18000:end]
+# build cumulative contribution function (normalized per wavelength)
+cum_cfunc_flux_norm = cumsum(cfunc_flux, dims=1)
+cum_cfunc_flux_norm ./= maximum(cum_cfunc_flux_norm, dims=1)
+
+# read linelist for species labels (filter to same range)
+linelist = Korg.read_linelist(joinpath(cephdir, "formation_temps", "Sun_VALD_BIG.lin"))
+linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 wls = [l.wl * 1e8 for l in linelist]
+in_range = (wls .>= λ_min) .& (wls .<= λ_max)
+linelist = linelist[in_range]
+wls = wls[in_range]
 species = [l.species for l in linelist]
+E_lower = [l.E_lower for l in linelist]
 
-# do the synthesis
-λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux, Ts = synth_given_linelist(linelist)
+# target formation temperature and tolerance
+ftemp = 4800.0
+atol = 25.0
+isolated_only = true
+min_sep = 0.5  # minimum separation in Å between T₁/₂ minima (not raw linelist)
 
-# get indices with similar formation temperatures
-ftemp = 4750.0
-atol = 0.5e1
 all_idx = findall(isapprox.(ftemp, form_temps_flux, atol=atol))
 
-# get line bottoms
-min_idx, λsub = find_line_minima(λs_korg, form_temps_flux; σ=2.0, depth=0.02, win=40, minsep=7)
+# find line minima in the T₁/₂ curve
+# scale win/minsep to the actual pixel size (parameters were tuned for Δλ≈0.01)
+Δλ_actual = mean(diff(λs_korg))
+pix_per_angstrom = round(Int, 1.0 / Δλ_actual)
+min_idx, λsub = find_line_minima(λs_korg, form_temps_flux;
+                                  σ=2.0,
+                                  depth=0.02,
+                                  win=max(40, round(Int, 0.5 * pix_per_angstrom)),
+                                  minsep=max(7, round(Int, 0.1 * pix_per_angstrom)))
+@info "found $(length(min_idx)) T₁/₂ minima (Δλ=$(round(Δλ_actual, digits=4)) Å, $(pix_per_angstrom) pix/Å)"
 
-# match indices
-near_min_idx = []
-for i in eachindex(all_idx)
-    tmp_idx = FT.searchsortednearest(all_idx[i], min_idx)
-    push!(near_min_idx, min_idx[tmp_idx])
+# group candidate pixels by their nearest line minimum
+line_to_pixels = Dict{Int, Vector{Int}}()
+for i in all_idx
+    li = min_idx[FT.searchsortednearest(i, min_idx)]
+    push!(get!(line_to_pixels, li, Int[]), i)
+end
+@info "$(length(line_to_pixels)) unique minima have candidate pixels nearby"
+
+# for each unique line, pick the red-wing pixel closest to ftemp
+line_ids = sort(collect(keys(line_to_pixels)))
+best_pixel = Dict{Int, Int}()
+global n_no_red = 0
+for li in line_ids
+    pixels = line_to_pixels[li]
+    red_pixels = filter(p -> p > li, pixels)
+    if isempty(red_pixels)
+        delete!(line_to_pixels, li)
+        global n_no_red += 1
+        continue
+    end
+    _, bi = findmin(abs.(form_temps_flux[red_pixels] .- ftemp))
+    best_pixel[li] = red_pixels[bi]
+end
+filter!(li -> haskey(best_pixel, li), line_ids)
+@info "$(length(line_ids)) lines with red-wing pixels ($n_no_red dropped for no red-wing match)"
+
+# filter to minima that are well separated from their neighbors in the T₁/₂ curve
+if isolated_only
+    min_sep_pix = round(Int, min_sep * pix_per_angstrom)
+    min_λs = λs_korg[min_idx]  # wavelengths of all detected minima
+    n_before_iso = length(line_ids)
+    filter!(li -> begin
+        # find this minimum's position among all minima
+        mi = findfirst(==(li), min_idx)
+        isnothing(mi) && return false
+        left_ok = mi == 1 || (min_idx[mi] - min_idx[mi-1]) >= min_sep_pix
+        right_ok = mi == length(min_idx) || (min_idx[mi+1] - min_idx[mi]) >= min_sep_pix
+        left_ok && right_ok
+    end, line_ids)
+    best_pixel = Dict(li => best_pixel[li] for li in line_ids)
+    @info "$(length(line_ids)) / $n_before_iso isolated candidate lines (min_sep=$(min_sep) Å)"
 end
 
-# take random 10
-idx = (1:10) .+ 3 # so no random plot
-# idx = randperm(length(near_min_idx))[1:10]
-idx = sort(near_min_idx[idx])
+# filter to lines with E_lower > 0 (exclude ground-state resonance lines)
+filter!(li -> begin
+    nearest_ll = FT.searchsortednearest(wls, λs_korg[li])
+    E_lower[nearest_ll] > 0
+end, line_ids)
+best_pixel = Dict(li => best_pixel[li] for li in line_ids)
+@info "$(length(line_ids)) candidate lines after E_lower > 0 filter"
 
-# find the lines they are nearest
-λs_interest = view(λs_korg, idx)
-idx_wls = [FT.searchsortednearest(wls, i) for i in λs_interest]
+# filter out lines whose cfunc peaks at the top of the atmosphere (truncated by model boundary)
+edge_thresh = 0.1  # max allowed cfunc at top layer, as fraction of peak
+n_before_edge = length(line_ids)
+filter!(li -> begin
+    col = cfunc_flux[:, best_pixel[li]]
+    peak = maximum(col)
+    peak > 0 && col[1] / peak < edge_thresh
+end, line_ids)
+best_pixel = Dict(li => best_pixel[li] for li in line_ids)
+@info "$(length(line_ids)) / $n_before_edge lines after top-of-atmosphere cfunc filter"
+
+# extract cfunc at each line's best pixel, normalize to unit area for shape comparison
+line_cfuncs = Dict{Int, Vector{Float64}}()
+for li in line_ids
+    col = cfunc_flux[:, best_pixel[li]]
+    s = sum(col)
+    line_cfuncs[li] = s > 0 ? col ./ s : col
+end
+
+# farthest-point sampling: select k lines with maximally diverse cfunc shapes
+function select_diverse(line_ids, line_cfuncs, k)
+    n = length(line_ids)
+    k = min(k, n)
+
+    # pairwise L2 distance
+    D = zeros(n, n)
+    for i in 1:n, j in i+1:n
+        d = sqrt(sum((line_cfuncs[line_ids[i]] .- line_cfuncs[line_ids[j]]).^2))
+        D[i,j] = d
+        D[j,i] = d
+    end
+
+    # seed with the most distant pair
+    _, ij = findmax(D)
+    chosen = [ij[1], ij[2]]
+
+    while length(chosen) < k
+        best_ci = 0
+        best_d = -Inf
+        for c in 1:n
+            c in chosen && continue
+            min_d = minimum(D[c, s] for s in chosen)
+            if min_d > best_d
+                best_d = min_d
+                best_ci = c
+            end
+        end
+        push!(chosen, best_ci)
+    end
+    return sort(chosen)
+end
+
+nlines = 10
+@info "$(length(all_idx)) pixels within atol=$atol of ftemp=$ftemp; $(length(line_ids)) unique lines"
+diverse_ci = select_diverse(line_ids, line_cfuncs, nlines)
+selected_line_ids = [line_ids[ci] for ci in diverse_ci]
+
+# map selected lines back to linelist entries
+idx_wls = [FT.searchsortednearest(wls, λs_korg[li]) for li in selected_line_ids]
 wls_interest = wls[idx_wls]
 
-# redo the synthesis just with these lines on a finer grid
-δλ = 0.001
-linelist = linelist[idx_wls]
-λs_korg, cfunc_flux, flux, cum_cfunc_flux_norm, form_temps_flux, Ts = synth_given_linelist(linelist, δλ=δλ)
-wls = [l.wl * 1e8 for l in linelist]
-species =  [l.species for l in linelist]
-
-# format species name
-specs_interest = string.(species)
+# format species names
+specs_interest = string.(species[idx_wls])
 specs_interest_latex = latexstring.(specs_interest)
 for i in eachindex(specs_interest)
     parts = split(specs_interest[i])
-    part3 = string(round(wls_interest[i], digits=1))
-    specs_interest_latex[i] = L"{\rm %$(parts[1])\, %$(parts[2])\, %$part3\, \AA}"
+    wl_str = string(round(wls_interest[i], digits=1))
+    spec_str = join(parts, "\\, ")
+    specs_interest_latex[i] = L"{\rm %$spec_str\, %$wl_str\, \AA}"
 end
 
-# get views of the lines
+# extract windows around each selected line
 wavs_list = []
 flux_list = []
 temp_list = []
 cfunc_list = []
 cfunc_cum_list = []
+best_local_idx = Int[]  # local index of the pixel that matched ftemp in each window
 
-buffer = ceil(Int, 0.3 / mean(diff(λs_korg)))
+# buffer extends until T₁/₂ recovers to near-continuum on both sides
+cont_thresh = 0.95  # fraction of local max T₁/₂ to count as "continuum reached"
+min_buffer = ceil(Int, 0.3 / mean(diff(λs_korg)))
 offset_scale = 0.725
-for i in eachindex(wls)
-    # isolate the lines
-    idx_λs = findfirst(x -> x .>= wls[i], λs_korg)
+Nλ_total = length(λs_korg)
+for i in eachindex(selected_line_ids)
+    idx_λs = findfirst(x -> x >= wls_interest[i], λs_korg)
+    bp = best_pixel[selected_line_ids[i]]
 
-    # get an offset
+    # find where T₁/₂ recovers to near-continuum on the red side
+    local_max_T = maximum(form_temps_flux[max(1,idx_λs-min_buffer):min(Nλ_total,idx_λs+min_buffer)])
+    thresh_T = cont_thresh * local_max_T
+    red_buf = min_buffer
+    for k in 1:Nλ_total-idx_λs
+        if form_temps_flux[idx_λs + k] >= thresh_T
+            red_buf = k + ceil(Int, 0.1 * k)  # 10% padding beyond recovery
+            break
+        end
+    end
+    # same for the blue side
+    blue_buf = min_buffer
+    for k in 1:idx_λs-1
+        if form_temps_flux[idx_λs - k] >= thresh_T
+            blue_buf = k + ceil(Int, 0.1 * k)
+            break
+        end
+    end
+
+    buffer = max(min_buffer, red_buf, blue_buf, ceil(Int, 1.2 * abs(bp - idx_λs)))
+    buffer = min(buffer, idx_λs - 1, Nλ_total - idx_λs)
     offset = offset_scale * (i - 1)
 
-    # take views
-    λs_view = view(λs_korg, idx_λs-buffer:idx_λs+buffer) .- wls[i] .+ offset
-    flux_view = view(flux, idx_λs-buffer:idx_λs+buffer)
-    temp_view = view(form_temps_flux, idx_λs-buffer:idx_λs+buffer)
-    cfunc_view = view(cfunc_flux, :, idx_λs-buffer:idx_λs+buffer)
-    cfunc_cum_view = view(cum_cfunc_flux_norm, :, idx_λs-buffer:idx_λs+buffer)
+    win_start = idx_λs - buffer
+    λs_view = view(λs_korg, win_start:idx_λs+buffer) .- wls_interest[i] .+ offset
+    flux_view = view(flux, win_start:idx_λs+buffer)
+    temp_view = view(form_temps_flux, win_start:idx_λs+buffer)
+    cfunc_view = view(cfunc_flux, :, win_start:idx_λs+buffer)
+    cfunc_cum_view = view(cum_cfunc_flux_norm, :, win_start:idx_λs+buffer)
 
-    # push
     push!(wavs_list, collect(λs_view))
     push!(flux_list, collect(flux_view))
     push!(temp_list, collect(temp_view))
     push!(cfunc_list, collect(cfunc_view))
     push!(cfunc_cum_list, collect(cfunc_cum_view))
+    push!(best_local_idx, bp - win_start + 1)
 end
 
 # find temperatures to loop over
@@ -268,8 +381,26 @@ cmap = plt.get_cmap(seq_cmap)
 norm = mpl.colors.Normalize(vmin=1, vmax=length(wls_interest))
 colors = cmap(norm(1:length(wls_interest)))
 
-# loop over ftemps
-jsave = 21
+# find the pixel on the wings (non-negative dT/dλ) closest to a target temperature
+function find_nearest_pixel(temps, target)
+    N = length(temps)
+    dT = diff(temps)
+    best_idx = 0
+    best_diff = Inf
+    for i in 1:N-1
+        dT[i] >= 0 || continue
+        d = abs(temps[i] - target)
+        if d < best_diff
+            best_diff = d
+            best_idx = i
+        end
+    end
+    # fallback: if no non-negative-derivative pixel found, use global closest
+    return best_idx == 0 ? argmin(abs.(temps .- target)) : best_idx
+end
+
+# loop over ftemps; save the frame closest to the target formation temperature
+jsave = argmin(abs.(ftemps .- ftemp))
 for j in eachindex(ftemps)
     # make figure objects
     fig, ax1 = plt.subplots(figsize=(9.2,4.8))
@@ -280,27 +411,19 @@ for j in eachindex(ftemps)
     # iterate over lines
     the_xticks = zeros(length(idx_wls))
     for i in eachindex(idx_wls)
-        # get the index of the minimum
-        idx_min = argmin(temp_list[i])
-
-        # get the index of the temperature for each line
-        tdiffs = abs.(temp_list[i][idx_min+1:end] .- ftemps[j])
-        this_idx = argmin(tdiffs) .+ idx_min
-
         # plot the lines
         ax1.plot(wavs_list[i], temp_list[i], zorder=0, c=ncolors[i])
+        the_xticks[i] = offset_scale * (i - 1)
 
-        # get an offset
-        offset = offset_scale * (i - 1)
-        the_xticks[i] = offset
+        if j == jsave
+            # use precomputed pixel — guaranteed valid, skip tolerance check
+            this_idx = best_local_idx[i]
+        else
+            this_idx = find_nearest_pixel(temp_list[i], ftemps[j])
+            abs(temp_list[i][this_idx] - ftemps[j]) > atol && continue
+        end
 
-        # continue if broke
-        isnothing(this_idx) && continue
-
-        # get data for scatter
-        xscatter = [wavs_list[i][this_idx]] #.+ offset
-        yscatter = [temp_list[i][this_idx]]
-        ax1.scatter(xscatter, yscatter, c="k", zorder=1)
+        ax1.scatter([wavs_list[i][this_idx]], [temp_list[i][this_idx]], c="k", zorder=1)
     end
     ax1.set_xticks(the_xticks)
     ax1.set_xticklabels(specs_interest_latex, rotation=45, ha="right")
@@ -328,28 +451,24 @@ for j in eachindex(ftemps)
     this_ymax = [0.0]
 
     for i in eachindex(idx_wls)
-        # get the index of the minimum
-        idx_min = argmin(temp_list[i])
-
-        # get the index of the temperature for each line
-        tdiffs = abs.(temp_list[i][idx_min+1:end] .- ftemps[j])
-        this_idx = argmin(tdiffs) .+ idx_min
+        if j == jsave
+            this_idx = best_local_idx[i]
+        else
+            this_idx = find_nearest_pixel(temp_list[i], ftemps[j])
+            abs(temp_list[i][this_idx] - ftemps[j]) > atol && continue
+        end
 
         # get views of cfuncs at indices of interest
-        cfuncs_sim = cfunc_list[i][:, this_idx] # view(cfunc_flux, :, idx)
-        cfuncs_cum_sim = cfunc_cum_list[i][:, this_idx] # view(cum_cfunc_flux_norm, :, idx)
+        cfuncs_sim = cfunc_list[i][:, this_idx]
+        cfuncs_cum_sim = cfunc_cum_list[i][:, this_idx]
 
         if maximum(cfuncs_sim) / 10^exponent > this_ymax[1]
             this_ymax[1] = maximum(cfuncs_sim) / 10^exponent
         end
 
-        # get the mean
-        # mean_to_plot = sum(cfuncs_sim .* elav(Ts)) ./ sum(cfuncs_sim)
-
         ax1.plot(elav(Ts), cfuncs_sim / 10^exponent, c=ncolors[i])
         ax2.plot(elav(Ts), cfuncs_cum_sim, c=ncolors[i], label=specs_interest_latex[i])
         ax1.axvline(ftemps[j], ls="--", c="k", alpha=0.9)
-        # ax1.axvline(mean_to_plot, ls=":", c="k", alpha=0.9)
         ax2.axvline(ftemps[j], ls="--", c="k", alpha=0.9)
     end
 
