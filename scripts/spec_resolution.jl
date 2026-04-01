@@ -30,7 +30,7 @@ ncolors = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#C
 img_cmap = "viridis"
 μ_cmap = "autumn"
 
-# alias type 
+# alias type
 AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
@@ -48,7 +48,7 @@ specs = [string(l.species) for l in linelist]
 linelist = linelist[specs .== "Fe I"]
 
 # get the Fe I 6301 & 6302 lines (just cuz)
-wls = [l.wl for l in linelist] 
+wls = [l.wl for l in linelist]
 idx1 = findfirst(x -> x * 1e8 .>= 6301, wls)
 idx2 = findfirst(x -> x * 1e8 .>= 6302, wls)
 linelist = vcat([linelist[idx1], linelist[idx2]])
@@ -106,7 +106,7 @@ flux_stationary = Array(FT.get_flux(cfunc_flux_struct)')
 cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
 flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_struct)')
 
-# set rotational and macroturbulence 
+# set rotational and macroturbulence
 vsinis = range(1000.0, 1.0e4, step=1000)
 ζ_rt = 3400.0
 
@@ -135,7 +135,7 @@ colors = pyconvert(Array, cmap(norm(vsinis ./ 1e3)))
     flux_cont_convolution = Array(FT.convolve_hirano_rotmacro(λs_korg, flux_cont_stationary, vsinis[k], ζ_rt, u1, u2))
     flux_convolution_norm = Array(flux_convolution ./ flux_cont_convolution)[1,:]
 
-    # get disk stuff 
+    # get disk stuff
     ρstar = 1.0
     istar = 90.0
     v0 = vsinis[k]
@@ -167,12 +167,13 @@ colors = pyconvert(Array, cmap(norm(vsinis ./ 1e3)))
         # now do continuum intensity
         cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
 
+        # convolve with radial tangential
         tbc_cont = cfunc_intensity_cont.cfunc_dt
         cfunc_int_cont_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, ζ_rt, μs_cpu[i])
         flux_cont_integration .+= sum(cfunc_int_cont_i_mac, dims=1)' .* dA_cpu[i]
     end
 
-    # convolve with radial tangential
+    # 2pi
     flux_integration .*= 2π
     flux_cont_integration .*= 2π
 
