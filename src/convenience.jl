@@ -249,7 +249,6 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     Natm = size(αs, 1)
     Npad = 512
     cmem_mac = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
-    cmem_mac_cont = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
 
     σ_v = G(star.ξ)
 
@@ -381,16 +380,19 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                 kbuf_mac, gpu_mem.λs, μ_vals_gpu, Int32(i0_mac), G(star.ζ),
                 Int32(Nλ), Int32(L_mac))
             kbuf_mac ./= sum(kbuf_mac, dims=2)
+            CUDA.unsafe_free!(μ_vals_gpu)
 
-            # batched R2C FFT → kernel_cache_flat
+            # batched R2C FFT → kernel_cache_flat; free temporary kbuf_mac afterward
             plan_kc = CUDA.CUFFT.plan_rfft(kbuf_mac, 2)
             kernel_cache_flat = CUDA.zeros(Complex{G}, N_unique, nfreq_mac)
             mul!(kernel_cache_flat, plan_kc, kbuf_mac)
+            CUDA.unsafe_free!(kbuf_mac)
 
             # per-tile μ index
             μ_idx_gpu = CuArray(Int32[μ_to_idx[G(μs_cpu[i])] for i in 1:Ntiles])
 
-            # batched macro buffers + cuFFT plans
+            # batched macro buffers + cuFFT plans (one fwd plan shared by both streams;
+            # separate data buffers since streams run concurrently)
             mac_pad      = CUDA.zeros(G, B * Natm1, L_mac)
             mac_pad_cont = CUDA.zeros(G, B * Natm1, L_mac)
             mac_ft      = CUDA.zeros(Complex{G}, B * Natm1, nfreq_mac)
@@ -402,11 +404,12 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             acc_ft      = CUDA.zeros(Complex{G}, Natm1, nfreq_mac)
             acc_ft_cont = CUDA.zeros(Complex{G}, Natm1, nfreq_mac)
 
-            # final IFFT buffers
+            # final IFFT buffers (plans created from acc_ft/acc_ft_cont to avoid
+            # throwaway CuArray allocations)
             mac_ifft_buf      = CUDA.zeros(G, Natm1, L_mac)
             mac_ifft_buf_cont = CUDA.zeros(G, Natm1, L_mac)
-            plan_mac_bwd      = CUDA.CUFFT.plan_irfft(CUDA.zeros(Complex{G}, Natm1, nfreq_mac), L_mac, 2)
-            plan_mac_bwd_cont = CUDA.CUFFT.plan_irfft(CUDA.zeros(Complex{G}, Natm1, nfreq_mac), L_mac, 2)
+            plan_mac_bwd      = CUDA.CUFFT.plan_irfft(acc_ft, L_mac, 2)
+            plan_mac_bwd_cont = CUDA.CUFFT.plan_irfft(acc_ft_cont, L_mac, 2)
 
             # real-space output after final IFFT + extract
             mac_out      = CUDA.zeros(G, Natm1, Nλ)

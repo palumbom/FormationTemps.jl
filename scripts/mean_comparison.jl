@@ -202,7 +202,8 @@ for i in eachindex(all_idx)
 end
 
 # take random 10
-idx = randperm(length(near_min_idx))[1:10]
+idx = (1:10) .+ 3 # so no random plot
+# idx = randperm(length(near_min_idx))[1:10]
 idx = sort(near_min_idx[idx])
 
 # find the lines they are nearest

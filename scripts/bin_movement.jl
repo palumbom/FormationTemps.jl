@@ -22,8 +22,8 @@ colormaps = pyimport("colormaps")
 plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
-                               
-# alias type 
+
+# alias type
 AA = AbstractArray
 CA = CuArray
 AF = AbstractFloat
@@ -34,7 +34,7 @@ plotdir = joinpath(pwd(), "figures")
 
 # get the linelist
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))
-linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist][16000:17000]
+linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist][18000:19000]
 specs = [string(l.species) for l in linelist]
 
 # re-get values
@@ -73,7 +73,7 @@ Natm = size(αs, 1)
 Npad = 240
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
-# loop over mus 
+# loop over mus
 μs = range(0.1, 1.0, step=0.1)
 μ_v = CUDA.zeros(Float64, length(zs))
 σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
@@ -97,7 +97,7 @@ for i in eachindex(μs)
     cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
     continuum[:,i] .= Array(FT.get_intensity(cfunc_intensity_cont))
 end
- 
+
 # get flux and flux cfunc
 cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
 flux_disk_integrated = Array(FT.get_flux(cfunc_flux_struct))
@@ -126,7 +126,7 @@ for i in eachindex(λs_korg)
     end
 end
 
-# overplot the intensity and flux formation temperure spectra 
+# overplot the intensity and flux formation temperure spectra
 fig, axes = plt.subplots(nrows=2, ncols=1, sharex=true, height_ratios=[3,1])
 ax1 = axes[0]
 ax2 = axes[1]
@@ -141,7 +141,7 @@ ax2.set_ylabel(L"{\rm Difference\ [K]}")
 fig.savefig("figures/bin_form_temp_spectra.pdf")
 plt.clf(); plt.close()
 
-# split the bins 
+# split the bins
 x1 = form_temps_flux
 x2 = @view form_temps_intensity[:,end]
 nbins = 4
