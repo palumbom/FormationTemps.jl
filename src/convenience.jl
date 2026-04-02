@@ -248,7 +248,6 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
 
     Natm = size(αs, 1)
     Npad = 512
-    cmem_mac = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
 
     σ_v = G(star.ξ)
 
@@ -258,6 +257,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         gpu_mem_cont = _make_gpu_mem()
         cmem = ConvolutionMemory(Nλ, Natm, Npad; T=G)
         cmem_cont = ConvolutionMemory(Nλ, Natm, Npad; T=G)
+        cmem_mac = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
 
         cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
         cfunc_dt_flux = cfunc_flux_struct.cfunc_dt
@@ -296,6 +296,19 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         bytes_shared = Natm * (Nλ * sizeof(G) + L_est * sizeof(G) + nfreq * sizeof(Complex{G}))
         bytes_per_tile_total = 2 * (bytes_per_tile + bytes_work)  # dual-stream, scales with B
         bytes_fixed = 2 * bytes_shared                             # dual-stream, paid once
+
+        # macro convolution buffers (only when macroturbulence is active)
+        if !iszero(star.ζ)
+            # per-tile: mac_pad (real) + mac_ft (complex), dual-stream
+            bytes_mac_per_tile = Natm1 * (L_est * sizeof(G) + nfreq * sizeof(Complex{G}))
+            bytes_per_tile_total += 2 * bytes_mac_per_tile
+            # fixed: acc_ft + mac_ifft_buf + mac_out, each pair dual-stream
+            bytes_mac_fixed = 2 * Natm1 * (nfreq * sizeof(Complex{G}) +
+                                            L_est * sizeof(G) +
+                                            Nλ * sizeof(G))
+            bytes_fixed += bytes_mac_fixed
+        end
+
         avail = CUDA.free_memory()
         budget = Int(floor(avail * 0.5))
         B_mem = max(1, (budget - bytes_fixed) ÷ bytes_per_tile_total)
@@ -362,8 +375,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
 
         # precompute macro kernel FFTs for all unique μ values (batched)
         if !iszero(star.ζ)
-            L_mac = cmem_mac.L
-            pad_left_mac = cmem_mac.pad_left
+            L_mac, _, pad_left_mac, _ = _conv_mem_geometry(Nλ, Npad)
             nfreq_mac = fld(L_mac, 2) + 1
             i0_mac = Nλ ÷ 2 + 1
 

@@ -183,7 +183,8 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     # separate memory for total and continuum streams
     bcmem      = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad; T=T)
     bcmem_cont = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad; T=T)
-    cmem_mac   = FT.MacroConvolutionMemory(Nλ, Natm1, Npad; T=T)
+    # only geometry needed for disk integration macro path (matches production)
+    L_mac, _, pad_left_mac, _ = FT._conv_mem_geometry(Nλ, Npad)
 
     # pre-upload all tile parameters (matches production)
     all_μ_tiles_gpu = CuArray(T.(μs_cpu))
@@ -206,8 +207,6 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     bcmem_cont.signal_cached = true
 
     # batched macro kernel precomputation (matches production)
-    L_mac = cmem_mac.L
-    pad_left_mac = cmem_mac.pad_left
     nfreq_mac = fld(L_mac, 2) + 1
     i0_mac = Nλ ÷ 2 + 1
     unique_μ_sorted = sort(unique(T.(μs_cpu)))
