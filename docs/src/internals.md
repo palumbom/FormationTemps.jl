@@ -12,6 +12,7 @@ FormationTemps.jl provides a few high-level convenience wrappers to produce flux
 
 ```@docs
 calc_formation_temp
+calc_formation_temp_chunked
 StellarProps
 FormTempResult
 ```

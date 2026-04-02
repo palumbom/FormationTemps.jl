@@ -6,10 +6,8 @@ and a Doppler shift, using FFT convolution. The kernel width is wavelength-depen
 (constant in velocity units): σ(x) = x·σ_v/c.
 
 Scalar `μ_v` and `σ_v` apply the same kernel to every row; vectors specify per-row
-values. The GPU implementation ([`convolve_wavelength_axis_gpu`](@ref)) builds the same
+values. The GPU implementation (`convolve_wavelength_axis_gpu`) builds the same
 kernel on device, so CPU and GPU agree to floating-point precision.
-
-See also: [`convolve_wavelength_axis_gpu`](@ref)
 """
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::T, σ_v::T) where {T<:AF}
     Δλ = median(diff(xs))

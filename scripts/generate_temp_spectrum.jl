@@ -33,15 +33,15 @@ cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
 tmpdir = joinpath(outdir, "tmp")
 if !isdir(tmpdir); mkdir(tmpdir); end
-outfile = joinpath(outdir, "temp_spectrum_$(wav_label)_chunks_debug.h5")
-outfile_1d = joinpath(outdir, "temp_spectrum_$(wav_label)_1D_debug.h5")
+outfile = joinpath(outdir, "temp_spectrum_$(wav_label)_chunks_new.h5")
+outfile_1d = joinpath(outdir, "temp_spectrum_$(wav_label)_1D_new.h5")
 
 # get the linelist
 linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
-wls = [l.wl * 1e8 for l in linelist]
-idx1 = findfirst(wls .>= 5000.0)
-idx2 = findfirst(wls .>= 5300.0)
-linelist = linelist[idx1:idx2]
+# wls = [l.wl * 1e8 for l in linelist]
+# idx1 = findfirst(wls .>= 3000.0)
+# idx2 = findfirst(wls .>= 4000.0)
+# linelist = linelist[idx1:idx2]
 
 # convert to air wavelengths
 if !vacuum_wavs
@@ -81,7 +81,7 @@ chunk_width = 50.0    # Å per wavelength chunk
 wing_padding = 30.0   # Å beyond chunk edges for linelist selection
 overlap = 5.0         # Å overlap between chunks for stitching
 Δλ = 0.001
-Nϕ = 32
+Nϕ = 128
 buffer = 3.0
 
 println(">>> Synthesizing chunks...")
@@ -143,7 +143,7 @@ if isfile(outfile)
     end
 end
 
-println(">>> Splicing chunks...")
+println(">>> Splicing chunks (blend)...")
 h5open(outfile, "r") do h5in
     chunk_names = sort(filter(name -> startswith(name, "chunk_"), collect(keys(h5in))))
     nchunks = length(chunk_names)
@@ -151,19 +151,74 @@ h5open(outfile, "r") do h5in
         error("No chunk groups found in $(outfile).")
     end
 
-    # chunks are already in wavelength order; compute centers for midpoint stitching
-    centers = zeros(Float64, nchunks)
-    for (i, group_name) in enumerate(chunk_names)
-        g = h5in[group_name]
-        wavs = vec(read(g["wavs"]))
-        centers[i] = 0.5 * (first(wavs) + last(wavs))
+    # read all chunks into memory for blending
+    raw_wavs  = Vector{Vector{Float64}}(undef, nchunks)
+    raw_flux  = Vector{Vector{Float64}}(undef, nchunks)
+    raw_temp  = Vector{Vector{Float64}}(undef, nchunks)
+    raw_cfunc = Vector{Matrix{Float64}}(undef, nchunks)
+    raw_lc    = Vector{Vector{Float64}}(undef, nchunks)
+    for (i, gn) in enumerate(chunk_names)
+        g = h5in[gn]
+        raw_wavs[i]  = vec(read(g["wavs"]))
+        raw_flux[i]  = vec(read(g["flux"]))
+        raw_temp[i]  = vec(read(g["temp"]))
+        raw_cfunc[i] = read(g["cfunc"])
+        raw_lc[i]    = vec(read(g["line_centers"]))
     end
 
+    # blend: accumulate starting from chunk 1, linearly crossfade in overlap
+    N_ov = max(0, round(Int, overlap / Δλ) + 1)
+
+    all_wavs  = copy(raw_wavs[1])
+    all_flux  = copy(raw_flux[1])
+    all_temps = copy(raw_temp[1])
+    all_cfunc = copy(raw_cfunc[1])
+    all_lc    = copy(raw_lc[1])
+
+    for i in 2:nchunks
+        Nλ_new = length(raw_wavs[i])
+        N_ov_actual = min(N_ov, length(all_wavs), Nλ_new)
+
+        # blend the overlap region
+        for k in 1:N_ov_actual
+            w_new = Float64(k) / Float64(N_ov_actual + 1)
+            w_old = 1.0 - w_new
+            acc_idx = length(all_wavs) - N_ov_actual + k
+            all_flux[acc_idx]  = w_old * all_flux[acc_idx]  + w_new * raw_flux[i][k]
+            all_temps[acc_idx] = w_old * all_temps[acc_idx] + w_new * raw_temp[i][k]
+            all_cfunc[:, acc_idx] .= w_old .* all_cfunc[:, acc_idx] .+ w_new .* raw_cfunc[i][:, k]
+        end
+
+        # append the non-overlapping tail
+        if N_ov_actual < Nλ_new
+            tail = (N_ov_actual + 1):Nλ_new
+            append!(all_wavs, raw_wavs[i][tail])
+            append!(all_flux, raw_flux[i][tail])
+            append!(all_temps, raw_temp[i][tail])
+            all_cfunc = hcat(all_cfunc, raw_cfunc[i][:, tail])
+            append!(all_lc, raw_lc[i][filter(j -> raw_lc[i][j] > all_wavs[end - length(tail)], eachindex(raw_lc[i]))])
+        end
+    end
+    all_lc = sort(unique(all_lc))
+
+    # trim to actual linelist extent + buffer
+    wls_Å = [l.wl * 1e8 for l in linelist]
+    trim_lo = first(wls_Å) - buffer
+    trim_hi = last(wls_Å) + buffer
+    keep = (all_wavs .>= trim_lo) .& (all_wavs .<= trim_hi)
+    all_wavs  = all_wavs[keep]
+    all_flux  = all_flux[keep]
+    all_temps = all_temps[keep]
+    all_cfunc = all_cfunc[:, keep]
+    all_lc = all_lc[(all_lc .>= trim_lo) .& (all_lc .<= trim_hi)]
+
+    # write blended result as a single group
     h5open(outfile_1d, "w") do h5out
         HDF5.attributes(h5out)["chunk_width"] = chunk_width
         HDF5.attributes(h5out)["n_lines"] = length(linelist)
         HDF5.attributes(h5out)["n_chunks"] = nchunks
         HDF5.attributes(h5out)["spliced"] = 1
+        HDF5.attributes(h5out)["stitch_mode"] = "blend"
         HDF5.attributes(h5out)["Teff"] = star_props.Teff
         HDF5.attributes(h5out)["logg"] = star_props.logg
         HDF5.attributes(h5out)["Fe_H"] = star_props.Fe_H
@@ -174,36 +229,18 @@ h5open(outfile, "r") do h5in
         HDF5.attributes(h5out)["i_star"] = star_props.istar
         HDF5.attributes(h5out)["wavelength_frame"] = wav_label
 
-        # include atmosphere data in the same output file
         g_atm = create_group(h5out, "model_atmosphere")
         g_atm["zs"] = zs
         g_atm["nd"] = nd
         g_atm["Ts"] = Ts
         g_atm["τs_ref"] = τs_ref
 
-        for i in eachindex(chunk_names)
-            g_in = h5in[chunk_names[i]]
-            wavs = vec(read(g_in["wavs"]))
-            flux = vec(read(g_in["flux"]))
-            temp = vec(read(g_in["temp"]))
-            cfunc = read(g_in["cfunc"])
-            line_centers = vec(read(g_in["line_centers"]))
-
-            left_bound = i == 1 ? -Inf : 0.5 * (centers[i - 1] + centers[i])
-            right_bound = i == nchunks ? Inf : 0.5 * (centers[i] + centers[i + 1])
-            keep = (wavs .>= left_bound) .& (wavs .< right_bound)
-
-            # filter line centers to the trimmed wavelength range
-            wavs_kept = wavs[keep]
-            lc_keep = (line_centers .>= first(wavs_kept)) .& (line_centers .<= last(wavs_kept))
-
-            g_out = create_group(h5out, @sprintf("chunk_%04d", i))
-            g_out["line_centers"] = line_centers[lc_keep]
-            g_out["wavs"] = wavs_kept
-            g_out["flux"] = flux[keep]
-            g_out["temp"] = temp[keep]
-            g_out["cfunc"] = cfunc[:, keep]
-        end
+        g_out = create_group(h5out, "chunk_0001")
+        g_out["line_centers"] = all_lc
+        g_out["wavs"] = all_wavs
+        g_out["flux"] = all_flux
+        g_out["temp"] = all_temps
+        g_out["cfunc"] = all_cfunc
     end
 end
 

@@ -92,8 +92,8 @@ if show_spliced
     T_mids = 0.5 .* (Ts_atm[1:nrows] .+ Ts_atm[2:nrows+1])
 
     # set to (λ_lo, λ_hi) to zoom in, or nothing for full range
-    # zoom_wav = nothing
-    zoom_wav = (5024.0, 5025.0)
+    zoom_wav = nothing
+    # zoom_wav = (5024.0, 5025.0)
 
     fig3, (ax3a, ax3b) = plt.subplots(2, 1, sharex=true, figsize=(10, 6),
                                        gridspec_kw=Dict("height_ratios" => [1, 2]))
@@ -103,13 +103,12 @@ if show_spliced
     ax3a.set_ylabel("Normalized Flux")
     ax3a.tick_params(labelbottom=false)
 
-    # column-normalize: each wavelength bin scaled to its own peak,
-    # so line and continuum formation depths are equally visible
-    col_max = maximum(cfunc_spliced, dims=1)
-    cfunc_plot = cfunc_spliced ./ col_max
-
-    im = ax3b.pcolormesh(wavs_spliced, T_mids, cfunc_plot,
-                          cmap="inferno", shading="auto", rasterized=true)
+    # log-scaled (no column normalization)
+    colors = pyimport("matplotlib.colors")
+    vmin = maximum(cfunc_spliced) * 1e-4  # clip 4 decades below peak
+    im = ax3b.pcolormesh(wavs_spliced, T_mids, cfunc_spliced,
+                          cmap="inferno", shading="auto", rasterized=true,
+                          norm=colors.LogNorm(vmin=vmin, vmax=maximum(cfunc_spliced)))
     ax3b.invert_yaxis()
     ax3b.set_xlabel("Wavelength [\\AA]")
     ax3b.set_ylabel("Temperature [K]")
@@ -121,7 +120,7 @@ if show_spliced
 
     divider_b = axes_grid1.make_axes_locatable(ax3b)
     cax = divider_b.append_axes("right", size="2%", pad=0.05)
-    cbar = fig3.colorbar(im, cax=cax, label="Cont. Fn. (column norm.)")
+    cbar = fig3.colorbar(im, cax=cax, label="Cont. Fn. (log scale)")
     cbar.ax.tick_params(length=0)
     cbar.ax.grid(false)
 
@@ -141,6 +140,7 @@ ax2.set_xlabel("Wavelength [\\AA]")
 ax2.set_ylabel("Formation Temperature [K]")
 ax2.legend()
 fig2.savefig("temp_spectrum.pdf", bbox_inches="tight")
+plt.show()
 plt.clf(); plt.close()
 plt.close("all")
 plt.close()
