@@ -13,7 +13,7 @@ datadir = joinpath(FT.moddir, "benchmarks", "data")
 # ── setup ──────────────────────────────────────────────────────────────────────
 use_gpu = FT.GPU_DEFAULT
 run_pertile = true
-run_e2e = true
+run_e2e = false
 println("GPU available: ", use_gpu)
 
 # Fe I 6301 & 6302 lines
@@ -34,7 +34,7 @@ vsini = 2100.0
 ζ_RT = 3500.0
 ξ = 850.0
 Nϕ = 128
-Δλ = 0.005
+Δλ = 0.0025
 
 star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
@@ -80,14 +80,16 @@ println("  Unique μ = ", unique_μs)
 println("  Threads  = ", Threads.nthreads())
 println()
 
-iqr(x) = quantile(x, 0.75) - quantile(x, 0.25)
-iqr_ms(trial) = (quantile(trial.times, 0.75) - quantile(trial.times, 0.25)) / 2e6
+# ── helpers ───────────────────────────────────────────────────────────────────
+med_s(trial) = median(trial).time / 1e9          # median in seconds
+iqr_s(trial) = (quantile(trial.times, 0.75) -    # IQR in seconds
+                quantile(trial.times, 0.25)) / 1e9
 
 # ── CPU per-tile benchmark ────────────────────────────────────────────────────
 # mirrors the production tile loop in convenience.jl: uses CPUTileWorkspace with
-# in-place convolutions, and times both total + continuum paths
-function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, z_rot_cpu;
-                               n_repeat=10)
+# in-place convolutions, and times both total + continuum paths.
+# BenchmarkTools handles warmup, GC fencing, and statistical analysis.
+function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, z_rot_cpu)
     T = Float64
     Natm = length(atm_cpu.zs)
     Nλ = length(λs_korg)
@@ -102,55 +104,66 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
 
     σ_v_scalar = star.ξ
     ws = FT.CPUTileWorkspace(T, Natm, Nλ)
+    μ_tile = μs_cpu[1]
+    μ_v_scalar = T(z_rot_cpu[1] * FT.c_ms)
 
-    t_micro = zeros(n_repeat)
-    t_tau = zeros(n_repeat)
-    t_cfunc = zeros(n_repeat)
-    t_macro = zeros(n_repeat)
-
-    for r in 1:n_repeat
-        μ_tile = μs_cpu[1]
-        μ_v_scalar = T(z_rot_cpu[1] * FT.c_ms)
-
-        # total path (in-place, matching production scalar dispatch)
-        t_micro[r] = @elapsed begin
-            FT._convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, μ_v_scalar, σ_v_scalar, ws)
-        end
-        t_tau[r] = @elapsed _calc_tau_cpu!(μ_tile, ws.αs_broad, ws.τs_int)
-        t_cfunc[r] = @elapsed begin
-            FT.calc_intensity_cfunc_cpu!(ws.cfunc_int, Ts, λs_korg, ws.τs_int)
-            @views ws.cfunc_dt_int .= ws.cfunc_int .* (ws.τs_int[2:end, :] .- ws.τs_int[1:end-1, :])
-        end
-        t_macro[r] = @elapsed begin
-            FT._convolve_macro_inplace!(ws.macro_out, λs_korg, ws.cfunc_dt_int, star.ζ, μ_tile, ws)
-        end
-
-        # continuum path (in-place, matching production scalar dispatch)
-        t_micro[r] += @elapsed begin
-            FT._convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, μ_v_scalar, σ_v_scalar, ws)
-        end
-        t_tau[r] += @elapsed _calc_tau_cpu!(μ_tile, ws.αs_cont_broad, ws.τs_int_cont)
-        t_cfunc[r] += @elapsed begin
-            FT.calc_intensity_cfunc_cpu!(ws.cfunc_int_cont, Ts, λs_korg, ws.τs_int_cont)
-            @views ws.cfunc_dt_int_cont .= ws.cfunc_int_cont .* (ws.τs_int_cont[2:end, :] .- ws.τs_int_cont[1:end-1, :])
-        end
-        t_macro[r] += @elapsed begin
-            FT._convolve_macro_inplace!(ws.macro_out, λs_korg, ws.cfunc_dt_int_cont, star.ζ, μ_tile, ws)
-        end
+    # microturbulence (total + continuum)
+    trial_micro = @benchmark begin
+        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $μ_v_scalar, $σ_v_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $μ_v_scalar, $σ_v_scalar, $ws)
     end
 
-    return (micro=median(t_micro), tau=median(t_tau),
-            cfunc=median(t_cfunc), macro_conv=median(t_macro),
-            micro_iqr=iqr(t_micro), tau_iqr=iqr(t_tau),
-            cfunc_iqr=iqr(t_cfunc), macro_conv_iqr=iqr(t_macro))
+    # tau integration (total + continuum); micro output needed as setup
+    trial_tau = @benchmark begin
+        $_calc_tau_cpu!($μ_tile, $ws.αs_broad, $ws.τs_int)
+        $_calc_tau_cpu!($μ_tile, $ws.αs_cont_broad, $ws.τs_int_cont)
+    end setup=begin
+        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $μ_v_scalar, $σ_v_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $μ_v_scalar, $σ_v_scalar, $ws)
+    end
+
+    # cfunc (total + continuum); micro + tau output needed as setup
+    trial_cfunc = @benchmark begin
+        FT.calc_intensity_cfunc_cpu!($ws.cfunc_int, $Ts, $λs_korg, $ws.τs_int)
+        @views $ws.cfunc_dt_int .= $ws.cfunc_int .* ($ws.τs_int[2:end, :] .- $ws.τs_int[1:end-1, :])
+        FT.calc_intensity_cfunc_cpu!($ws.cfunc_int_cont, $Ts, $λs_korg, $ws.τs_int_cont)
+        @views $ws.cfunc_dt_int_cont .= $ws.cfunc_int_cont .* ($ws.τs_int_cont[2:end, :] .- $ws.τs_int_cont[1:end-1, :])
+    end setup=begin
+        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $μ_v_scalar, $σ_v_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $μ_v_scalar, $σ_v_scalar, $ws)
+        $_calc_tau_cpu!($μ_tile, $ws.αs_broad, $ws.τs_int)
+        $_calc_tau_cpu!($μ_tile, $ws.αs_cont_broad, $ws.τs_int_cont)
+    end
+
+    # macro convolution (total + continuum); full pipeline as setup
+    trial_macro = @benchmark begin
+        FT._convolve_macro_inplace!($ws.macro_out, $λs_korg, $ws.cfunc_dt_int, $(star.ζ), $μ_tile, $ws)
+        FT._convolve_macro_inplace!($ws.macro_out, $λs_korg, $ws.cfunc_dt_int_cont, $(star.ζ), $μ_tile, $ws)
+    end setup=begin
+        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $μ_v_scalar, $σ_v_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $μ_v_scalar, $σ_v_scalar, $ws)
+        $_calc_tau_cpu!($μ_tile, $ws.αs_broad, $ws.τs_int)
+        $_calc_tau_cpu!($μ_tile, $ws.αs_cont_broad, $ws.τs_int_cont)
+        FT.calc_intensity_cfunc_cpu!($ws.cfunc_int, $Ts, $λs_korg, $ws.τs_int)
+        @views $ws.cfunc_dt_int .= $ws.cfunc_int .* ($ws.τs_int[2:end, :] .- $ws.τs_int[1:end-1, :])
+        FT.calc_intensity_cfunc_cpu!($ws.cfunc_int_cont, $Ts, $λs_korg, $ws.τs_int_cont)
+        @views $ws.cfunc_dt_int_cont .= $ws.cfunc_int_cont .* ($ws.τs_int_cont[2:end, :] .- $ws.τs_int_cont[1:end-1, :])
+    end
+
+    return (micro=med_s(trial_micro), tau=med_s(trial_tau),
+            cfunc=med_s(trial_cfunc), macro_conv=med_s(trial_macro),
+            micro_iqr=iqr_s(trial_micro), tau_iqr=iqr_s(trial_tau),
+            cfunc_iqr=iqr_s(trial_cfunc), macro_conv_iqr=iqr_s(trial_macro))
 end
 
 # ── GPU batched kernel benchmark ──────────────────────────────────────────────
 # mirrors the production GPU tile loop in convenience.jl: dual-stream total +
 # continuum, pre-uploaded tile params with tile_offset, batched Fourier-domain
-# macro accumulation, batched macro kernel precomputation
+# macro accumulation, batched macro kernel precomputation.
+# BenchmarkTools handles warmup, GC fencing, and statistical analysis.
+# CUDA.@sync ensures all streams are drained before the timer stops.
 function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu;
-                               n_repeat=10, B=8, gpu_precision::Type{<:AbstractFloat}=Float64)
+                               B=8, gpu_precision::Type{<:AbstractFloat}=Float64)
     T = gpu_precision
     A_X = star.A_X
     korg_atm = Korg.interpolate_marcs(star.Teff, star.logg, A_X)
@@ -223,11 +236,13 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     mul!(kernel_cache_flat, plan_kc, kbuf_mac)
     μ_idx_gpu = CuArray(Int32[μ_to_idx[T(μs_cpu[i])] for i in 1:Ntiles])
 
-    # batched macro buffers + plans
-    mac_pad      = CUDA.zeros(T, B * Natm1, L_mac)
-    mac_pad_cont = CUDA.zeros(T, B * Natm1, L_mac)
-    mac_ft_buf      = CUDA.zeros(Complex{T}, B * Natm1, nfreq_mac)
-    mac_ft_buf_cont = CUDA.zeros(Complex{T}, B * Natm1, nfreq_mac)
+    # batched macro buffers: alias over bcmem conv buffers (matches production)
+    @assert B * Natm1 * L_mac <= B * Natm * L_mac          # Natm1 < Natm
+    @assert B * Natm1 * nfreq_mac <= B * Natm * nfreq_mac
+    mac_pad      = unsafe_wrap(CuArray{T, 2}, pointer(bcmem.conv_gpu), (B * Natm1, L_mac))
+    mac_pad_cont = unsafe_wrap(CuArray{T, 2}, pointer(bcmem_cont.conv_gpu), (B * Natm1, L_mac))
+    mac_ft       = unsafe_wrap(CuArray{Complex{T}, 2}, pointer(bcmem.conv_ft_gpu), (B * Natm1, nfreq_mac))
+    mac_ft_cont  = unsafe_wrap(CuArray{Complex{T}, 2}, pointer(bcmem_cont.conv_ft_gpu), (B * Natm1, nfreq_mac))
     plan_mac_fwd      = CUDA.CUFFT.plan_rfft(mac_pad, 2)
     plan_mac_fwd_cont = CUDA.CUFFT.plan_rfft(mac_pad_cont, 2)
     acc_ft      = CUDA.zeros(Complex{T}, Natm1, nfreq_mac)
@@ -237,72 +252,80 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     stream_cont  = CUDA.CuStream()
     CUDA.synchronize()
 
-    # timing per batch (dual-stream overlap)
-    t_micro = zeros(n_repeat)
-    t_tau_cfunc = zeros(n_repeat)
-    t_macro = zeros(n_repeat)
-    local αs_conv, αs_conv_c
-
-    for r in 1:n_repeat
+    # Each closure includes CUDA.synchronize() so @benchmark doesn't need CUDA.@sync
+    # (which conflicts with @benchmark's setup= parsing).
+    αs_conv   = Ref{Any}(nothing)
+    αs_conv_c = Ref{Any}(nothing)
+    function run_micro!()
+        CUDA.stream!(stream_total) do
+            αs_conv[] = FT.convolve_wavelength_axis_batched!(bcmem, λs_T, αs_T,
+                all_μ_v_gpu, σ_v, B; tile_offset=0)
+        end
+        CUDA.stream!(stream_cont) do
+            αs_conv_c[] = FT.convolve_wavelength_axis_batched!(bcmem_cont, λs_T, αs_cont_T,
+                all_μ_v_gpu, σ_v, B; tile_offset=0)
+        end
         CUDA.synchronize()
-        fill!(acc_ft, zero(Complex{T}))
-        fill!(acc_ft_cont, zero(Complex{T}))
+    end
 
-        t_micro[r] = CUDA.@elapsed begin
-            CUDA.stream!(stream_total) do
-                αs_conv = FT.convolve_wavelength_axis_batched!(bcmem, λs_T, αs_T,
-                    all_μ_v_gpu, σ_v, B; tile_offset=0)
-            end
-            CUDA.stream!(stream_cont) do
-                αs_conv_c = FT.convolve_wavelength_axis_batched!(bcmem_cont, λs_T, αs_cont_T,
-                    all_μ_v_gpu, σ_v, B; tile_offset=0)
-            end
+    function run_tau_cfunc!()
+        CUDA.stream!(stream_total) do
+            FT.calc_tau_cfunc_dt_fused!(cfdt_batch, αs_conv[],
+                log_τ_ref, ifactor_base, all_μ_tiles_gpu,
+                Ts_gpu, λs_gpu, Natm, B; tile_offset=0)
         end
+        CUDA.stream!(stream_cont) do
+            FT.calc_tau_cfunc_dt_fused!(cfdt_batch_cont, αs_conv_c[],
+                log_τ_ref, ifactor_base, all_μ_tiles_gpu,
+                Ts_gpu, λs_gpu, Natm, B; tile_offset=0)
+        end
+        CUDA.synchronize()
+    end
 
-        t_tau_cfunc[r] = CUDA.@elapsed begin
-            CUDA.stream!(stream_total) do
-                FT.calc_tau_cfunc_dt_fused!(cfdt_batch, αs_conv,
-                    log_τ_ref, ifactor_base, all_μ_tiles_gpu,
-                    Ts_gpu, λs_gpu, Natm, B; tile_offset=0)
-            end
-            CUDA.stream!(stream_cont) do
-                FT.calc_tau_cfunc_dt_fused!(cfdt_batch_cont, αs_conv_c,
-                    log_τ_ref, ifactor_base, all_μ_tiles_gpu,
-                    Ts_gpu, λs_gpu, Natm, B; tile_offset=0)
-            end
+    function run_macro!()
+        CUDA.stream!(stream_total) do
+            ts_pad = (32, 32)
+            bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
+            @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(mac_pad, cfdt_batch,
+                Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
+            mul!(mac_ft, plan_mac_fwd, mac_pad)
+            FT.batched_macro_multiply_accumulate!(acc_ft, mac_ft, kernel_cache_flat,
+                μ_idx_gpu, all_dA_tiles_gpu, Natm1, B; tile_offset=0)
         end
+        CUDA.stream!(stream_cont) do
+            ts_pad = (32, 32)
+            bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
+            @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(mac_pad_cont, cfdt_batch_cont,
+                Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
+            mul!(mac_ft_cont, plan_mac_fwd_cont, mac_pad_cont)
+            FT.batched_macro_multiply_accumulate!(acc_ft_cont, mac_ft_cont, kernel_cache_flat,
+                μ_idx_gpu, all_dA_tiles_gpu, Natm1, B; tile_offset=0)
+        end
+        CUDA.synchronize()
+    end
 
-        t_macro[r] = CUDA.@elapsed begin
-            CUDA.stream!(stream_total) do
-                ts_pad = (32, 32)
-                bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
-                @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(mac_pad, cfdt_batch,
-                    Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-                mul!(mac_ft_buf, plan_mac_fwd, mac_pad)
-                FT.batched_macro_multiply_accumulate!(acc_ft, mac_ft_buf, kernel_cache_flat,
-                    μ_idx_gpu, all_dA_tiles_gpu, Natm1, B; tile_offset=0)
-            end
-            CUDA.stream!(stream_cont) do
-                ts_pad = (32, 32)
-                bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
-                @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(mac_pad_cont, cfdt_batch_cont,
-                    Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-                mul!(mac_ft_buf_cont, plan_mac_fwd_cont, mac_pad_cont)
-                FT.batched_macro_multiply_accumulate!(acc_ft_cont, mac_ft_buf_cont, kernel_cache_flat,
-                    μ_idx_gpu, all_dA_tiles_gpu, Natm1, B; tile_offset=0)
-            end
-        end
+    # microturbulence (dual-stream total + continuum)
+    trial_micro = @benchmark $run_micro!()
+
+    # fused tau + cfunc (needs micro output); micro run as setup
+    trial_tau_cfunc = @benchmark $run_tau_cfunc!() setup=($run_micro!())
+
+    # macro convolution (needs tau+cfunc output); full pipeline as setup,
+    # accumulator reset before each measurement
+    trial_macro = @benchmark $run_macro!() setup=begin
+        $run_micro!()
+        $run_tau_cfunc!()
+        fill!($acc_ft, zero(Complex{$T}))
+        fill!($acc_ft_cont, zero(Complex{$T}))
+        CUDA.synchronize()
     end
 
     # normalize to per-tile cost (each measurement covers B tiles)
-    t_micro      ./= B
-    t_tau_cfunc  ./= B
-    t_macro      ./= B
-
-    return (micro=median(t_micro), tau_cfunc=median(t_tau_cfunc),
-            macro_conv=median(t_macro),
-            micro_iqr=iqr(t_micro), tau_cfunc_iqr=iqr(t_tau_cfunc),
-            macro_conv_iqr=iqr(t_macro))
+    Bf = Float64(B)
+    return (micro=med_s(trial_micro) / Bf, tau_cfunc=med_s(trial_tau_cfunc) / Bf,
+            macro_conv=med_s(trial_macro) / Bf,
+            micro_iqr=iqr_s(trial_micro) / Bf, tau_cfunc_iqr=iqr_s(trial_tau_cfunc) / Bf,
+            macro_conv_iqr=iqr_s(trial_macro) / Bf)
 end
 
 # ── end-to-end benchmark ──────────────────────────────────────────────────────

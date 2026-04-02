@@ -9,7 +9,7 @@ n_physical = Sys.CPU_THREADS ÷ 2
 max_threads = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : n_physical
 
 Nϕ_values = [16, 32, 64, 128, 256]
-Δλ = 0.01
+Δλ = 0.0025
 n_repeat = 8
 
 println("="^60)

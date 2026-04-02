@@ -8,7 +8,7 @@ const DATADIR = joinpath(PROJECT_DIR, "benchmarks", "data")
 n_physical = Sys.CPU_THREADS ÷ 2
 max_threads = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : n_physical
 
-Δλ_values = [0.1, 0.05, 0.025, 0.01, 0.005]
+Δλ_values = [0.1, 0.05, 0.025, 0.01, 0.005, 0.0025]
 Nϕ = 128
 n_repeat = 8
 

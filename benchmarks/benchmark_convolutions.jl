@@ -20,8 +20,8 @@ linelist = vcat([linelist[idx1], linelist[idx2]])
 
 wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
 
-# wavelength grid (Δλ matches all other benchmark scripts)
-Δλ = 0.005
+# wavelength grid
+Δλ = 0.0025
 buffer = 2.0
 λs_korg = range(first(wls) - buffer, last(wls) + buffer, step=Δλ)
 
