@@ -2,10 +2,8 @@ Pkg.activate("/mnt/home/mpalumbo/work/FormationTemps")
 using Revise
 using FormationTemps; FT = FormationTemps
 using Korg
-using HDF5, JLD2, Printf
-using CUDA, BenchmarkTools
-using CSV, DataFrames, Statistics
-using ProgressMeter
+using HDF5, Printf
+using Statistics
 
 # plotting
 import PythonPlot; plt = PythonPlot
@@ -16,9 +14,7 @@ mpl = plt.matplotlib
 # matplotlib backend
 # mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
-inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 axes_grid1 = pyimport("mpl_toolkits.axes_grid1")
-colormaps = pyimport("colormaps")
 
 # get fancy fonts
 plt.rc("text", usetex=true)
@@ -26,17 +22,14 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
 # vacuum or air wavelengths
-vacuum_wavs = true
+vacuum_wavs = false
 wav_label = vacuum_wavs ? "vacuum" : "air"
 
 # set directory
 cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
-h5path_chunks = joinpath(outdir, "temp_spectrum_$(wav_label)_chunks.h5")
-h5path_splice = joinpath(outdir, "temp_spectrum_$(wav_label)_1D.h5")
-
-# h5path_chunks = joinpath(outdir, "temp_spectrum_chunks_debug.h5")
-# h5path_splice = joinpath(outdir, "temp_spectrum_1D_debug.h5")
+h5path_chunks = joinpath(outdir, "temp_spectrum_$(wav_label)_chunks_debug.h5")
+h5path_splice = joinpath(outdir, "temp_spectrum_$(wav_label)_1D_debug.h5")
 
 fig1, ax1 = plt.subplots()
 fig2, ax2 = plt.subplots()
@@ -50,7 +43,7 @@ h5open(h5path_chunks, "r") do h5
         error("No chunk groups found in HDF5 file.")
     end
 
-    # overplot each chunk as-is.
+    # overplot each chunk as-is
     for (idx, group_name) in enumerate(group_names)
         # idx > 10 && break
         g = h5[group_name]
@@ -78,7 +71,7 @@ if show_spliced
 
         _Ts_atm[] = vec(read(h5["model_atmosphere"]["Ts"]))
 
-        # Spliced file is already reconciled: reconstruct by simple concatenation.
+        # spliced file is already reconciled: reconstruct by simple concatenation
         for (idx, group_name) in enumerate(group_names)
             # idx > 10 && break
             g = h5[group_name]
@@ -118,7 +111,7 @@ if show_spliced
     im = ax3b.pcolormesh(wavs_spliced, T_mids, cfunc_plot,
                           cmap="inferno", shading="auto", rasterized=true)
     ax3b.invert_yaxis()
-    ax3b.set_xlabel("Wavelength [Å]")
+    ax3b.set_xlabel("Wavelength [\\AA]")
     ax3b.set_ylabel("Temperature [K]")
 
     # append a dummy axis to ax3a so both rows shrink by the same amount
@@ -139,14 +132,15 @@ if show_spliced
     fig3.savefig("cfunc_heatmap.pdf", bbox_inches="tight")
 end
 
-ax1.set_xlabel("Wavelength [Å]")
+ax1.set_xlabel("Wavelength [\\AA]")
 ax1.set_ylabel("Normalized Flux")
 ax1.legend()
 fig1.savefig("flux_spectrum.pdf", bbox_inches="tight")
 
-ax2.set_xlabel("Wavelength [Å]")
+ax2.set_xlabel("Wavelength [\\AA]")
 ax2.set_ylabel("Formation Temperature [K]")
 ax2.legend()
 fig2.savefig("temp_spectrum.pdf", bbox_inches="tight")
-# plt.show()
 plt.clf(); plt.close()
+plt.close("all")
+plt.close()

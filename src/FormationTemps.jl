@@ -72,10 +72,11 @@ include("disk_calculations.jl")
 
 # convenient high-level functions
 include("convenience.jl")
+include("chunked.jl")
 include("turb_fits.jl")
 
 export round_to_power, elav, searchsortednearest,
-       calc_formation_temp, StellarProps,
+       calc_formation_temp, calc_formation_temp_chunked, StellarProps,
        FormTempResult, vmac_fit, vmic_fit, convolve_gray_rotation,
        convolve_hirano_rotmacro, convolve_iso_rt_macro,
        convolve_rt_macro, gray_rot_kernel, hirano_rotmacro_ft_kernel,

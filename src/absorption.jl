@@ -23,12 +23,13 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist,
                         atm::Atmosphere{T}, A_X::AA{T,1};
                         α_ref_out=nothing, vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs,
-                        ne_warn_thresh=0.1, ne_warn_min=1e-4) where T<:AF
+                        ne_warn_thresh=0.1, ne_warn_min=1e-4,
+                        line_buffer_Å::Float64=10.0) where T<:AF
     compute_alpha!(αs, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ,
                    A_X; α_ref_out=α_ref_out, ref_wl_cm=atm.reference_wavelength,
                    vmic_ref_cms=vmic_ref_cms,
                    partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh,
-                   ne_warn_min=ne_warn_min)
+                   ne_warn_min=ne_warn_min, line_buffer_Å=line_buffer_Å)
     return nothing
 end
 
@@ -56,14 +57,15 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
                         α_ref_out=nothing, ref_wl_cm::Float64=5000.0*ANGSTROM_TO_CM,
                         vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
-                        ne_warn_min=1e-4)
+                        ne_warn_min=1e-4,
+                        line_buffer_Å::Float64=10.0)
     # deal with abundances
     abs_abundances = @. 10^(A_X - 12) # n(X) / n_tot
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
 
     # work in cm
-    cntm_step = ANGSTROM_TO_CM             # 1 Å step for continuum grid
-    line_buffer = 10.0 * ANGSTROM_TO_CM    # 10 Å buffer around line list
+    cntm_step = ANGSTROM_TO_CM
+    line_buffer = line_buffer_Å * ANGSTROM_TO_CM
 
     # wavelengths at which to calculate the continuum
     cntm_wls = range(first(wls) - line_buffer, last(wls) + line_buffer, step=cntm_step)
@@ -144,12 +146,12 @@ end
 function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, atm, A_X;
                         α_ref_out=nothing, vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
-                        ne_warn_min=1e-4)
+                        ne_warn_min=1e-4, line_buffer_Å::Float64=10.0)
     compute_alpha!(αs, αs_cont, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ,
                    A_X; α_ref_out=α_ref_out, ref_wl_cm=atm.reference_wavelength,
                    vmic_ref_cms=vmic_ref_cms,
                    partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh,
-                   ne_warn_min=ne_warn_min)
+                   ne_warn_min=ne_warn_min, line_buffer_Å=line_buffer_Å)
     return nothing
 end
 
@@ -157,14 +159,15 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
                         α_ref_out=nothing, ref_wl_cm::Float64=5000.0*ANGSTROM_TO_CM,
                         vmic_ref_cms::Float64=0.0,
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
-                        ne_warn_min=1e-4)
+                        ne_warn_min=1e-4,
+                        line_buffer_Å::Float64=10.0)
     # deal with abundances
     abs_abundances = @. 10^(A_X - 12) # n(X) / n_tot
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
 
     # work in cm
-    cntm_step = ANGSTROM_TO_CM             # 1 Å step for continuum grid
-    line_buffer = 10.0 * ANGSTROM_TO_CM    # 10 Å buffer around line list
+    cntm_step = ANGSTROM_TO_CM
+    line_buffer = line_buffer_Å * ANGSTROM_TO_CM
 
     # wavelengths at which to calculate the continuum
     cntm_wls = range(first(wls) - line_buffer, last(wls) + line_buffer, step=cntm_step)
