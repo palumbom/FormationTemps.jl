@@ -1,3 +1,4 @@
+let
 # Tests that GPU buffer-returning functions are safe for general use:
 # - calc_intensity_quantities returns independent copies
 # - calc_flux_quantities returns independent copies
@@ -137,4 +138,6 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
             @test maximum(abs.(result_gpu.form_temps[interior] .- result_cpu.form_temps[interior])) < 5.0
         end
     end
+end
+
 end

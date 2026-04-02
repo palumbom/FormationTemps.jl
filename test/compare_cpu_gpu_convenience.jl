@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -56,4 +57,6 @@ end
     T_max = maximum(FT.get_Ts(atm_cpu))
     @test all(result_cpu.form_temps .>= T_min)
     @test all(result_cpu.form_temps .<= T_max)
+end
+
 end

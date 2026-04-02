@@ -1,3 +1,4 @@
+let
 # Verify that GPU convolution output is correctly aligned with the input
 # wavelength grid for both microturbulence and macroturbulence paths.
 # A delta-spike convolved with a near-identity kernel must land at the same index.
@@ -141,4 +142,6 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
         peak_lag = argmax(xcorr_shift) - (Nλ ÷ 2 + 1)
         @test peak_lag == 0
     end
+end
+
 end

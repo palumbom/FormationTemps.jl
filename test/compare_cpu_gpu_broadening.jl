@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -118,4 +119,6 @@ end
             @test rotmacro_error[i] < 5e-8
         end
     end
+end
+
 end

@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -66,4 +67,6 @@ end
     @test maximum(form_temp) <= maximum(Ts)
     @test minimum(zs) <= minimum(form_height)
     @test maximum(form_height) <= maximum(zs)
+end
+
 end

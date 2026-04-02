@@ -1,3 +1,4 @@
+let
 # Tests that both ConvolutionMemory (micro) and MacroConvolutionMemory dispatch
 # correctly through AbstractConvolutionMemory, and that the type hierarchy works
 # end-to-end for all GPU convolution paths.
@@ -127,4 +128,6 @@ gpu_mem = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
         @test !hasproperty(atm_gpu, :vy)
         @test !hasproperty(atm_gpu, :vz)
     end
+end
+
 end

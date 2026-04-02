@@ -1,3 +1,4 @@
+let
 # Tests that batched GPU kernels produce results matching their single-tile counterparts.
 using FormationTemps; FT = FormationTemps
 using Korg
@@ -195,4 +196,6 @@ Natm1 = Natm - 1
             @test αs_batch[(bi-1)*Natm+1:bi*Natm, :] ≈ αs_single atol=1e-10
         end
     end
+end
+
 end

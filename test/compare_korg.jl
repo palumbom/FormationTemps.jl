@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -110,4 +111,6 @@ if make_plots
     fig.tight_layout()
     plt.savefig(joinpath(test_plotdir, "compare_korg.pdf"), bbox_inches="tight")
     plt.close()
+end
+
 end

@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -69,4 +70,6 @@ if make_plots
     ax.legend()
     fig.savefig(joinpath(test_plotdir, "integrate_aniso.pdf"), bbox_inches="tight")
     plt.close()
+end
+
 end

@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -125,4 +126,6 @@ end
 
     rel_error = maximum(abs.((cfunc_cpu .- cfunc_gpu) ./ cfunc_cpu)[:, interior])
     @test rel_error < 1e-2
+end
+
 end

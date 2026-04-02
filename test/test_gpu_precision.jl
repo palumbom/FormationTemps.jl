@@ -1,3 +1,4 @@
+let
 # Tests that gpu_precision=Float32 produces correct results and that all GPU structs
 # are properly typed at the requested precision.
 using FormationTemps; FT = FormationTemps
@@ -335,4 +336,6 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
         @test eltype(res_hirano) == Float32
         @test maximum(abs.(Float64.(res_hirano) .- ref_hirano)) / maximum(abs.(ref_hirano)) < 5e-3
     end
+end
+
 end

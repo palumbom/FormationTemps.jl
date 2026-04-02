@@ -1,3 +1,4 @@
+let
 # Tests that fused GPU kernels produce bit-identical results to the
 # non-fused (separate kernel launch) equivalents.
 using FormationTemps; FT = FormationTemps
@@ -103,4 +104,6 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
         @test Array(flux_f) ≈ Array(flux_nf)
         @test Array(cfunc_f) ≈ Array(cfunc_nf)
     end
+end
+
 end

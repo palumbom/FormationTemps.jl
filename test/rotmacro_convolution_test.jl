@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -96,3 +97,5 @@ end
     @test maximum(abs.(flux_iso_rt_cpu .- flux_iso_rt_gpu)) / norm < 1e-3
 end
 
+
+end

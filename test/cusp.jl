@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -66,4 +67,6 @@ if make_plots
     ax.set_title("{\\rm Anisotropic RT macro (mu = $(μ_val))}")
     fig.savefig(joinpath(test_plotdir, "cusp.pdf"), bbox_inches="tight")
     plt.close()
+end
+
 end

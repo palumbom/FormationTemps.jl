@@ -1,3 +1,4 @@
+let
 using FormationTemps; FT = FormationTemps
 using Korg
 using CUDA
@@ -53,4 +54,6 @@ Nϕ = 16
     @test all(result_cpu.form_temps .<= T_max)
     @test all(result_gpu.form_temps .>= T_min)
     @test all(result_gpu.form_temps .<= T_max)
+end
+
 end

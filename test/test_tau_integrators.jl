@@ -1,3 +1,4 @@
+let
 # test that the anchored and Bézier τ integrators produce physically consistent
 # results, and that the fused tau+cfunc kernel matches the unfused pipeline.
 using FormationTemps; FT = FormationTemps
@@ -158,4 +159,6 @@ Ts_gpu = CuArray{Float64}(atm_gpu.Ts)
 
         @test Array(cfdt_offset) ≈ Array(cfdt_direct) atol=1e-14
     end
+end
+
 end

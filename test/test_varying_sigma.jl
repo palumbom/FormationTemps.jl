@@ -1,3 +1,4 @@
+let
 # Tests for microturbulence dispatch: scalar, mixed, and vector overloads.
 using FormationTemps; FT = FormationTemps
 using Korg
@@ -150,4 +151,6 @@ Npad = 512
 
         @test maximum(abs.(result_scalar .- result_vector)) / maximum(abs.(result_scalar)) < 1e-10
     end
+end
+
 end

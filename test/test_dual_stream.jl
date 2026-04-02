@@ -1,3 +1,4 @@
+let
 # Tests that the dual-stream GPU path (total + continuum on separate CUDA streams)
 # produces results consistent with the CPU reference, for both ζ=0 and ζ≠0.
 using FormationTemps; FT = FormationTemps
@@ -76,4 +77,6 @@ Nϕ = 16
         @test result1.form_temps == result2.form_temps
         @test result1.cont_func == result2.cont_func
     end
+end
+
 end
