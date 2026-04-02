@@ -36,6 +36,7 @@ if !isdir(tmpdir); mkdir(tmpdir); end
 outfile = joinpath(outdir, "temp_spectrum_$(wav_label)_chunks_new.h5")
 outfile_1d = joinpath(outdir, "temp_spectrum_$(wav_label)_1D_new.h5")
 
+# [doc:linelist-start]
 # get the linelist
 linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_BIG.lin")
 # wls = [l.wl * 1e8 for l in linelist]
@@ -47,6 +48,7 @@ linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_
 if !vacuum_wavs
     linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 end
+# [doc:linelist-end]
 
 # parse values values
 wls = [l.wl * 1e8 for l in linelist]
@@ -56,6 +58,7 @@ E_lower = [l.E_lower for l in linelist]
 gamma_rad = [l.gamma_rad for l in linelist]
 gamma_stark = [l.gamma_stark for l in linelist]
 
+# [doc:params-start]
 # set parameters
 Teff = 5777.0
 logg = 4.44
@@ -69,6 +72,8 @@ vsini = 2100.0
 star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                           vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
+# [doc:params-end]
+
 # write out the temperature, etc.
 atm_cpu = FT.AtmosphereCPU(Korg.interpolate_marcs(star_props.Teff, star_props.logg, star_props.A_X))
 zs = atm_cpu.zs
@@ -76,6 +81,7 @@ nd = atm_cpu.nd
 Ts = atm_cpu.Ts
 τs_ref = atm_cpu.τs
 
+# [doc:chunked-start]
 # chunked computation parameters
 chunk_width = 50.0    # Å per wavelength chunk
 wing_padding = 30.0   # Å beyond chunk edges for linelist selection
@@ -84,6 +90,9 @@ overlap = 5.0         # Å overlap between chunks for stitching
 Nϕ = 128
 buffer = 3.0
 
+# [doc:chunked-end]
+
+# [doc:callback-start]
 println(">>> Synthesizing chunks...")
 let chunk_idx = Ref(0)
     h5open(outfile, "w") do h5
@@ -133,6 +142,8 @@ let chunk_idx = Ref(0)
     end
 end
 
+# [doc:callback-end]
+
 # repack output file
 if isfile(outfile)
     let tmp = outfile * ".tmp"
@@ -143,6 +154,7 @@ if isfile(outfile)
     end
 end
 
+# [doc:blend-start]
 println(">>> Splicing chunks (blend)...")
 h5open(outfile, "r") do h5in
     chunk_names = sort(filter(name -> startswith(name, "chunk_"), collect(keys(h5in))))
@@ -243,6 +255,7 @@ h5open(outfile, "r") do h5in
         g_out["cfunc"] = all_cfunc
     end
 end
+# [doc:blend-end]
 
 # repack output file
 if isfile(outfile_1d)

@@ -50,6 +50,7 @@ Index = "Full Index" => "longlist.md"
 Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
                       "Contribution Functions" => "cont_func.md",
                       "Broadening & Convolutions" => "convolutions.md",
+                      "Large Linelists" => "chunked.md",
                       "Parallelization" => "parallelization.md",
                       "Python Tutorial" => "python.md"]
 Internals = "Public Functions" => "internals.md"
