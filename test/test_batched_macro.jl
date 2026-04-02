@@ -239,4 +239,78 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
 
         @test Array(acc_two) ≈ Array(acc_one) rtol=1e-12
     end
+
+    @testset "Aliased buffers (unsafe_wrap) match fresh allocations" begin
+        # the production code aliases mac_pad over bcmem.conv_gpu and mac_ft over
+        # bcmem.conv_ft_gpu via unsafe_wrap to save ~1.1 GB of GPU memory.
+        # verify that the aliased path produces identical results to fresh buffers.
+        bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)
+
+        # reference: freshly allocated mac_pad and mac_ft
+        mac_pad_fresh = CUDA.zeros(Float64, B * Natm1, L_mac)
+        mac_ft_fresh = CUDA.zeros(Complex{Float64}, B * Natm1, nfreq_mac)
+        ts_pad = (32, 32)
+        bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
+        @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(
+            mac_pad_fresh, cfdt_batch, Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
+        plan_fresh = CUDA.CUFFT.plan_rfft(mac_pad_fresh, 2)
+        mul!(mac_ft_fresh, plan_fresh, mac_pad_fresh)
+
+        acc_fresh = CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac)
+        unique_μ_sorted = sort(collect(keys(macro_kernel_cache)))
+        μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
+        kernel_cache_flat = CUDA.zeros(Complex{Float64}, length(unique_μ_sorted), nfreq_mac)
+        let
+            for (i, μ) in enumerate(unique_μ_sorted)
+                copyto!(view(kernel_cache_flat, i, :), macro_kernel_cache[μ])
+            end
+        end
+        μ_idx = CuArray(Int32[μ_to_idx[μ_vals[bi]] for bi in 1:B])
+        dA_gpu = CuArray(Float64.(dA_vals))
+        FT.batched_macro_multiply_accumulate!(acc_fresh, mac_ft_fresh, kernel_cache_flat,
+                                               μ_idx, dA_gpu, Natm1, B)
+
+        # aliased: mac_pad over conv_gpu, mac_ft over conv_ft_gpu
+        # first fill conv_gpu with garbage to prove the alias overwrites it
+        bcmem.conv_gpu .= 999.0
+        bcmem.conv_ft_gpu .= Complex{Float64}(888.0, 777.0)
+
+        mac_pad_alias = unsafe_wrap(CuArray{Float64, 2},
+                                     pointer(bcmem.conv_gpu), (B * Natm1, L_mac))
+        mac_ft_alias = unsafe_wrap(CuArray{Complex{Float64}, 2},
+                                    pointer(bcmem.conv_ft_gpu), (B * Natm1, nfreq_mac))
+
+        fill!(mac_pad_alias, 0.0)
+        @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(
+            mac_pad_alias, cfdt_batch, Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
+        plan_alias = CUDA.CUFFT.plan_rfft(mac_pad_alias, 2)
+        mul!(mac_ft_alias, plan_alias, mac_pad_alias)
+
+        acc_alias = CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac)
+        FT.batched_macro_multiply_accumulate!(acc_alias, mac_ft_alias, kernel_cache_flat,
+                                               μ_idx, dA_gpu, Natm1, B)
+
+        # guard: fresh result must be non-trivial — expected ~1e-10 given
+        # cfdt ~1e-10, dA ~1e-3, B tiles. ensures the ≈ check below is meaningful.
+        acc_fresh_h = Array(acc_fresh)
+        @test maximum(abs.(acc_fresh_h)) > 1e-15
+
+        # aliased result must match fresh allocation
+        acc_alias_h = Array(acc_alias)
+        @test acc_alias_h ≈ acc_fresh_h rtol=1e-10
+
+        # verify conv_gpu alias: data is finite and differs from pre-fill garbage
+        conv_h = Array(bcmem.conv_gpu)
+        @test all(isfinite, conv_h[1:B*Natm1, :])
+        @test conv_h[1, 1] != 999.0
+
+        # verify conv_ft_gpu alias: mac_ft_alias wrote FFT output into backing memory
+        convft_h = Array(bcmem.conv_ft_gpu)
+        @test all(isfinite, convft_h[1:B*Natm1, :])
+        @test convft_h[1, 1] != Complex{Float64}(888.0, 777.0)
+
+        # cuFFT may use rows beyond B*Natm1 as workspace — this is safe because
+        # those rows are dead after micro-conv. document that cuFFT does touch them.
+        @test !all(conv_h[B*Natm1+1:B*Natm, :] .== 999.0)
+    end
 end

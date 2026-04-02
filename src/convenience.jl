@@ -289,23 +289,41 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         use_anchored = gpu_mem.use_anchored
         nfreq = fld(next_fft_friendly_len(Nλ + Npad), 2) + 1
         L_est = next_fft_friendly_len(Nλ + Npad)
-        bytes_per_tile = Natm * (L_est * sizeof(G) + nfreq * sizeof(Complex{G}) * 2)
-        bytes_work = Natm * Nλ * sizeof(G) + Natm1 * Nλ * sizeof(G)
+        bpe = sizeof(G)
+        bpc = sizeof(Complex{G})
 
-        # shared signal buffers (ys_gpu + signal_gpu + signal_ft_gpu), paid once per stream
-        bytes_shared = Natm * (Nλ * sizeof(G) + L_est * sizeof(G) + nfreq * sizeof(Complex{G}))
-        bytes_per_tile_total = 2 * (bytes_per_tile + bytes_work)  # dual-stream, scales with B
-        bytes_fixed = 2 * bytes_shared                             # dual-stream, paid once
+        # per-tile (scales with B): bcmem batched buffers, dual-stream
+        #   conv_gpu (Natm×L real) + kernel_ft_gpu (Natm×nfreq complex) +
+        #   conv_ft_gpu (Natm×nfreq complex)
+        bytes_bcmem_per_tile = Natm * (L_est * bpe + nfreq * bpc * 2)
+
+        # cfdt_batch (Natm1×Nλ real), dual-stream
+        bytes_cfdt_per_tile = Natm1 * Nλ * bpe
+
+        # Bézier path also needs τs_batch (Natm×Nλ) + ds/alphaC (2×Natm), per-stream
+        bytes_bezier_per_tile = use_anchored ? 0 :
+            (Natm * Nλ * bpe + 2 * Natm * bpe)
+
+        bytes_per_tile_total = 2 * (bytes_bcmem_per_tile + bytes_cfdt_per_tile +
+                                    bytes_bezier_per_tile)
+
+        # fixed cost (paid once, not scaling with B):
+        #   bcmem shared: ys_gpu (Natm×Nλ) + signal_gpu (Natm×L) +
+        #                 signal_ft_gpu (Natm×nfreq complex), dual-stream
+        bytes_bcmem_shared = 2 * Natm * (Nλ * bpe + L_est * bpe + nfreq * bpc)
+        #   accumulators: cfunc_flux + cfunc_comp, dual-stream = 4 × (Natm1×Nλ)
+        bytes_accumulators = 4 * Natm1 * Nλ * bpe
+        #   tile parameters: μ_tiles (Ntiles) + dA (Ntiles) + μ_v (Ntiles×Natm)
+        bytes_tile_params = Ntiles * (2 * bpe + Natm * bpe)
+
+        bytes_fixed = bytes_bcmem_shared + bytes_accumulators + bytes_tile_params
 
         # macro convolution buffers (only when macroturbulence is active)
         if !iszero(star.ζ)
-            # per-tile: mac_pad (real) + mac_ft (complex), dual-stream
-            bytes_mac_per_tile = Natm1 * (L_est * sizeof(G) + nfreq * sizeof(Complex{G}))
-            bytes_per_tile_total += 2 * bytes_mac_per_tile
-            # fixed: acc_ft + mac_ifft_buf + mac_out, each pair dual-stream
-            bytes_mac_fixed = 2 * Natm1 * (nfreq * sizeof(Complex{G}) +
-                                            L_est * sizeof(G) +
-                                            Nλ * sizeof(G))
+            # per-tile: mac_pad and mac_ft alias bcmem's conv_gpu and conv_ft_gpu,
+            # so no additional per-tile memory for them.
+            # fixed: acc_ft (complex) + mac_ifft_buf (real) + mac_out (real), dual-stream
+            bytes_mac_fixed = 2 * Natm1 * (nfreq * bpc + L_est * bpe + Nλ * bpe)
             bytes_fixed += bytes_mac_fixed
         end
 
@@ -399,12 +417,18 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             # per-tile μ index
             μ_idx_gpu = CuArray(Int32[μ_to_idx[G(μs_cpu[i])] for i in 1:Ntiles])
 
-            # batched macro buffers + cuFFT plans (one fwd plan shared by both streams;
-            # separate data buffers since streams run concurrently)
-            mac_pad      = CUDA.zeros(G, B * Natm1, L_mac)
-            mac_pad_cont = CUDA.zeros(G, B * Natm1, L_mac)
-            mac_ft      = CUDA.zeros(Complex{G}, B * Natm1, nfreq_mac)
-            mac_ft_cont = CUDA.zeros(Complex{G}, B * Natm1, nfreq_mac)
+            # batched macro buffers: alias bcmem's conv_gpu and conv_ft_gpu to avoid
+            # separate allocations. mac_pad (B*Natm1, L) fits inside conv_gpu (B*Natm, L)
+            # because Natm1 < Natm. They're used sequentially on the same stream:
+            # conv_gpu is consumed by the fused τ+cfunc kernel before mac_pad is written.
+            # unsafe_wrap creates a non-owning CuArray with different shape over the same
+            # flat device memory; cuFFT plans are created on the wrapped arrays.
+            @assert B * Natm1 * L_mac <= B * Natm * L_mac  # Natm1 < Natm
+            @assert B * Natm1 * nfreq_mac <= B * Natm * nfreq_mac
+            mac_pad      = unsafe_wrap(CuArray{G, 2}, pointer(bcmem.conv_gpu), (B * Natm1, L_mac))
+            mac_pad_cont = unsafe_wrap(CuArray{G, 2}, pointer(bcmem_cont.conv_gpu), (B * Natm1, L_mac))
+            mac_ft      = unsafe_wrap(CuArray{Complex{G}, 2}, pointer(bcmem.conv_ft_gpu), (B * Natm1, nfreq_mac))
+            mac_ft_cont = unsafe_wrap(CuArray{Complex{G}, 2}, pointer(bcmem_cont.conv_ft_gpu), (B * Natm1, nfreq_mac))
             plan_mac_fwd      = CUDA.CUFFT.plan_rfft(mac_pad, 2)
             plan_mac_fwd_cont = CUDA.CUFFT.plan_rfft(mac_pad_cont, 2)
 
