@@ -37,7 +37,6 @@ if use_gpu
     include("height_test.jl")
     include("compare_cpu_gpu_convenience.jl")
     include("compare_cpu_gpu_broadening.jl")
-    include("disk_int_error.jl")
     include("test_buffer_safety.jl")
     include("compare_cpu_gpu_disk_integration.jl")
     include("test_convolution_alignment.jl")
@@ -46,6 +45,7 @@ if use_gpu
     include("test_dual_stream.jl")
     include("test_convmem_types.jl")
     include("test_batched_kernels.jl")
+    include("test_tau_integrators.jl")
     include("test_varying_sigma.jl")
     include("test_gpu_precision.jl")
 end

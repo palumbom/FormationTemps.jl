@@ -1,4 +1,4 @@
-E_2(τ) = Korg.RadiativeTransfer.exponential_integral_2(τ)
+E_2(τ) = exponential_integral_2_gpu(τ)
 
 """
     calc_intensity_quantities(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
@@ -529,7 +529,7 @@ function calc_flux_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
     one_over_sqrt3 = one(T) / sqrt(T(3))
     frac1 = T(0.5) * (one(T) - one_over_sqrt3)
     frac2 = T(0.5) * (one(T) + one_over_sqrt3)
-    E2 = Korg.RadiativeTransfer.exponential_integral_2
+    E2 = exponential_integral_2_gpu
     @inbounds for j in 1:length(λs)
         λ_cm = λs[j] * T(ANGSTROM_TO_CM)
         for k in 1:Natm-1
@@ -555,8 +555,80 @@ end
 
 # ── batched kernels ────────────────────────────────────────────────────────────
 
-# batched fused intensity cfunc_dt: one thread per (tile, wavelength), serial over layers
-# τs layout: (B*Natm, Nλ), cfunc_dt layout: (B*(Natm-1), Nλ)
+# fused τ-integration + cfunc_dt: one thread per (tile, wavelength), serial over layers.
+# computes τ in registers (rolling pair) and immediately evaluates the contribution function.
+# eliminates the τs_batch global memory round-trip.
+function calc_tau_cfunc_dt_fused_kernel!(cfunc_dt, αs, log_τ_ref, ifactor_base,
+                                         μ_tiles, μ_off, Ts, λs,
+                                         Natm, Nλ, Bcur, total)
+    idx = threadIdx().x + blockDim().x * (blockIdx().x - Int32(1))
+    sdx = gridDim().x * blockDim().x
+    T = eltype(cfunc_dt)
+    Natm1 = Natm - Int32(1)
+
+    one_over_sqrt3 = one(T) / sqrt(T(3))
+    frac1 = T(0.5) * (one(T) - one_over_sqrt3)
+    frac2 = T(0.5) * (one(T) + one_over_sqrt3)
+
+    for lin in idx:sdx:total
+        b = ((lin - Int32(1)) ÷ Nλ) + Int32(1)
+        j = ((lin - Int32(1)) % Nλ) + Int32(1)
+        inv_μ = one(T) / @inbounds μ_tiles[μ_off + b]
+        off_α  = (b - Int32(1)) * Natm
+        off_cf = (b - Int32(1)) * Natm1
+
+        λ_cm = @inbounds λs[j] * T(ANGSTROM_TO_CM)
+        λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
+        bb_num = T(2.0) * T(h) * (T(c)^2) / λ5
+        bb_x = T(h) * T(c) / (λ_cm * T(kB))
+
+        # rolling τ integration + cfunc_dt in one pass
+        τ_prev = zero(T)
+        @inbounds for k in Int32(1):Natm1
+            f_prev = αs[off_α + k, j]     * ifactor_base[k]     * inv_μ
+            f_curr = αs[off_α + k + Int32(1), j] * ifactor_base[k + Int32(1)] * inv_μ
+            dlog   = log_τ_ref[k + Int32(1)] - log_τ_ref[k]
+            τ_curr = τ_prev + T(0.5) * (f_prev + f_curr) * dlog
+
+            Δτ = τ_curr - τ_prev
+            τ_mid = T(0.5) * (τ_prev + τ_curr)
+
+            τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
+            τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
+
+            dT = Ts[k + Int32(1)] - Ts[k]
+            T1 = Ts[k] + dT * frac1
+            T2 = Ts[k] + dT * frac2
+
+            B1 = bb_num / (exp(bb_x / T1) - one(T))
+            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            f1 = B1 * exp(-τp1)
+            f2 = B2 * exp(-τp2)
+
+            cf = T(0.5) * (f1 + f2) * T(ANGSTROM_TO_CM)
+            cfunc_dt[off_cf + k, j] = cf * Δτ
+
+            τ_prev = τ_curr
+        end
+    end
+    return nothing
+end
+
+function calc_tau_cfunc_dt_fused!(cfunc_dt::CA{T,2}, αs::AA{T,2},
+                                   log_τ_ref::CA{T,1}, ifactor_base::CA{T,1},
+                                   μ_tiles::CA{T,1}, Ts::CA{T,1}, λs::CA{T,1},
+                                   Natm::Int, Bcur::Int; tile_offset::Int=0) where T<:AF
+    Nλ = size(cfunc_dt, 2)
+    total = Bcur * Nλ
+    threads = 256
+    blocks = cld(total, threads)
+    @cuda threads=threads blocks=blocks calc_tau_cfunc_dt_fused_kernel!(
+        cfunc_dt, αs, log_τ_ref, ifactor_base, μ_tiles, Int32(tile_offset),
+        Ts, λs, Int32(Natm), Int32(Nλ), Int32(Bcur), Int32(total))
+    return nothing
+end
+
+# unfused batched cfunc_dt (kept for Bézier path which has a different τ integrator)
 function calc_intensity_cfunc_dt_batched_kernel!(cfunc_dt, τs, Ts, λs,
                                                   Natm, Nλ, Bcur, total)
     idx = threadIdx().x + blockDim().x * (blockIdx().x - 1)
@@ -616,8 +688,38 @@ function calc_intensity_cfunc_dt_batched!(cfunc_dt::CA{T,2}, τs::CA{T,2},
     return nothing
 end
 
-# batched accumulation: one thread per wavelength, loops over B tiles and Natm-1 layers
-# uses Kahan compensated summation to keep O(ε) accuracy across ~10^4 tile additions
+# 2D batched accumulation: one thread per (layer, wavelength), loops over B tiles only.
+# Kahan compensated summation keeps O(ε) accuracy across ~10^4 tile additions.
+# flux is NOT accumulated here — derive it post-loop via sum(cfunc_acc, dims=1).
+function accumulate_batch_2d_kernel!(cfunc_acc, cfunc_comp,
+                                     cfunc_dt, dA_tiles, dA_off, Natm1, Nλ, Bcur)
+    j = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    k = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
+    (j > Nλ || k > Natm1) && return nothing
+    T = eltype(cfunc_acc)
+    @inbounds for b in Int32(1):Bcur
+        val = cfunc_dt[(b - Int32(1)) * Natm1 + k, j] * dA_tiles[dA_off + b]
+        y = val - cfunc_comp[k, j]
+        t = cfunc_acc[k, j] + y
+        cfunc_comp[k, j] = (t - cfunc_acc[k, j]) - y
+        cfunc_acc[k, j] = t
+    end
+    return nothing
+end
+
+function accumulate_batch!(cfunc_acc::CA{T,2}, cfunc_comp::CA{T,2},
+                           cfunc_dt::CA{T,2}, dA_tiles::CA{T,1},
+                           Natm1::Int, Bcur::Int; tile_offset::Int=0) where T<:AF
+    Nλ = Int32(size(cfunc_acc, 2))
+    ts = (32, 16)
+    bs = (cld(Nλ, ts[1]), cld(Natm1, ts[2]))
+    @cuda threads=ts blocks=bs accumulate_batch_2d_kernel!(
+        cfunc_acc, cfunc_comp,
+        cfunc_dt, dA_tiles, Int32(tile_offset), Int32(Natm1), Nλ, Int32(Bcur))
+    return nothing
+end
+
+# legacy 1D accumulation (kept for macro path compatibility)
 function accumulate_batch_kernel!(flux_acc, cfunc_acc, flux_comp, cfunc_comp,
                                   cfunc_dt, dA_tiles, dA_off, Natm1, Nλ, Bcur)
     j = (blockIdx().x - 1) * blockDim().x + threadIdx().x

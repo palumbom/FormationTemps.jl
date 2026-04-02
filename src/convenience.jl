@@ -341,8 +341,6 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         bcmem_cont.signal_cached = true
 
         # batched working arrays (dual-stream)
-        τs_batch      = CUDA.zeros(G, B * Natm, Nλ)
-        τs_batch_cont = CUDA.zeros(G, B * Natm, Nλ)
         cfdt_batch      = CUDA.zeros(G, B * Natm1, Nλ)
         cfdt_batch_cont = CUDA.zeros(G, B * Natm1, Nλ)
 
@@ -353,6 +351,8 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
 
         # Bezier work arrays (only allocated when needed)
         if !use_anchored
+            τs_batch      = CUDA.zeros(G, B * Natm, Nλ)
+            τs_batch_cont = CUDA.zeros(G, B * Natm, Nλ)
             ds_batch      = CUDA.zeros(G, B * Natm)
             alphaC_batch  = CUDA.zeros(G, B * Natm)
             ds_batch_cont = CUDA.zeros(G, B * Natm)
@@ -360,12 +360,8 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         end
 
         # accumulators + Kahan compensation arrays
-        flux_integration = CUDA.zeros(G, Nλ)
-        flux_cont_integration = CUDA.zeros(G, Nλ)
         cfunc_flux_integration = CUDA.zeros(G, Natm1, Nλ)
         cfunc_flux_cont_integration = CUDA.zeros(G, Natm1, Nλ)
-        flux_comp = CUDA.zeros(G, Nλ)
-        flux_cont_comp = CUDA.zeros(G, Nλ)
         cfunc_comp = CUDA.zeros(G, Natm1, Nλ)
         cfunc_cont_comp = CUDA.zeros(G, Natm1, Nλ)
 
@@ -445,19 +441,20 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                 αs_conv = convolve_wavelength_axis_batched!(bcmem, λs_G, αs,
                     all_μ_v_gpu, σ_v, Bcur; tile_offset=tile_offset)
                 if use_anchored
-                    calc_tau_anchored_batched!(all_μ_tiles_gpu, log_τ_ref, ifactor_base,
-                        αs_conv, τs_batch, Natm, Bcur; tile_offset=tile_offset)
+                    calc_tau_cfunc_dt_fused!(cfdt_batch, αs_conv,
+                        log_τ_ref, ifactor_base, all_μ_tiles_gpu,
+                        atm_gpu.Ts_gpu, gpu_mem.λs, Natm, Bcur;
+                        tile_offset=tile_offset)
                 else
                     calc_tau_bezier_batched!(all_μ_tiles_gpu, atm_gpu.zs_gpu,
                         αs_conv, τs_batch, ds_batch, alphaC_batch, Natm, Bcur;
                         tile_offset=tile_offset)
+                    calc_intensity_cfunc_dt_batched!(cfdt_batch, τs_batch,
+                        atm_gpu.Ts_gpu, gpu_mem.λs, Natm, Bcur)
                 end
-                calc_intensity_cfunc_dt_batched!(cfdt_batch, τs_batch,
-                    atm_gpu.Ts_gpu, gpu_mem.λs, Natm, Bcur)
 
                 if iszero(star.ζ)
-                    accumulate_batch!(flux_integration, cfunc_flux_integration,
-                        flux_comp, cfunc_comp,
+                    accumulate_batch!(cfunc_flux_integration, cfunc_comp,
                         cfdt_batch, all_dA_tiles_gpu, Natm1, Bcur;
                         tile_offset=tile_offset)
                 else
@@ -478,19 +475,20 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                 αs_conv_c = convolve_wavelength_axis_batched!(bcmem_cont, λs_G, αs_cont,
                     all_μ_v_gpu, σ_v, Bcur; tile_offset=tile_offset)
                 if use_anchored
-                    calc_tau_anchored_batched!(all_μ_tiles_gpu, log_τ_ref, ifactor_base,
-                        αs_conv_c, τs_batch_cont, Natm, Bcur; tile_offset=tile_offset)
+                    calc_tau_cfunc_dt_fused!(cfdt_batch_cont, αs_conv_c,
+                        log_τ_ref, ifactor_base, all_μ_tiles_gpu,
+                        atm_gpu.Ts_gpu, gpu_mem.λs, Natm, Bcur;
+                        tile_offset=tile_offset)
                 else
                     calc_tau_bezier_batched!(all_μ_tiles_gpu, atm_gpu.zs_gpu,
                         αs_conv_c, τs_batch_cont, ds_batch_cont, alphaC_batch_cont, Natm, Bcur;
                         tile_offset=tile_offset)
+                    calc_intensity_cfunc_dt_batched!(cfdt_batch_cont, τs_batch_cont,
+                        atm_gpu.Ts_gpu, gpu_mem.λs, Natm, Bcur)
                 end
-                calc_intensity_cfunc_dt_batched!(cfdt_batch_cont, τs_batch_cont,
-                    atm_gpu.Ts_gpu, gpu_mem.λs, Natm, Bcur)
 
                 if iszero(star.ζ)
-                    accumulate_batch!(flux_cont_integration, cfunc_flux_cont_integration,
-                        flux_cont_comp, cfunc_cont_comp,
+                    accumulate_batch!(cfunc_flux_cont_integration, cfunc_cont_comp,
                         cfdt_batch_cont, all_dA_tiles_gpu, Natm1, Bcur;
                         tile_offset=tile_offset)
                 else

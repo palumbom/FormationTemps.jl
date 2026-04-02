@@ -6,6 +6,8 @@ CurrentModule = FormationTemps
 
 FormationTemps.jl exposes the broadening kernels and convolution routines it uses internally so they can be applied directly to any spectrum. This page demonstrates each option and compares the convolution approximation to full disk integration.
 
+See the [Public Functions](@ref "Public Functions") page for full API documentation on each function.
+
 ## Disk integration vs. convolution approximation
 
 By default `calc_formation_temp` performs a numerical disk integration over the stellar surface. Passing `convolve=true` instead applies the Hirano et al. (2011) combined rotation + macroturbulence kernel in the Fourier domain. This is much faster, but ultimately an approximation. The code below shows both modes and their difference:
@@ -69,4 +71,10 @@ Markdown.parse("```julia\n" * code * "\n```")
 ```
 ![broadened spectra](static/broadened_spectra.png)
 
-See the [Public Functions](@ref "Public Functions") page for full API documentation on each function.
+## Disk integration convergence
+
+The numerical disk integration approximates the stellar surface with an ``N_\phi \times 2N_\phi`` grid of tiles. The plot below shows how the integrated flux converges toward the direct (no-integration) reference as the grid resolution increases. Both the mean and maximum absolute percent error across all wavelength bins are shown.
+
+![disk integration convergence](static/disk_int_convergence.png)
+
+At ``N_\phi = 128`` (the default), the mean error is well below 1% and the maximum error is on the order of a few tenths of a percent. Doubling to ``N_\phi = 256`` or ``512`` reduces the error further but with diminishing returns and quadratically increasing cost (since the number of visible tiles scales as ``\sim N_\phi^2``). For most applications ``N_\phi = 128`` provides a good balance between accuracy and runtime.

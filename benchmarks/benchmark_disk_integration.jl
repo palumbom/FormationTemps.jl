@@ -191,9 +191,7 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     all_dA_tiles_gpu = CuArray(T.(ones(Ntiles) .* 0.001))  # dummy dA for timing
     all_μ_v_gpu = CuArray(repeat(T.(z_rot_cpu .* FT.c_ms), inner=Natm))
 
-    # working arrays
-    τs_batch      = CUDA.zeros(T, B * Natm, Nλ)
-    τs_batch_cont = CUDA.zeros(T, B * Natm, Nλ)
+    # working arrays (fused kernel: no τs_batch needed for anchored path)
     cfdt_batch      = CUDA.zeros(T, B * Natm1, Nλ)
     cfdt_batch_cont = CUDA.zeros(T, B * Natm1, Nλ)
 
@@ -241,8 +239,7 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
 
     # timing per batch (dual-stream overlap)
     t_micro = zeros(n_repeat)
-    t_tau = zeros(n_repeat)
-    t_cfunc = zeros(n_repeat)
+    t_tau_cfunc = zeros(n_repeat)
     t_macro = zeros(n_repeat)
     local αs_conv, αs_conv_c
 
@@ -262,25 +259,16 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
             end
         end
 
-        t_tau[r] = CUDA.@elapsed begin
+        t_tau_cfunc[r] = CUDA.@elapsed begin
             CUDA.stream!(stream_total) do
-                FT.calc_tau_anchored_batched!(all_μ_tiles_gpu, log_τ_ref, ifactor_base,
-                    αs_conv, τs_batch, Natm, B; tile_offset=0)
+                FT.calc_tau_cfunc_dt_fused!(cfdt_batch, αs_conv,
+                    log_τ_ref, ifactor_base, all_μ_tiles_gpu,
+                    Ts_gpu, λs_gpu, Natm, B; tile_offset=0)
             end
             CUDA.stream!(stream_cont) do
-                FT.calc_tau_anchored_batched!(all_μ_tiles_gpu, log_τ_ref, ifactor_base,
-                    αs_conv_c, τs_batch_cont, Natm, B; tile_offset=0)
-            end
-        end
-
-        t_cfunc[r] = CUDA.@elapsed begin
-            CUDA.stream!(stream_total) do
-                FT.calc_intensity_cfunc_dt_batched!(cfdt_batch, τs_batch,
-                    Ts_gpu, λs_gpu, Natm, B)
-            end
-            CUDA.stream!(stream_cont) do
-                FT.calc_intensity_cfunc_dt_batched!(cfdt_batch_cont, τs_batch_cont,
-                    Ts_gpu, λs_gpu, Natm, B)
+                FT.calc_tau_cfunc_dt_fused!(cfdt_batch_cont, αs_conv_c,
+                    log_τ_ref, ifactor_base, all_μ_tiles_gpu,
+                    Ts_gpu, λs_gpu, Natm, B; tile_offset=0)
             end
         end
 
@@ -307,15 +295,14 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     end
 
     # normalize to per-tile cost (each measurement covers B tiles)
-    t_micro ./= B
-    t_tau   ./= B
-    t_cfunc ./= B
-    t_macro ./= B
+    t_micro      ./= B
+    t_tau_cfunc  ./= B
+    t_macro      ./= B
 
-    return (micro=median(t_micro), tau=median(t_tau),
-            cfunc=median(t_cfunc), macro_conv=median(t_macro),
-            micro_iqr=iqr(t_micro), tau_iqr=iqr(t_tau),
-            cfunc_iqr=iqr(t_cfunc), macro_conv_iqr=iqr(t_macro))
+    return (micro=median(t_micro), tau_cfunc=median(t_tau_cfunc),
+            macro_conv=median(t_macro),
+            micro_iqr=iqr(t_micro), tau_cfunc_iqr=iqr(t_tau_cfunc),
+            macro_conv_iqr=iqr(t_macro))
 end
 
 # ── end-to-end benchmark ──────────────────────────────────────────────────────
@@ -363,12 +350,11 @@ if use_gpu
         println("─"^40)
         gt = benchmark_gpu_batched(copy(αs), copy(αs_cont), star, λs_korg, μs_cpu, z_rot_cpu;
                                    B=B_bench, gpu_precision=G)
-        @printf("  Micro (per tile): %8.3f ms  (IQR %.3f)\n", gt.micro * 1000, gt.micro_iqr * 1000)
-        @printf("  Tau (per tile):   %8.3f ms  (IQR %.3f)\n", gt.tau * 1000, gt.tau_iqr * 1000)
-        @printf("  Cfunc (per tile): %8.3f ms  (IQR %.3f)\n", gt.cfunc * 1000, gt.cfunc_iqr * 1000)
-        @printf("  Macro (per tile): %8.3f ms  (IQR %.3f)\n", gt.macro_conv * 1000, gt.macro_conv_iqr * 1000)
-        gpu_total = (gt.micro + gt.tau + gt.cfunc + gt.macro_conv) * 1000
-        @printf("  Total per tile:   %8.3f ms  (from B=%d batch)\n", gpu_total, B_bench)
+        @printf("  Micro (per tile):     %8.3f ms  (IQR %.3f)\n", gt.micro * 1000, gt.micro_iqr * 1000)
+        @printf("  Tau+cfunc (per tile): %8.3f ms  (IQR %.3f)\n", gt.tau_cfunc * 1000, gt.tau_cfunc_iqr * 1000)
+        @printf("  Macro (per tile):     %8.3f ms  (IQR %.3f)\n", gt.macro_conv * 1000, gt.macro_conv_iqr * 1000)
+        gpu_total = (gt.micro + gt.tau_cfunc + gt.macro_conv) * 1000
+        @printf("  Total per tile:       %8.3f ms  (from B=%d batch)\n", gpu_total, B_bench)
         @printf("  Speedup vs CPU:   %.1f×\n", cpu_total_pertile / gpu_total)
         println()
         if G == Float64
@@ -382,22 +368,23 @@ end  # run_pertile
 
 # save pertile data immediately so it survives an e2e crash
 if run_pertile && cpu_times !== nothing
-    steps = ["microturbulence", "tau", "cfunc", "macro"]
-    cpu_med = [cpu_times.micro, cpu_times.tau, cpu_times.cfunc, cpu_times.macro_conv] .* 1000.0
-    cpu_iqr = [cpu_times.micro_iqr, cpu_times.tau_iqr, cpu_times.cfunc_iqr, cpu_times.macro_conv_iqr] .* 1000.0
+    # CPU has 4 stages; GPU has 3 (tau+cfunc fused). align by splitting CPU tau+cfunc.
+    steps = ["microturbulence", "tau+cfunc", "macro"]
+    cpu_med = [cpu_times.micro, cpu_times.tau + cpu_times.cfunc, cpu_times.macro_conv] .* 1000.0
+    cpu_iqr = [cpu_times.micro_iqr, cpu_times.tau_iqr + cpu_times.cfunc_iqr, cpu_times.macro_conv_iqr] .* 1000.0
 
     g64_med = gpu64_times !== nothing ?
-        [gpu64_times.micro, gpu64_times.tau, gpu64_times.cfunc, gpu64_times.macro_conv] .* 1000.0 :
-        fill(NaN, 4)
+        [gpu64_times.micro, gpu64_times.tau_cfunc, gpu64_times.macro_conv] .* 1000.0 :
+        fill(NaN, 3)
     g64_iqr = gpu64_times !== nothing ?
-        [gpu64_times.micro_iqr, gpu64_times.tau_iqr, gpu64_times.cfunc_iqr, gpu64_times.macro_conv_iqr] .* 1000.0 :
-        fill(NaN, 4)
+        [gpu64_times.micro_iqr, gpu64_times.tau_cfunc_iqr, gpu64_times.macro_conv_iqr] .* 1000.0 :
+        fill(NaN, 3)
     g32_med = gpu32_times !== nothing ?
-        [gpu32_times.micro, gpu32_times.tau, gpu32_times.cfunc, gpu32_times.macro_conv] .* 1000.0 :
-        fill(NaN, 4)
+        [gpu32_times.micro, gpu32_times.tau_cfunc, gpu32_times.macro_conv] .* 1000.0 :
+        fill(NaN, 3)
     g32_iqr = gpu32_times !== nothing ?
-        [gpu32_times.micro_iqr, gpu32_times.tau_iqr, gpu32_times.cfunc_iqr, gpu32_times.macro_conv_iqr] .* 1000.0 :
-        fill(NaN, 4)
+        [gpu32_times.micro_iqr, gpu32_times.tau_cfunc_iqr, gpu32_times.macro_conv_iqr] .* 1000.0 :
+        fill(NaN, 3)
 
     open(joinpath(datadir, "pertile_timings.csv"), "w") do io
         println(io, "step,cpu_med_ms,cpu_iqr_ms,gpu64_med_ms,gpu64_iqr_ms,gpu32_med_ms,gpu32_iqr_ms")

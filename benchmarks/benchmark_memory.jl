@@ -99,24 +99,28 @@ atm_ref = FT.AtmosphereGPU(Korg.interpolate_marcs(Teff, logg, A_X))
 Natm_ref = length(atm_ref.zs)
 Natm1_ref = Natm_ref - 1
 
-@printf("\n%-6s  %8s  %12s  %12s  %12s\n",
-        "B", "B*Natm", "BatchMicro", "Work arrays", "Total")
-println("-" ^ 60)
+@printf("\n%-6s  %8s  %12s  %12s  %12s  %12s\n",
+        "B", "B*Natm", "BatchMicro", "Work(anchor)", "Work(bezier)", "Total(anchor)")
+println("-" ^ 80)
 
 for B in [1, 4, 8, 16, 32, 64]
     _, mem_bcmem = measure_alloc("BatchedMicroConvMem B=$B") do
         FT.BatchedMicroConvMem(Nλ_ref, Natm_ref, B, Npad)
     end
 
-    # work arrays: τs_batch + cfdt_batch (what convenience.jl allocates per stream)
+    # anchored (fused) path: only cfdt_batch (τ computed in registers)
     bpe = sizeof(Float64)
-    mem_work = B * Natm_ref * Nλ_ref * bpe +      # τs_batch
-               B * Natm1_ref * Nλ_ref * bpe        # cfdt_batch
+    mem_work_anchored = B * Natm1_ref * Nλ_ref * bpe   # cfdt_batch only
 
-    total = mem_bcmem + mem_work
+    # bezier path: τs_batch + cfdt_batch (unfused, needs intermediate τs)
+    mem_work_bezier = B * Natm_ref * Nλ_ref * bpe +    # τs_batch
+                      B * Natm1_ref * Nλ_ref * bpe     # cfdt_batch
 
-    @printf("%-6d  %8d  %10.2f MB  %10.2f MB  %10.2f MB\n",
-            B, B * Natm_ref, mem_bcmem/1024^2, mem_work/1024^2, total/1024^2)
+    total_anchored = mem_bcmem + mem_work_anchored
+
+    @printf("%-6d  %8d  %10.2f MB  %10.2f MB  %10.2f MB  %10.2f MB\n",
+            B, B * Natm_ref, mem_bcmem/1024^2, mem_work_anchored/1024^2,
+            mem_work_bezier/1024^2, total_anchored/1024^2)
     gpu_used_bytes()
 end
 
@@ -145,13 +149,16 @@ for (label, G) in [("Float64", Float64), ("Float32", Float32)]
     end
 
     bpe = sizeof(G)
-    mem_work = B_cmp * Natm_ref * Nλ_ref * bpe +
-               B_cmp * Natm1_ref * Nλ_ref * bpe
+    mem_work_anchored = B_cmp * Natm1_ref * Nλ_ref * bpe   # cfdt_batch only (fused τ)
+    mem_work_bezier = B_cmp * Natm_ref * Nλ_ref * bpe +    # τs_batch
+                      B_cmp * Natm1_ref * Nλ_ref * bpe     # cfdt_batch
 
-    total = mem_bcmem + mem_cmem + mem_cmac + mem_work
-    @printf("    Work arrays (τs+cfdt):            %8.2f MB\n", mem_work/1024^2)
-    @printf("    Total (1 stream):                 %8.2f MB\n", total/1024^2)
-    @printf("    Total (2 streams, dual):          %8.2f MB\n", (2*total)/1024^2)
+    total_anchored = mem_bcmem + mem_cmem + mem_cmac + mem_work_anchored
+    total_bezier = mem_bcmem + mem_cmem + mem_cmac + mem_work_bezier
+    @printf("    Work arrays (anchored, cfdt only): %8.2f MB\n", mem_work_anchored/1024^2)
+    @printf("    Work arrays (bezier, τs+cfdt):     %8.2f MB\n", mem_work_bezier/1024^2)
+    @printf("    Total (1 stream, anchored):        %8.2f MB\n", total_anchored/1024^2)
+    @printf("    Total (2 streams, anchored):       %8.2f MB\n", (2*total_anchored)/1024^2)
     gpu_used_bytes()
 end
 

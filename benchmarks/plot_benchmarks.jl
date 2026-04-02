@@ -123,7 +123,7 @@ try
 
     fig.tight_layout()
     fig.savefig(joinpath(PLOTDIR, "benchmark_convolutions.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    plt.close()
     println("Saved: benchmark_convolutions.png")
 catch e
     println("Skipping convolution plot: ", e)
@@ -165,11 +165,11 @@ try
 
         fig, ax_brk = plt.subplots(figsize=(7, has_gpu32 ? 7.0 : 4.0))
 
-        step_labels = ["{\\rm Microturbulence}", "{\\rm Optical depth}",
-                       "{\\rm Contribution fn.}", "{\\rm Macroturbulence}"]
-        colors_cpu  = ["#B8DFFB", COL_CPU_1T, COL_CPU_MT, "#1A7AB5"]
-        colors_g64  = ["#FFD3A6", "#F5A66E", COL_GPU64, "#B8432E"]
-        colors_g32  = ["#66D9B2", COL_GPU32, "#007A59", "#004D38"]
+        step_labels = ["{\\rm Microturbulence}", raw"{$\tau$ + {\rm contrib. fn.}}",
+                       "{\\rm Macroturbulence}"]
+        colors_cpu  = ["#B8DFFB", COL_CPU_1T, "#1A7AB5"]
+        colors_g64  = ["#FFD3A6", COL_GPU64, "#B8432E"]
+        colors_g32  = ["#66D9B2", COL_GPU32, "#004D38"]
 
         bar_h = 0.55
         y_cpu   = 0
@@ -282,7 +282,7 @@ try
 
         fig.tight_layout()
         fig.savefig(joinpath(PLOTDIR, "benchmark_pertile.png"), dpi=150, bbox_inches="tight")
-        plt.close(fig)
+        plt.close()
         println("Saved: benchmark_pertile.png")
     end
 catch e
@@ -336,7 +336,7 @@ try
 
     fig.tight_layout()
     fig.savefig(joinpath(PLOTDIR, "benchmark_threading.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    plt.close()
     println("Saved: benchmark_threading.png")
 catch e
     println("Skipping threading plot: ", e)
@@ -430,7 +430,7 @@ try
 
     fig.tight_layout()
     fig.savefig(joinpath(PLOTDIR, "benchmark_nlambda.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    plt.close()
     println("Saved: benchmark_nlambda.png")
 catch e
     println("Skipping Nλ scaling plot: ", e)
@@ -544,85 +544,10 @@ try
 
     fig.tight_layout()
     fig.savefig(joinpath(PLOTDIR, "benchmark_nphi.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    plt.close()
     println("Saved: benchmark_nphi.png")
 catch e
     println("Skipping Nϕ scaling plot: ", e)
-end
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 6. Dispatch comparison (scalar vs per-row micro, in-place vs allocating macro)
-# ══════════════════════════════════════════════════════════════════════════════
-try
-    csv = joinpath(DATADIR, "convolution_timings.csv")
-    header, rows = read_csv(csv)
-
-    # build lookup: kernel name → cpu median ms
-    kern_cpu = Dict(r[1] => parse(Float64, r[2]) for r in rows)
-
-    # find the paired entries
-    pairs = [
-        ("Microturbulence", "Micro (scalar)", "Micro (per-row)"),
-        ("Aniso. RT macro", "Aniso. RT (in-place)", "Aniso. RT (alloc.)"),
-    ]
-
-    # only plot pairs that exist in the data
-    groups = Tuple{String, Float64, Float64}[]
-    for (label, fast_key, slow_key) in pairs
-        if haskey(kern_cpu, fast_key) && haskey(kern_cpu, slow_key)
-            push!(groups, (label, kern_cpu[fast_key], kern_cpu[slow_key]))
-        end
-    end
-
-    if !isempty(groups)
-        fig, ax = plt.subplots(figsize=(6, 4))
-
-        x = 0:length(groups)-1
-        w = 0.35
-        fast_vals = [g[2] for g in groups]
-        slow_vals = [g[3] for g in groups]
-        labels_x = [g[1] for g in groups]
-
-        bars_fast = ax.bar(x .- w/2, fast_vals, w,
-                           label="{\\rm Production (scalar / in-place)}",
-                           color=COL_CPU_MT, edgecolor="none")
-        bars_slow = ax.bar(x .+ w/2, slow_vals, w,
-                           label="{\\rm Alternative (per-row / alloc.)}",
-                           color=COL_CPU_1T, edgecolor="none")
-
-        # annotate speedup ratio
-        for i in eachindex(groups)
-            xi = i - 1
-            ratio = slow_vals[i] / fast_vals[i]
-            y_top = max(fast_vals[i], slow_vals[i]) * 1.08
-            ax.text(xi, y_top, @sprintf("\$%.1f\\times\$", ratio),
-                    ha="center", va="bottom", fontsize=9, fontweight="bold")
-        end
-
-        ax.set_xticks(collect(x))
-        ax.set_xticklabels(["{\\rm " * l * "}" for l in labels_x])
-        ax.set_ylabel("{\\rm CPU time [ms]}")
-
-        Nλ_conv = 0
-        try
-            _, meta = read_csv(joinpath(DATADIR, "convolution_meta.csv"))
-            Nλ_conv = parse(Int, meta[1][1])
-        catch; end
-        if Nλ_conv > 0
-            ax.set_title(@sprintf("{\\rm Dispatch overhead (}\$N_\\lambda\${\\rm =%d)}", Nλ_conv))
-        else
-            ax.set_title("{\\rm Dispatch overhead}")
-        end
-        ax.legend(fontsize=8)
-        ax.grid(false)
-
-        fig.tight_layout()
-        fig.savefig(joinpath(PLOTDIR, "benchmark_dispatch_comparison.png"), dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        println("Saved: benchmark_dispatch_comparison.png")
-    end
-catch e
-    println("Skipping dispatch comparison plot: ", e)
 end
 
 println()
