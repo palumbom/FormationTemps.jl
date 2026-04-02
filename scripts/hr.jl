@@ -13,7 +13,6 @@ using LaTeXStrings
 mpl = plt.matplotlib
 
 # matplotlib backend
-mpl.use("Qt5Agg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 colormaps = pyimport("colormaps")
@@ -97,7 +96,7 @@ ints_cont = zeros(length(λs_korg), length(μs))
 # allocate memory for convolutions
 Nλ = length(λs_korg)
 Natm = 56
-Npad = 100
+Npad = 512
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # velocities
