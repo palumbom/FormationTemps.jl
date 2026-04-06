@@ -85,6 +85,8 @@ Fields:
 - `nₑ`, `nd`: Electron and total number density grids on the CPU.
 - `reference_wavelength`: MARCS reference wavelength for `τ_ref` (cm; typically 5000 Å).
 - `zs_gpu`, `Ts_gpu`, `nd_gpu`: Height, temperature, and number density on the device.
+- `vx`, `vy`, `vz`: Per-layer velocity components on the device (m/s). Initialized to zero
+  by the convenience constructor; populated by downstream packages from MHD simulation data.
 - `σ_v`, `μ_v`: Per-layer microturbulent speed and mean line-of-sight velocity on the device (m/s).
 
 See also: [`AtmosphereGPU(atm_korg)`](@ref)
@@ -101,6 +103,9 @@ struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
     zs_gpu::CuVector{T}
     Ts_gpu::CuVector{T}
     nd_gpu::CuVector{T}
+    vx::CuVector{T}
+    vy::CuVector{T}
+    vz::CuVector{T}
     σ_v::CuVector{T}
     μ_v::CuVector{T}
 end
@@ -126,11 +131,14 @@ function AtmosphereGPU(atm_korg; T::Type{<:AF}=Float64)
     zs_gpu = CuArray{T}(f.zs)
     Ts_gpu = CuArray{T}(f.Ts)
     nd_gpu = CuArray{T}(f.nd)
+    vx     = CUDA.zeros(T, f.Natm)
+    vy     = CUDA.zeros(T, f.Natm)
+    vz     = CUDA.zeros(T, f.Natm)
     σ_v    = CUDA.zeros(T, f.Natm)
     μ_v    = CUDA.zeros(T, f.Natm)
 
     return AtmosphereGPU(f.Natm, T.(f.τs), T.(f.zs), T.(f.Ts), T.(f.nₑ), T.(f.nd),
-                         T(f.ref_wl), zs_gpu, Ts_gpu, nd_gpu, σ_v, μ_v)
+                         T(f.ref_wl), zs_gpu, Ts_gpu, nd_gpu, vx, vy, vz, σ_v, μ_v)
 end
 
 """

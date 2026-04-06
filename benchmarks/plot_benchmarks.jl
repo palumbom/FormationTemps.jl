@@ -1,4 +1,4 @@
-using Printf, DelimitedFiles
+using Printf, DelimitedFiles, Statistics
 using PythonPlot; plt = PythonPlot.pyplot
 
 const PROJECT_DIR = dirname(@__DIR__)
