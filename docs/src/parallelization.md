@@ -97,14 +97,11 @@ Individual broadening kernel timings for each convolution type (CPU vs GPU Float
 
 ## CPU vs. GPU numerical differences
 
-The CPU and GPU paths use slightly different algorithms in a few places, leading to small numerical differences:
-
-- Microturbulence: the GPU applies an analytical Fourier-domain Gaussian; the CPU samples a real-space kernel. Flux differences are ~4×10⁻⁴ at typical parameters.
-- All broadening kernels (iso_rad_tan, rad_tan, rad_tan_two, gray_rot, Hirano): CPU and GPU both use padded linear convolution with edge replication. Agreement is at floating-point precision.
+The CPU and GPU paths use the same algorithms throughout: real-space kernels placed in DFT layout and R2C FFT'd, padded linear convolution with edge replication, and identical optical-depth integration schemes. At Float64, CPU and GPU agree to floating-point precision.
 
 ### Float32 vs. Float64 accuracy
 
-The figures below compare flux and formation temperature spectra for two Fe I lines near 6300 Å, computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra (visually indistinguishable); the bottom row shows residuals relative to the CPU Float64 reference on a symmetric log scale. GPU Float64 residuals are small, dominated by the algorithmic differences described above. GPU Float32 residuals are orders of magnitude larger but still modest: flux residuals at the ~10⁻⁴ level and formation temperature differences of ~1 K.
+The figures below compare flux and formation temperature spectra for two Fe I lines near 6300 Å, computed at CPU Float64, GPU Float64, and GPU Float32 for a solar-like star. The top row overlays the three spectra (visually indistinguishable); the bottom row shows residuals relative to the CPU Float64 reference on a symmetric log scale. GPU Float64 residuals are negligible. GPU Float32 residuals are larger but still modest: flux residuals at the ~10⁻⁴ level and formation temperature differences of ~1 K.
 
 ![GPU precision: convolution path](static/gpu_precision_convolve.png)
 

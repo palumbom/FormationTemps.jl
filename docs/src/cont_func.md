@@ -2,7 +2,7 @@
 
 Formation temperatures are computed from the model contribution functions, and can be thought of as a simple summary statistic thereof. For some users, it may be advantageous to view and manipulate these contribution functions. 
 
-Following a procedure like that in the [Basic Tutorial](@ref "Basic Tutorial"), we can see that the ```FormTempResults``` composite type also contains a ```cont_func``` field. We can plot this like so:
+Following a procedure like that in the [Basic Tutorial](@ref "Basic Tutorial"), we can see that the ```FormTempResult``` composite type also contains a ```cont_func``` field. We can plot this like so:
 
 ```@eval
 using Markdown
@@ -14,7 +14,7 @@ Markdown.parse("```julia\n" * code * "\n```")
 ```
 ![formation_temps](static/cont_func_simple_example.png)
 
-We can also add axis values. The x-axis is wavelength, and y-axis is a coordinate in the model atmosphere. Let's first parse out and view the model atmosphere structure from the ```FormTempResults``` composite type instance. 
+We can also add axis values. The x-axis is wavelength, and y-axis is a coordinate in the model atmosphere. Let's first parse out and view the model atmosphere structure from the ```FormTempResult``` composite type instance. 
 
 ```@eval
 using Markdown
