@@ -1,24 +1,24 @@
 """
-    convolve_wavelength_axis(xs, ys, μ_v, σ_v)
+    convolve_wavelength_axis(xs, ys, v_los, v_mic)
 
 Convolve each row of `ys` with a Gaussian kernel that models microturbulent broadening
 and a Doppler shift, using FFT convolution. The kernel width is wavelength-dependent
-(constant in velocity units): σ(x) = x·σ_v/c.
+(constant in velocity units): σ(x) = x·v_mic/c.
 
-Scalar `μ_v` and `σ_v` apply the same kernel to every row; vectors specify per-row
+Scalar `v_los` and `v_mic` apply the same kernel to every row; vectors specify per-row
 values. The GPU implementation (`convolve_wavelength_axis_gpu`) builds the same
 kernel on device, so CPU and GPU agree to floating-point precision.
 """
-function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::T, σ_v::T) where {T<:AF}
+function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::T, v_mic::T) where {T<:AF}
     Δλ = median(diff(xs))
     σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
 
-    σ(x) = max(x * (σ_v / c_ms), σ_floor)
+    σ(x) = max(x * (v_mic / c_ms), σ_floor)
     g(x, n) = exp(-((x - n) / σ(x))^2.0)
 
     i0 = length(xs) ÷ 2 + 1
     λ0 = xs[i0]
-    λc = (μ_v / c_ms) * λ0 + λ0
+    λc = (v_los / c_ms) * λ0 + λ0
 
     kernel = g.(xs, λc)
     kernel ./= sum(kernel)
@@ -26,7 +26,7 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::T, σ_v::T) wh
     return _padded_convolve(collect(T, ys), kernel)
 end
 
-function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, σ_v::AA{T,1}) where {T<:AF}
+function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::AA{T,1}, v_mic::AA{T,1}) where {T<:AF}
     Nλ = length(xs)
     Npad = 512
     L, _, pad_left, _ = _conv_mem_geometry(Nλ, Npad)
@@ -42,9 +42,9 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, μ_v::AA{T,1}, σ_v:
     sig = zeros(T, L)
 
     for t in axes(ys, 1)
-        σ(x) = max(x * (σ_v[t] / c_ms), σ_floor)
+        σ(x) = max(x * (v_mic[t] / c_ms), σ_floor)
         g(x, n) = exp(-((x - n) / σ(x))^2.0)
-        λc = (μ_v[t] / c_ms) * λ0 + λ0
+        λc = (v_los[t] / c_ms) * λ0 + λ0
 
         @inbounds for j in 1:Nλ
             kvec[j] = g(xs[j], λc)
@@ -69,16 +69,16 @@ end
 # ── CPU in-place (disk integration) ─────────────────────────────────────────
 
 """
-    _convolve_micro_inplace!(out, xs, ys, μ_v, σ_v, ws)
+    _convolve_micro_inplace!(out, xs, ys, v_los, v_mic, ws)
 
 In-place microturbulent broadening using pre-allocated [`CPUTileWorkspace`](@ref)
 buffers.
 
-Scalar `μ_v` and `σ_v` build one kernel and apply it to all atmosphere layers
+Scalar `v_los` and `v_mic` build one kernel and apply it to all atmosphere layers
 (the common case in disk integration). Vector arguments build per-row kernels.
 """
 function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
-                                  μ_v::T, σ_v::T,
+                                  v_los::T, v_mic::T,
                                   ws::CPUTileWorkspace) where T<:AF
     Nλ = ws.Nλ
     Natm = size(ys, 1)
@@ -86,11 +86,11 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
     σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
     i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
-    λc = (μ_v / c_ms) * λ0 + λ0
+    λc = (v_los / c_ms) * λ0 + λ0
 
     kvec = Vector{T}(undef, Nλ)
     @inbounds for j in 1:Nλ
-        σx = max(xs[j] * (σ_v / c_ms), σ_floor)
+        σx = max(xs[j] * (v_mic / c_ms), σ_floor)
         kvec[j] = exp(-((xs[j] - λc) / σx)^2.0)
     end
     kvec ./= sum(kvec)
@@ -102,7 +102,7 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
 end
 
 function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
-                                  μ_v::AA{T,1}, σ_v::AA{T,1},
+                                  v_los::AA{T,1}, v_mic::AA{T,1},
                                   ws::CPUTileWorkspace) where T<:AF
     Nλ = ws.Nλ
     Natm = size(ys, 1)
@@ -113,9 +113,9 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
     kvec = Vector{T}(undef, Nλ)
 
     for t in 1:Natm
-        λc = (μ_v[t] / c_ms) * λ0 + λ0
+        λc = (v_los[t] / c_ms) * λ0 + λ0
         @inbounds for j in 1:Nλ
-            σx = max(xs[j] * (σ_v[t] / c_ms), σ_floor)
+            σx = max(xs[j] * (v_mic[t] / c_ms), σ_floor)
             kvec[j] = exp(-((xs[j] - λc) / σx)^2.0)
         end
         kvec ./= sum(kvec)
@@ -163,15 +163,15 @@ function extract_valid!(out, src, pad_left, Nλ)
     return nothing
 end
 
-# Build ONE kernel in DFT layout (scalar μ_v, σ_v).
-function kernel_to_dft_layout_1d_gpu!(kbuf, xs, λ0, μ_v_val, σ_v_val, σ_floor, i0, Nλ, L)
+# Build ONE kernel in DFT layout (scalar v_los, v_mic).
+function kernel_to_dft_layout_1d_gpu!(kbuf, xs, λ0, v_los_val, v_mic_val, σ_floor, i0, Nλ, L)
     j = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     j > Nλ && return nothing
     T = eltype(kbuf)
     xj = @inbounds xs[j]
-    σx = max(xj * (σ_v_val / T(c_ms)), σ_floor)
-    # avoid catastrophic cancellation: (xj - λ0) and (μ_v/c)*λ0 are both small
-    Δx = (xj - λ0) - (μ_v_val / T(c_ms)) * λ0
+    σx = max(xj * (v_mic_val / T(c_ms)), σ_floor)
+    # avoid catastrophic cancellation: (xj - λ0) and (v_los/c)*λ0 are both small
+    Δx = (xj - λ0) - (v_los_val / T(c_ms)) * λ0
     val = exp(-(Δx / σx)^2)
     d = j - i0
     idx = d >= 0 ? d + 1 : L + d + 1
@@ -179,8 +179,11 @@ function kernel_to_dft_layout_1d_gpu!(kbuf, xs, λ0, μ_v_val, σ_v_val, σ_floo
     return nothing
 end
 
-# Build per-row kernels in DFT layout (vector μ_v, vector σ_v).
-function kernel_to_dft_layout_2d_gpu!(kbuf, xs, μ_v, μ_v_off, σ_v, σ_floor, i0, Nλ, L)
+# Build per-row kernels in DFT layout (vector v_los, vector v_mic).
+# Natm_v is the period for v_mic indexing: v_mic[(row-1) % Natm_v + 1].
+# When length(v_mic) == Nrows the modulo is a no-op; when Nrows = B*Natm
+# the Natm-length v_mic wraps across batched tiles without tiling allocation.
+function kernel_to_dft_layout_2d_gpu!(kbuf, xs, v_los, v_los_off, v_mic, σ_floor, i0, Nλ, L, Natm_v)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     Nrows = size(kbuf, 1)
@@ -188,8 +191,9 @@ function kernel_to_dft_layout_2d_gpu!(kbuf, xs, μ_v, μ_v_off, σ_v, σ_floor, 
     T = eltype(kbuf)
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
-    σx = max(xj * (@inbounds σ_v[row]) / T(c_ms), σ_floor)
-    Δx = (xj - λ0) - (@inbounds μ_v[μ_v_off + row]) / T(c_ms) * λ0
+    mic_idx = (row - Int32(1)) % Natm_v + Int32(1)
+    σx = max(xj * (@inbounds v_mic[mic_idx]) / T(c_ms), σ_floor)
+    Δx = (xj - λ0) - (@inbounds v_los[v_los_off + row]) / T(c_ms) * λ0
     val = exp(-(Δx / σx)^2)
     d = j - i0
     idx = d >= 0 ? d + 1 : L + d + 1
@@ -197,8 +201,8 @@ function kernel_to_dft_layout_2d_gpu!(kbuf, xs, μ_v, μ_v_off, σ_v, σ_floor, 
     return nothing
 end
 
-# Build per-row kernels in DFT layout (vector μ_v, scalar σ_v).
-function kernel_to_dft_layout_2d_scalar_σ_gpu!(kbuf, xs, μ_v, μ_v_off, σ_v_val, σ_floor, i0, Nλ, L)
+# Build per-row kernels in DFT layout (vector v_los, scalar v_mic).
+function kernel_to_dft_layout_2d_scalar_v_mic_gpu!(kbuf, xs, v_los, v_los_off, v_mic_val, σ_floor, i0, Nλ, L)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     Nrows = size(kbuf, 1)
@@ -206,8 +210,8 @@ function kernel_to_dft_layout_2d_scalar_σ_gpu!(kbuf, xs, μ_v, μ_v_off, σ_v_v
     T = eltype(kbuf)
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
-    σx = max(xj * (σ_v_val / T(c_ms)), σ_floor)
-    Δx = (xj - λ0) - (@inbounds μ_v[μ_v_off + row]) / T(c_ms) * λ0
+    σx = max(xj * (v_mic_val / T(c_ms)), σ_floor)
+    Δx = (xj - λ0) - (@inbounds v_los[v_los_off + row]) / T(c_ms) * λ0
     val = exp(-(Δx / σx)^2)
     d = j - i0
     idx = d >= 0 ? d + 1 : L + d + 1
@@ -262,8 +266,8 @@ function _pad_and_fft_signal!(cmem, ys_d::CuArray{T,2}) where T<:AF
     return nothing
 end
 
-# build 1D kernel FT (scalar μ_v, σ_v → single kernel, broadcast)
-function _build_kernel_ft_1d!(cmem, xs_h::AbstractVector{T}, μ_v_val::T, σ_v_val::T) where T<:AF
+# build 1D kernel FT (scalar v_los, v_mic → single kernel, broadcast)
+function _build_kernel_ft_1d!(cmem, xs_h::AbstractVector{T}, v_los_val::T, v_mic_val::T) where T<:AF
     Nλ = cmem.Nλ; L = cmem.L
     i0 = Nλ ÷ 2 + 1
     λ0 = xs_h[i0]
@@ -272,7 +276,7 @@ function _build_kernel_ft_1d!(cmem, xs_h::AbstractVector{T}, μ_v_val::T, σ_v_v
     fill!(cmem.kr_1d, zero(T))
     ts = (256,); bs = (cld(Nλ, ts[1]),)
     @cuda threads=ts blocks=bs kernel_to_dft_layout_1d_gpu!(
-        cmem.kr_1d, cmem.xs_gpu, T(λ0), μ_v_val, σ_v_val, σ_floor,
+        cmem.kr_1d, cmem.xs_gpu, T(λ0), v_los_val, v_mic_val, σ_floor,
         Int32(i0), Int32(Nλ), Int32(L))
     normval = CUDA.sum(cmem.kr_1d)
     cmem.kr_1d ./= normval
@@ -282,7 +286,7 @@ end
 
 # build per-row kernels into conv_gpu, normalize, batch-FFT into kernel_ft_gpu
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
-                                  μ_v::CA{T,1}, σ_v::T) where T<:AF
+                                  v_los::CA{T,1}, v_mic::T) where T<:AF
     i0 = cmem.Nλ ÷ 2 + 1
     Δλ = median(diff(xs_h))
     σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
@@ -291,15 +295,15 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     fill!(cmem.conv_gpu, zero(T))
     ts = (32, 32)
     bs = (cld(cmem.Nλ, ts[1]), cld(Nrows, ts[2]))
-    @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_scalar_σ_gpu!(
-        cmem.conv_gpu, cmem.xs_gpu, μ_v, Int32(0), σ_v, σ_floor,
+    @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
+        cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L))
     cmem.conv_gpu ./= sum(cmem.conv_gpu, dims=2)
     return nothing
 end
 
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
-                                  μ_v::CA{T,1}, σ_v::CA{T,1}) where T<:AF
+                                  v_los::CA{T,1}, v_mic::CA{T,1}) where T<:AF
     i0 = cmem.Nλ ÷ 2 + 1
     Δλ = median(diff(xs_h))
     σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
@@ -309,8 +313,8 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     ts = (32, 32)
     bs = (cld(cmem.Nλ, ts[1]), cld(Nrows, ts[2]))
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_gpu!(
-        cmem.conv_gpu, cmem.xs_gpu, μ_v, Int32(0), σ_v, σ_floor,
-        Int32(i0), Int32(cmem.Nλ), Int32(cmem.L))
+        cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
+        Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows))
     cmem.conv_gpu ./= sum(cmem.conv_gpu, dims=2)
     return nothing
 end
@@ -324,89 +328,89 @@ end
 # ── GPU public API: convolve_wavelength_axis_gpu ─────────────────────────────
 
 """
-    convolve_wavelength_axis_gpu(cmem, xs, ys, μ_v, σ_v)
+    convolve_wavelength_axis_gpu(cmem, xs, ys, v_los, v_mic)
 
 GPU implementation of [`convolve_wavelength_axis`](@ref). Builds the same real-space
-kernel with wavelength-dependent σ(x) = x·σ_v/c as the CPU, matching exactly.
+kernel with wavelength-dependent σ(x) = x·v_mic/c as the CPU, matching exactly.
 
-Scalar `μ_v` and `σ_v` build one kernel broadcast to all rows. Vector arguments
+Scalar `v_los` and `v_mic` build one kernel broadcast to all rows. Vector arguments
 build per-row kernels via batch R2C FFT.
 
 See also: [`convolve_wavelength_axis`](@ref)
 """
-# scalar μ_v, scalar σ_v — host xs
+# scalar v_los, scalar v_mic — host xs
 function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory, xs::AA{T,1},
-                                      ys::AA{T,2}, μ_v::T, σ_v::T) where {T<:AF}
+                                      ys::AA{T,2}, v_los::T, v_mic::T) where {T<:AF}
     xs_h = collect(T, xs)
     _pad_and_fft_signal!(cmem, ys, xs_h)
-    _build_kernel_ft_1d!(cmem, xs_h, μ_v, σ_v)
+    _build_kernel_ft_1d!(cmem, xs_h, v_los, v_mic)
     kft = reshape(cmem.kernel_row_ft_1d, 1, :)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
     return _irfft_and_extract(cmem)
 end
 
-# scalar μ_v, scalar σ_v — device xs
+# scalar v_los, scalar v_mic — device xs
 function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory,
                                       xs_d::CuArray{T,1}, ys_d::CuArray{T,2},
-                                      μ_v::T, σ_v::T) where {T<:AF}
+                                      v_los::T, v_mic::T) where {T<:AF}
     if !cmem.doppler_ready
         _init_micro_params!(cmem, Array(xs_d))
     end
     _pad_and_fft_signal!(cmem, ys_d)
     xs_h = Array(cmem.xs_gpu)
-    _build_kernel_ft_1d!(cmem, xs_h, μ_v, σ_v)
+    _build_kernel_ft_1d!(cmem, xs_h, v_los, v_mic)
     kft = reshape(cmem.kernel_row_ft_1d, 1, :)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
     return _irfft_and_extract(cmem)
 end
 
-# vector μ_v, scalar σ_v — host xs
+# vector v_los, scalar v_mic — host xs
 function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory, xs::AA{T,1},
-                                      ys::AA{T,2}, μ_v::CA{T,1}, σ_v::T) where {T<:AF}
+                                      ys::AA{T,2}, v_los::CA{T,1}, v_mic::T) where {T<:AF}
     xs_h = collect(T, xs)
     _pad_and_fft_signal!(cmem, ys, xs_h)
-    _build_per_row_kernels!(cmem, xs_h, μ_v, σ_v)
+    _build_per_row_kernels!(cmem, xs_h, v_los, v_mic)
     mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.conv_gpu)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     return _irfft_and_extract(cmem)
 end
 
-# vector μ_v, scalar σ_v — device xs
+# vector v_los, scalar v_mic — device xs
 function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory,
                                       xs_d::CuArray{T,1}, ys_d::CuArray{T,2},
-                                      μ_v::CA{T,1}, σ_v::T) where {T<:AF}
+                                      v_los::CA{T,1}, v_mic::T) where {T<:AF}
     if !cmem.doppler_ready
         _init_micro_params!(cmem, Array(xs_d))
     end
     _pad_and_fft_signal!(cmem, ys_d)
     xs_h = Array(cmem.xs_gpu)
-    _build_per_row_kernels!(cmem, xs_h, μ_v, σ_v)
+    _build_per_row_kernels!(cmem, xs_h, v_los, v_mic)
     mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.conv_gpu)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     return _irfft_and_extract(cmem)
 end
 
-# vector μ_v, vector σ_v — host xs
+# vector v_los, vector v_mic — host xs
 function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory, xs::AA{T,1},
-                                      ys::AA{T,2}, μ_v::CA{T,1}, σ_v::CA{T,1}) where {T<:AF}
+                                      ys::AA{T,2}, v_los::CA{T,1}, v_mic::CA{T,1}) where {T<:AF}
     xs_h = collect(T, xs)
     _pad_and_fft_signal!(cmem, ys, xs_h)
-    _build_per_row_kernels!(cmem, xs_h, μ_v, σ_v)
+    _build_per_row_kernels!(cmem, xs_h, v_los, v_mic)
     mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.conv_gpu)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     return _irfft_and_extract(cmem)
 end
 
-# vector μ_v, vector σ_v — device xs
+# vector v_los, vector v_mic — device xs
 function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory,
                                       xs_d::CuArray{T,1}, ys_d::CuArray{T,2},
-                                      μ_v::CA{T,1}, σ_v::CA{T,1}) where {T<:AF}
+                                      v_los::CA{T,1}, v_mic::CA{T,1}) where {T<:AF}
     if !cmem.doppler_ready
         _init_micro_params!(cmem, Array(xs_d))
     end
     _pad_and_fft_signal!(cmem, ys_d)
     xs_h = Array(cmem.xs_gpu)
-    _build_per_row_kernels!(cmem, xs_h, μ_v, σ_v)
+    _build_per_row_kernels!(cmem, xs_h, v_los, v_mic)
     mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.conv_gpu)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     return _irfft_and_extract(cmem)
@@ -415,16 +419,16 @@ end
 # ── GPU batched API ──────────────────────────────────────────────────────────
 
 """
-    convolve_wavelength_axis_batched!(bcmem, xs, ys, μ_v_batch, σ_v, Bcur)
+    convolve_wavelength_axis_batched!(bcmem, xs, ys, v_los_batch, v_mic, Bcur)
 
 Batched Doppler convolution for `Bcur` tiles simultaneously. The absorption signal
-`ys` (Natm × Nλ) is shared across tiles; `μ_v_batch` (Bcur*Natm) provides per-tile
-velocities. Scalar `σ_v` avoids tiling allocations; vector `σ_v` is tiled across tiles.
+`ys` (Natm × Nλ) is shared across tiles; `v_los_batch` (Bcur*Natm) provides per-tile
+velocities. Scalar `v_mic` avoids tiling allocations; vector `v_mic` is tiled across tiles.
 Returns a view of the valid region `(Bcur*Natm, Nλ)`.
 """
 function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
                                            xs::AA{T,1}, ys::AA{T,2},
-                                           μ_v_batch::CA{T,1}, σ_v::T,
+                                           v_los_batch::CA{T,1}, v_mic::T,
                                            Bcur::Int; tile_offset::Int=0) where {T<:AF}
     Natm = bcmem.Natm
     BNatm = Bcur * Natm
@@ -443,7 +447,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
         mul!(bcmem.signal_ft_gpu, bcmem.plan_fwd, bcmem.signal_gpu)
     end
 
-    # per-row kernels with scalar σ_v
+    # per-row kernels with scalar v_mic
     i0 = bcmem.Nλ ÷ 2 + 1
     Δλ = median(diff(xs_h))
     σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
@@ -451,9 +455,9 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     fill!(bcmem.conv_gpu, zero(T))
     bs_k = (cld(bcmem.Nλ, ts2[1]), cld(BNatm, ts2[2]))
-    μ_v_off = Int32(tile_offset * Natm)
-    @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_scalar_σ_gpu!(
-        bcmem.conv_gpu, bcmem.xs_gpu, μ_v_batch, μ_v_off, σ_v, σ_floor,
+    v_los_off = Int32(tile_offset * Natm)
+    @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
+        bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L))
     bcmem.conv_gpu ./= sum(bcmem.conv_gpu, dims=2)
     mul!(bcmem.kernel_ft_gpu, bcmem.plan_fwd_kernel, bcmem.conv_gpu)
@@ -471,7 +475,7 @@ end
 
 function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
                                            xs::AA{T,1}, ys::AA{T,2},
-                                           μ_v_batch::CA{T,1}, σ_v::CA{T,1},
+                                           v_los_batch::CA{T,1}, v_mic::CA{T,1},
                                            Bcur::Int; tile_offset::Int=0) where {T<:AF}
     Natm = bcmem.Natm
     BNatm = Bcur * Natm
@@ -490,7 +494,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
         mul!(bcmem.signal_ft_gpu, bcmem.plan_fwd, bcmem.signal_gpu)
     end
 
-    # per-row kernels with vector σ_v (tiled across tiles)
+    # per-row kernels with vector v_mic (modular indexing wraps across tiles)
     i0 = bcmem.Nλ ÷ 2 + 1
     Δλ = median(diff(xs_h))
     σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
@@ -498,11 +502,10 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     fill!(bcmem.conv_gpu, zero(T))
     bs_k = (cld(bcmem.Nλ, ts2[1]), cld(BNatm, ts2[2]))
-    σ_v_tiled = repeat(σ_v, Bcur)
-    μ_v_off = Int32(tile_offset * Natm)
+    v_los_off = Int32(tile_offset * Natm)
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_gpu!(
-        bcmem.conv_gpu, bcmem.xs_gpu, μ_v_batch, μ_v_off, σ_v_tiled, σ_floor,
-        Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L))
+        bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
+        Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(Natm))
     bcmem.conv_gpu ./= sum(bcmem.conv_gpu, dims=2)
     mul!(bcmem.kernel_ft_gpu, bcmem.plan_fwd_kernel, bcmem.conv_gpu)
 

@@ -46,4 +46,15 @@ end
 
     # vsini=0 default
     @test star.vsini == 0.0
+
+    # vector v_micro
+    v_mic_vec = collect(range(600.0, 1200.0, length=56))
+    star_vec = FT.StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, v_micro=v_mic_vec)
+    @test star_vec.ξ == v_mic_vec
+    @test star_vec.ξ isa Vector{Float64}
+
+    # NaN default still triggers vmic_fit (scalar only)
+    star_fit = FT.StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0)
+    @test star_fit.ξ isa Float64
+    @test !isnan(star_fit.ξ)
 end

@@ -41,12 +41,12 @@ test_μs = [0.95, 0.7, 0.4, 0.2, 0.05]
 
         # batched path
         N_unique = length(test_μs)
-        μ_vals_gpu = CuArray(Float64.(test_μs))
+        v_losals_gpu = CuArray(Float64.(test_μs))
         kbuf = CUDA.zeros(Float64, N_unique, L)
         ts = (32, 32)
         bs = (cld(Nλ, ts[1]), cld(N_unique, ts[2]))
         @cuda threads=ts blocks=bs FT.compute_rt_macro_dft_layout_2d!(
-            kbuf, λs_gpu, μ_vals_gpu, Int32(i0), ζ_rt, Int32(Nλ), Int32(L))
+            kbuf, λs_gpu, v_losals_gpu, Int32(i0), ζ_rt, Int32(Nλ), Int32(L))
         kbuf ./= sum(kbuf, dims=2)
         plan = CUDA.CUFFT.plan_rfft(kbuf, 2)
         batched_ft = CUDA.zeros(Complex{Float64}, N_unique, nfreq)
@@ -60,12 +60,12 @@ test_μs = [0.95, 0.7, 0.4, 0.2, 0.05]
 
     @testset "DFT layout: zero-lag at index L" begin
         # the kernel peak (v=0, j=i0) should map to DFT index L
-        μ_vals_gpu = CuArray([0.5])
+        v_losals_gpu = CuArray([0.5])
         kbuf = CUDA.zeros(Float64, 1, L)
         ts = (32, 32)
         bs = (cld(Nλ, ts[1]), 1)
         @cuda threads=ts blocks=bs FT.compute_rt_macro_dft_layout_2d!(
-            kbuf, λs_gpu, μ_vals_gpu, Int32(i0), ζ_rt, Int32(Nλ), Int32(L))
+            kbuf, λs_gpu, v_losals_gpu, Int32(i0), ζ_rt, Int32(Nλ), Int32(L))
         kbuf_h = Array(kbuf)
         @test argmax(kbuf_h[1, :]) == L
     end
@@ -79,13 +79,13 @@ test_μs = [0.95, 0.7, 0.4, 0.2, 0.05]
 
         serial_ft_f32 = Array(FT.precompute_rt_macro_kernel_ft(cmem32, λs_f32, Float32(ζ_rt), Float32(0.7)))
 
-        μ_vals_gpu32 = CuArray(Float32[0.7])
+        v_losals_gpu32 = CuArray(Float32[0.7])
         λs_gpu32 = CuArray(λs_f32)
         kbuf32 = CUDA.zeros(Float32, 1, L32)
         ts = (32, 32)
         bs = (cld(Nλ, ts[1]), 1)
         @cuda threads=ts blocks=bs FT.compute_rt_macro_dft_layout_2d!(
-            kbuf32, λs_gpu32, μ_vals_gpu32, Int32(i0), Float32(ζ_rt), Int32(Nλ), Int32(L32))
+            kbuf32, λs_gpu32, v_losals_gpu32, Int32(i0), Float32(ζ_rt), Int32(Nλ), Int32(L32))
         kbuf32 ./= sum(kbuf32, dims=2)
         plan32 = CUDA.CUFFT.plan_rfft(kbuf32, 2)
         ft32 = CUDA.zeros(Complex{Float32}, 1, nfreq32)

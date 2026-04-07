@@ -90,20 +90,17 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
 # velocities
-μ_v_rot = CUDA.zeros(Float64, length(zs))
-σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-
-μ_v_mac = CUDA.zeros(Float64, length(zs)-1)
-σ_v_mac = CUDA.zeros(Float64, length(zs)-1)
+v_los_rot = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # get cfunc for flux
-cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 flux_stationary = Array(FT.get_flux(cfunc_flux_struct)')
 
 # get disk integrated continuum
-cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, v_mic)
 flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_struct)')
 
 # set rotational and macroturbulence
@@ -155,17 +152,17 @@ colors = pyconvert(Array, cmap(norm(vsinis ./ 1e3)))
     # do the disk integration
     for i in eachindex(μs_cpu)
         # set the rotational velocity
-        μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
+        v_los_rot .= z_rot_cpu[i] .* FT.c_ms
 
         # get intensity stuff
-        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], v_los_rot, v_mic)
 
         tbc = cfunc_intensity_struct.cfunc_dt
         cfunc_int_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μs_cpu[i])
         flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[i]
 
         # now do continuum intensity
-        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], v_los_rot, v_mic)
 
         # convolve with radial tangential
         tbc_cont = cfunc_intensity_cont.cfunc_dt

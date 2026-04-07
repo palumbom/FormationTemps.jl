@@ -33,10 +33,10 @@ cmem  = FT.ConvolutionMemory(Nλ, Natm, Npad)
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 gpu_mem  = FT.GPUMemory(λs_korg, atm_gpu)
 
-σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
-cfunc_flux_stationary      = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
-cfunc_flux_cont_stationary = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_stationary      = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
+cfunc_flux_cont_stationary = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, v_mic)
 
 # broadening parameters
 vsini = 4200.0

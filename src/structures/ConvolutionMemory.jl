@@ -44,7 +44,7 @@ mutable struct ConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     plan_fwd::CUDA.CUFFT.CuFFTPlan
     plan_bwd::AbstractFFTs.ScaledPlan
 
-    # 1D R2C FFT for real-space micro kernel (Tier 1: uniform σ_v)
+    # 1D R2C FFT for real-space micro kernel (Tier 1: uniform v_mic)
     xs_gpu::CA{T,1}                        # wavelength grid (Nλ)
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)

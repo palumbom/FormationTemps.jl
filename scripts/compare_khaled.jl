@@ -93,9 +93,9 @@ Npad = 400
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # broadening
-μ_v = CUDA.zeros(Float64, length(zs))
-σ_v = CUDA.zeros(Float64, length(zs)) .+ 850.0
-μ_v_rot = CUDA.zeros(Float64, length(zs))
+v_los = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 850.0
+v_los_rot = CUDA.zeros(Float64, length(zs))
 
 # memory for convolution
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
@@ -106,20 +106,20 @@ vsini = 1630.0
 vmac = 3980.0
 
 # get intensity stuff
-cfunc_int = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
+cfunc_int = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, v_los, v_mic)
 cfunc_int_cum = Array(FT.get_cum_cfunc(cfunc_int))
 intensity = Array(FT.get_intensity(cfunc_int))
 
-cfunc_int_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 1.0, μ_v, σ_v)
+cfunc_int_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 1.0, v_los, v_mic)
 cfunc_int_cont_cum = Array(FT.get_cum_cfunc(cfunc_int_cont))
 intensity_cont = Array(FT.get_intensity(cfunc_int_cont))
 
 # get flux
-cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux))
 flux = Array(FT.get_flux(cfunc_flux))
 
-cfunc_flux_cont = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux_cont = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, v_mic)
 cfunc_flux_cont_cum = Array(FT.get_cum_cfunc(cfunc_flux_cont))
 flux_cont = Array(FT.get_flux(cfunc_flux_cont))
 
@@ -157,11 +157,11 @@ cfunc_flux_integration = zeros(length(zs)-1, length(λs_korg))
     μs_cpu[i] <= 0.0 && continue
 
     # set the rotational velocity
-    μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
+    v_los_rot .= z_rot_cpu[i] .* FT.c_ms
 
     # get the intensity contribution function
-    cfunc_intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
-    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+    cfunc_intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], v_los, v_mic)
+    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], v_los, v_mic)
 
     # convolve the cfunc with RT macroturbulence
     tbc = cfunc_intensity.cfunc_dt

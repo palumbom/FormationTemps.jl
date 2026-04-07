@@ -48,12 +48,12 @@ Npad = 100
 cmem    = FT.ConvolutionMemory(Nλ, Natm, Npad)
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
-μ_v = CUDA.zeros(Float64, length(zs))
-σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+v_los = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # ── reference: direct flux (no disk integration) ────────────────────────────
 println("Computing reference flux (direct, no disk integration)...")
-cfunc_flux_ref = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux_ref = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 flux_ref       = Array(FT.get_flux(cfunc_flux_ref))
 
 # ── disk integration at several resolutions ──────────────────────────────────
@@ -76,7 +76,7 @@ for j in eachindex(Nϕ_vals)
 
     flux_disk = CUDA.zeros(Float64, length(λs_korg))
     @showprogress for i in eachindex(μs_cpu)
-        cfunc_i = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+        cfunc_i = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], v_los, v_mic)
         flux_disk .+= FT.get_intensity(cfunc_i) .* dA_cpu[i]
     end
 

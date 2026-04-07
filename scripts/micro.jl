@@ -93,21 +93,21 @@ vmics = range(mic_min, 8000.0 + mic_min, step=800.0)
 
 # loop over vmics
 μs = 1.0
-μ_v = CUDA.zeros(Float64, length(zs))
-σ_v = CUDA.zeros(Float64, length(zs))
+v_los = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs))
 cfuncs = zeros(length(zs)-1, length(λs_korg), length(vmics))
 cfuncs_flux = zeros(length(zs)-1, length(λs_korg), length(vmics))
 intensities = zeros(length(λs_korg), length(vmics))
 fluxes = zeros(length(λs_korg), length(vmics))
 
 for i in eachindex(vmics)
-    σ_v .= vmics[i]
+    v_mic .= vmics[i]
 
-    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs, μ_v, σ_v)
+    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs, v_los, v_mic)
     cfuncs[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_struct))
     intensities[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
 
-    local cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+    local cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
     cfuncs_flux[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_flux_struct))
     fluxes[:,i] = Array(FT.get_flux(cfunc_flux_struct))
 end

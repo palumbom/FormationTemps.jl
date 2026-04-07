@@ -39,18 +39,18 @@ Npad = 512
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
-σ_v = CUDA.zeros(Float64, Natm) .+ ξ
-μ_v_zero = CUDA.zeros(Float64, Natm)
+v_mic = CUDA.zeros(Float64, Natm) .+ ξ
+v_los_zero = CUDA.zeros(Float64, Natm)
 
 # ── tests ──────────────────────────────────────────────────────────────────────
 @testset "Buffer safety" begin
     @testset "calc_intensity_quantities returns independent copies" begin
-        μ_v_rot = CUDA.zeros(Float64, Natm) .+ 500.0
-        result1 = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 0.9, μ_v_rot, σ_v)
+        v_los_rot = CUDA.zeros(Float64, Natm) .+ 500.0
+        result1 = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 0.9, v_los_rot, v_mic)
         cfunc_dt_1 = Array(result1.cfunc_dt)
 
         # second call with different αs overwrites gpu_mem internals
-        result2 = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 0.5, μ_v_rot, σ_v)
+        result2 = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, 0.5, v_los_rot, v_mic)
         cfunc_dt_1_after = Array(result1.cfunc_dt)
 
         # result1 should be unchanged — it holds an independent copy
@@ -61,10 +61,10 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
     end
 
     @testset "calc_flux_quantities returns independent copies" begin
-        result1 = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+        result1 = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
         cfunc_dt_1 = Array(result1.cfunc_dt)
 
-        result2 = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v)
+        result2 = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, v_mic)
         cfunc_dt_1_after = Array(result1.cfunc_dt)
 
         @test cfunc_dt_1 ≈ cfunc_dt_1_after
@@ -74,7 +74,7 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
     @testset "GPU broadening out_gpu: Array() captures before next call" begin
         # get a contribution function to convolve
-        cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+        cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
         tbc = Array(cfunc_flux.cfunc_dt)
 
         # first call
@@ -93,7 +93,7 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
     end
 
     @testset "GPU broadening functions: iso_rt, gray_rot, hirano" begin
-        cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+        cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
         tbc = Array(cfunc_flux.cfunc_dt)
 
         # iso RT macro

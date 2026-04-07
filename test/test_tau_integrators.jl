@@ -36,16 +36,16 @@ ifactor_base = CuArray{Float64}(atm_gpu.τs ./ α_ref)
 Ts_gpu = CuArray{Float64}(atm_gpu.Ts)
 λs_gpu = CuArray{Float64}(collect(λs_korg))
 
-μ_vals = [1.0, 0.8, 0.5, 0.2]
+v_losals = [1.0, 0.8, 0.5, 0.2]
 
 @testset "τ integrator equivalence" begin
 
-    @testset "single-tile τ sanity: anchored at μ=$μ" for μ in μ_vals
+    @testset "single-tile τ sanity: anchored at μ=$μ" for μ in v_losals
         gpu_mem = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
         cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-        μ_v = CUDA.zeros(Float64, Natm)
-        σ_v = CUDA.zeros(Float64, Natm) .+ 850.0
-        αs_conv = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, μ_v, σ_v)
+        v_los = CUDA.zeros(Float64, Natm)
+        v_mic = CUDA.zeros(Float64, Natm) .+ 850.0
+        αs_conv = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, v_los, v_mic)
         FT.calc_tau_anchored_gpu!(μ, log_τ_ref, ifactor_base, αs_conv, gpu_mem.τs)
         τ = Array(gpu_mem.τs)
 
@@ -57,12 +57,12 @@ Ts_gpu = CuArray{Float64}(atm_gpu.Ts)
         @test maximum(τ[end, :]) > 10.0
     end
 
-    @testset "single-tile τ sanity: Bézier at μ=$μ" for μ in μ_vals
+    @testset "single-tile τ sanity: Bézier at μ=$μ" for μ in v_losals
         gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
         cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-        μ_v = CUDA.zeros(Float64, Natm)
-        σ_v = CUDA.zeros(Float64, Natm) .+ 850.0
-        αs_conv = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, μ_v, σ_v)
+        v_los = CUDA.zeros(Float64, Natm)
+        v_mic = CUDA.zeros(Float64, Natm) .+ 850.0
+        αs_conv = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, v_los, v_mic)
         FT.calc_tau_bezier_cached!(μ, atm_gpu.zs_gpu, αs_conv, gpu_mem.τs,
                                    gpu_mem.tau_ds, gpu_mem.tau_alphaC)
         τ = Array(gpu_mem.τs)
@@ -75,17 +75,17 @@ Ts_gpu = CuArray{Float64}(atm_gpu.Ts)
         @test maximum(τ[end, :]) > 10.0
     end
 
-    @testset "anchored vs Bézier: intensity agreement at μ=$μ" for μ in μ_vals
+    @testset "anchored vs Bézier: intensity agreement at μ=$μ" for μ in v_losals
         gpu_mem_a = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
         cmem_a = FT.ConvolutionMemory(Nλ, Natm, Npad)
-        μ_v = CUDA.zeros(Float64, Natm)
-        σ_v = CUDA.zeros(Float64, Natm) .+ 850.0
-        result_a = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem_a, cmem_a, μ, μ_v, σ_v)
+        v_los = CUDA.zeros(Float64, Natm)
+        v_mic = CUDA.zeros(Float64, Natm) .+ 850.0
+        result_a = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem_a, cmem_a, μ, v_los, v_mic)
         I_anchored = Array(FT.get_intensity(result_a))
 
         gpu_mem_b = FT.GPUMemory(λs_korg, atm_gpu)
         cmem_b = FT.ConvolutionMemory(Nλ, Natm, Npad)
-        result_b = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem_b, cmem_b, μ, μ_v, σ_v)
+        result_b = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem_b, cmem_b, μ, v_los, v_mic)
         I_bezier = Array(FT.get_intensity(result_b))
 
         @test all(isfinite, I_anchored)
@@ -101,15 +101,15 @@ Ts_gpu = CuArray{Float64}(atm_gpu.Ts)
     end
 
     @testset "fused tau+cfunc matches unfused pipeline" begin
-        B = length(μ_vals)
+        B = length(v_losals)
         bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)
-        μ_tiles = CuArray{Float64}(μ_vals)
-        μ_v_batch = CUDA.zeros(Float64, B * Natm)
-        σ_v_scalar = 850.0
+        μ_tiles = CuArray{Float64}(v_losals)
+        v_los_batch = CUDA.zeros(Float64, B * Natm)
+        v_mic_scalar = 850.0
 
         bcmem.signal_cached = false
         αs_conv = FT.convolve_wavelength_axis_batched!(
-            bcmem, λs_korg, αs, μ_v_batch, σ_v_scalar, B)
+            bcmem, λs_korg, αs, v_los_batch, v_mic_scalar, B)
 
         # unfused: anchored tau → cfunc_dt (separate kernels)
         τs_batch = CUDA.zeros(Float64, B * Natm, Nλ)
@@ -132,27 +132,27 @@ Ts_gpu = CuArray{Float64}(atm_gpu.Ts)
     end
 
     @testset "fused kernel with tile_offset" begin
-        B = length(μ_vals)
+        B = length(v_losals)
         bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)
-        μ_v_batch = CUDA.zeros(Float64, B * Natm)
-        σ_v_scalar = 850.0
+        v_los_batch = CUDA.zeros(Float64, B * Natm)
+        v_mic_scalar = 850.0
 
         # pad μ_tiles to test that tile_offset indexes correctly
-        μ_padded = CuArray{Float64}([0.99, 0.88, μ_vals...])
+        μ_padded = CuArray{Float64}([0.99, 0.88, v_losals...])
         offset = 2
 
         bcmem.signal_cached = false
         αs_conv = FT.convolve_wavelength_axis_batched!(
-            bcmem, λs_korg, αs, μ_v_batch, σ_v_scalar, B)
+            bcmem, λs_korg, αs, v_los_batch, v_mic_scalar, B)
 
-        # with offset: reads μ_padded[3:6] = μ_vals
+        # with offset: reads μ_padded[3:6] = v_losals
         cfdt_offset = CUDA.zeros(Float64, B * Natm1, Nλ)
         FT.calc_tau_cfunc_dt_fused!(cfdt_offset, αs_conv, log_τ_ref, ifactor_base,
                                      μ_padded, Ts_gpu, λs_gpu, Natm, B;
                                      tile_offset=offset)
 
-        # without offset: reads μ_vals[1:4] directly
-        μ_tiles = CuArray{Float64}(μ_vals)
+        # without offset: reads v_losals[1:4] directly
+        μ_tiles = CuArray{Float64}(v_losals)
         cfdt_direct = CUDA.zeros(Float64, B * Natm1, Nλ)
         FT.calc_tau_cfunc_dt_fused!(cfdt_direct, αs_conv, log_τ_ref, ifactor_base,
                                      μ_tiles, Ts_gpu, λs_gpu, Natm, B)

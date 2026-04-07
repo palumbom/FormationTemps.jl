@@ -87,7 +87,7 @@ Fields:
 - `zs_gpu`, `Ts_gpu`, `nd_gpu`: Height, temperature, and number density on the device.
 - `vx`, `vy`, `vz`: Per-layer velocity components on the device (m/s). Initialized to zero
   by the convenience constructor; populated by downstream packages from MHD simulation data.
-- `σ_v`, `μ_v`: Per-layer microturbulent speed and mean line-of-sight velocity on the device (m/s).
+- `v_mic`, `v_los`: Per-layer microturbulent speed and mean line-of-sight velocity on the device (m/s).
 
 See also: [`AtmosphereGPU(atm_korg)`](@ref)
 """
@@ -106,8 +106,8 @@ struct AtmosphereGPU{T<:AF} <: Atmosphere{T}
     vx::CuVector{T}
     vy::CuVector{T}
     vz::CuVector{T}
-    σ_v::CuVector{T}
-    μ_v::CuVector{T}
+    v_mic::CuVector{T}
+    v_los::CuVector{T}
 end
 
 """
@@ -134,11 +134,11 @@ function AtmosphereGPU(atm_korg; T::Type{<:AF}=Float64)
     vx     = CUDA.zeros(T, f.Natm)
     vy     = CUDA.zeros(T, f.Natm)
     vz     = CUDA.zeros(T, f.Natm)
-    σ_v    = CUDA.zeros(T, f.Natm)
-    μ_v    = CUDA.zeros(T, f.Natm)
+    v_mic    = CUDA.zeros(T, f.Natm)
+    v_los    = CUDA.zeros(T, f.Natm)
 
     return AtmosphereGPU(f.Natm, T.(f.τs), T.(f.zs), T.(f.Ts), T.(f.nₑ), T.(f.nd),
-                         T(f.ref_wl), zs_gpu, Ts_gpu, nd_gpu, vx, vy, vz, σ_v, μ_v)
+                         T(f.ref_wl), zs_gpu, Ts_gpu, nd_gpu, vx, vy, vz, v_mic, v_los)
 end
 
 """
@@ -153,7 +153,7 @@ Fields:
 - `nₑ`, `nd`: Electron and total number density grids.
 - `reference_wavelength`: MARCS reference wavelength for `τ_ref` (cm; typically 5000 Å).
 - `vx`, `vy`, `vz`: Per-layer velocity components (m/s).
-- `σ_v`, `μ_v`: Per-layer microturbulent speed and mean line-of-sight velocity (m/s).
+- `v_mic`, `v_los`: Per-layer microturbulent speed and mean line-of-sight velocity (m/s).
 
 See also: [`AtmosphereCPU(atm_korg)`](@ref)
 """
@@ -169,8 +169,8 @@ struct AtmosphereCPU{T<:AF} <: Atmosphere{T}
     vx::Vector{T}
     vy::Vector{T}
     vz::Vector{T}
-    σ_v::Vector{T}
-    μ_v::Vector{T}
+    v_mic::Vector{T}
+    v_los::Vector{T}
 end
 
 """
@@ -190,11 +190,11 @@ function AtmosphereCPU(atm_korg)
     vx  = zeros(Float64, f.Natm)
     vy  = zeros(Float64, f.Natm)
     vz  = zeros(Float64, f.Natm)
-    σ_v = zeros(Float64, f.Natm)
-    μ_v = zeros(Float64, f.Natm)
+    v_mic = zeros(Float64, f.Natm)
+    v_los = zeros(Float64, f.Natm)
 
     return AtmosphereCPU(f.Natm, f.τs, f.zs, f.Ts, f.nₑ, f.nd, f.ref_wl,
-                         vx, vy, vz, σ_v, μ_v)
+                         vx, vy, vz, v_mic, v_los)
 end
 
 """

@@ -26,11 +26,11 @@ Npad = 240
 cmem    = FT.ConvolutionMemory(Nλ, Natm, Npad)
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
-μ_v_rot = CUDA.zeros(Float64, length(zs))
-σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+v_los_rot = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
-cfunc_int  = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, μ_v_rot, σ_v_mic)
-cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_int  = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, v_los_rot, v_mic)
+cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 
 cfunc_int_cum  = Array(FT.get_cum_cfunc(cfunc_int))
 cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux))

@@ -1,12 +1,12 @@
 E_2(τ) = exponential_integral_2_gpu(τ)
 
 """
-    calc_intensity_quantities(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
+    calc_intensity_quantities(αs_init, atm, mem, cmem, μ_tile, v_los, v_mic)
 
 Compute the specific intensity contribution function and its optical-depth-weighted
 differential for a single disk tile.
 
-Applies microturbulent broadening (with per-layer Doppler shift `μ_v`), integrates the
+Applies microturbulent broadening (with per-layer Doppler shift `v_los`), integrates the
 optical depth using either the anchored or Bézier scheme (as configured in `mem`), and
 evaluates the Planck-weighted contribution function at each layer boundary.
 
@@ -16,8 +16,9 @@ Arguments:
 - `mem::GPUMemory`: Pre-allocated GPU working arrays.
 - `cmem::AbstractConvolutionMemory`: Pre-allocated GPU convolution memory.
 - `μ_tile::Real`: Cosine of the local zenith angle for this disk tile.
-- `μ_v::CuArray{<:Real,1}`: Per-layer line-of-sight velocity from rotation (m/s).
-- `σ_v::CuArray{<:Real,1}`: Per-layer microturbulent broadening width (m/s).
+- `v_los::CuArray{<:Real,1}`: Per-layer line-of-sight velocity from rotation (m/s).
+- `v_mic::Union{T, CuArray{T,1}}`: Microturbulent broadening width (m/s). Scalar for
+  uniform broadening; CuVector for per-layer broadening.
 
 Returns:
 - `IntensityContFunc` with fields:
@@ -27,10 +28,10 @@ Returns:
 See also: [`calc_flux_quantities`](@ref)
 """
 function calc_intensity_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                                   cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
-                                   σ_v) where T<:AF
+                                   cmem::AbstractConvolutionMemory, μ_tile::T, v_los::CA{T,1},
+                                   v_mic::Union{T, CA{T,1}}) where T<:AF
     # get contribution function
-    calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, μ_v, σ_v)
+    calc_intensity_cfunc!(αs_init, atm, mem, cmem, μ_tile, v_los, v_mic)
 
     # multiply by differential for cum. cont. & intensity
     # returns independent copies so callers can hold the result across multiple calls
@@ -42,11 +43,11 @@ end
 # Returned cfunc and cfunc_dt alias mem.cfunc / mem.cfunc_dt — caller must consume
 # (copy or pass to a function that copies internally) before the next call that shares mem.
 function calc_intensity_quantities_inplace!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                                            cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
-                                            σ_v) where T<:AF
+                                            cmem::AbstractConvolutionMemory, μ_tile::T, v_los::CA{T,1},
+                                            v_mic::Union{T, CA{T,1}}) where T<:AF
     # micro-broadening + tau (same as calc_intensity_cfunc!)
     cmem.signal_cached || copyto!(mem.αs, αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, v_los, v_mic)
     if mem.use_anchored
         calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
     else
@@ -63,7 +64,7 @@ function calc_intensity_quantities_inplace!(αs_init::AA{T,2}, atm::AtmosphereGP
 end
 
 """
-    calc_flux_quantities(αs_init, atm, mem, cmem, σ_v)
+    calc_flux_quantities(αs_init, atm, mem, cmem, v_mic)
 
 Compute the disk-center (μ=1, zero rotation) flux contribution function and its
 optical-depth-weighted differential.
@@ -77,7 +78,8 @@ Arguments:
 - `atm::AtmosphereGPU`: GPU atmosphere.
 - `mem::GPUMemory`: Pre-allocated GPU working arrays.
 - `cmem::AbstractConvolutionMemory`: Pre-allocated GPU convolution memory.
-- `σ_v::CuArray{<:Real,1}`: Per-layer microturbulent broadening width (m/s).
+- `v_mic::Union{T, CuArray{T,1}}`: Microturbulent broadening width (m/s). Scalar for
+  uniform broadening; CuVector for per-layer broadening.
 
 Returns:
 - `FluxContFunc` with fields:
@@ -87,11 +89,10 @@ Returns:
 See also: [`calc_intensity_quantities`](@ref)
 """
 function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                              cmem::AbstractConvolutionMemory, σ_v) where T<:AF
-    # micro-broadening + tau
+                              cmem::AbstractConvolutionMemory, v_mic::Union{T, CA{T,1}}) where T<:AF
+    # micro-broadening + tau (stationary frame: zero v_los)
     cmem.signal_cached || copyto!(mem.αs, αs_init)
-    fill!(atm.μ_v, zero(T))
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, atm.μ_v, σ_v)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, mem.v_los_zeros, v_mic)
     if mem.use_anchored
         calc_tau_anchored_gpu!(one(T), mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
     else
@@ -111,11 +112,11 @@ function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPU
 end
 
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                               cmem::AbstractConvolutionMemory, μ_tile::T, μ_v::CA{T,1},
-                               σ_v) where T<:AF
+                               cmem::AbstractConvolutionMemory, μ_tile::T, v_los::CA{T,1},
+                               v_mic::Union{T, CA{T,1}}) where T<:AF
     # copy opacities (skip when signal FFT is cached — αs unchanged)
     cmem.signal_cached || copyto!(mem.αs, αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, v_los, v_mic)
 
     # compute taus
     if mem.use_anchored
@@ -136,9 +137,9 @@ end
 # Does NOT populate mem.cfunc — use calc_intensity_cfunc! if you need the cfunc matrix.
 function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::AtmosphereGPU{T},
                                 mem::GPUMemory, cmem::AbstractConvolutionMemory, μ_tile::T,
-                                μ_v::CA{T,1}, σ_v) where T<:AF
+                                v_los::CA{T,1}, v_mic::Union{T, CA{T,1}}) where T<:AF
     cmem.signal_cached || copyto!(mem.αs, αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, μ_v, σ_v)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, v_los, v_mic)
     if mem.use_anchored
         calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
     else
@@ -150,11 +151,10 @@ function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::Atmosphere
 end
 
 function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
-                         cmem::AbstractConvolutionMemory, σ_v) where T<:AF
-    # move alphas to reusable buffers and zero mean velocity in-place
+                         cmem::AbstractConvolutionMemory, v_mic::Union{T, CA{T,1}}) where T<:AF
+    # micro-broadening (stationary frame: zero v_los)
     cmem.signal_cached || copyto!(mem.αs, αs_init)
-    fill!(atm.μ_v, zero(T))
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, atm.μ_v, σ_v)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, mem.v_los_zeros, v_mic)
 
     # compute taus
     if mem.use_anchored

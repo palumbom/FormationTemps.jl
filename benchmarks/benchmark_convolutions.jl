@@ -47,19 +47,19 @@ cmem32 = FT.ConvolutionMemory(Nλ, Natm, Npad; T=Float32)
 cmem_mac32 = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=Float32)
 
 # velocities — Float64 (vector, for GPU per-row path)
-μ_v_rot64 = CUDA.zeros(Float64, Natm)
-σ_v_mic64 = CUDA.zeros(Float64, Natm) .+ 850.0
+v_los_rot64 = CUDA.zeros(Float64, Natm)
+v_mic64 = CUDA.zeros(Float64, Natm) .+ 850.0
 
 # velocities — Float32 (vector, for GPU per-row path)
-μ_v_rot32 = CUDA.zeros(Float32, Natm)
-σ_v_mic32 = CUDA.zeros(Float32, Natm) .+ Float32(850.0)
+v_los_rot32 = CUDA.zeros(Float32, Natm)
+v_mic32 = CUDA.zeros(Float32, Natm) .+ Float32(850.0)
 
-# scalar σ_v for production-matching CPU in-place path
-σ_v_scalar = 850.0
+# scalar v_mic for production-matching CPU in-place path
+v_mic_scalar = 850.0
 
-# vector σ_v / μ_v for per-row CPU dispatch comparison
-μ_v_vec = fill(0.0, Natm)
-σ_v_vec = fill(850.0, Natm)
+# vector v_mic / v_los for per-row CPU dispatch comparison
+v_los_vec = fill(0.0, Natm)
+v_mic_vec = fill(850.0, Natm)
 
 # CPU tile workspace (matches production in-place path)
 cpu_ws = FT.CPUTileWorkspace(Float64, Natm, Nλ)
@@ -74,7 +74,7 @@ macro_ws = FT.CPUTileWorkspace(Float64, Natm, Nλ)
 αs_gpu32 = CuArray(Float32.(αs))
 
 # get a spectrum to convolve
-cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem64, σ_v_mic64)
+cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem64, v_mic64)
 tbc64 = Array(cfunc_flux_stationary.cfunc_dt)
 tbc32 = Float32.(tbc64)
 λs_korg_f32 = Float32.(collect(λs_korg))
@@ -123,16 +123,16 @@ end
 # microturbulence — scalar dispatch (production disk-integration path)
 println("Micro (scalar)...")
 record!("Micro (scalar)",
-    bench_cpu(() -> FT._convolve_micro_inplace!(cpu_ws.αs_broad, λs_korg, αs, 0.0, σ_v_scalar, cpu_ws)),
-    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, μ_v_rot64, σ_v_mic64)),
-    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem32, λs_gpu32, αs_gpu32, μ_v_rot32, σ_v_mic32)))
+    bench_cpu(() -> FT._convolve_micro_inplace!(cpu_ws.αs_broad, λs_korg, αs, 0.0, v_mic_scalar, cpu_ws)),
+    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, v_los_rot64, v_mic64)),
+    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem32, λs_gpu32, αs_gpu32, v_los_rot32, v_mic32)))
 
-# microturbulence — per-row dispatch (per-layer σ_v path)
+# microturbulence — per-row dispatch (per-layer v_mic path)
 println("Micro (per-row)...")
 record!("Micro (per-row)",
-    bench_cpu(() -> FT._convolve_micro_inplace!(cpu_ws.αs_broad, λs_korg, αs, μ_v_vec, σ_v_vec, cpu_ws)),
-    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, μ_v_rot64, σ_v_mic64)),
-    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem32, λs_gpu32, αs_gpu32, μ_v_rot32, σ_v_mic32)))
+    bench_cpu(() -> FT._convolve_micro_inplace!(cpu_ws.αs_broad, λs_korg, αs, v_los_vec, v_mic_vec, cpu_ws)),
+    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem64, λs_gpu64, αs_gpu64, v_los_rot64, v_mic64)),
+    bench_gpu(() -> FT.convolve_wavelength_axis_gpu(cmem32, λs_gpu32, αs_gpu32, v_los_rot32, v_mic32)))
 
 # gray rotation
 println("Gray rotation...")

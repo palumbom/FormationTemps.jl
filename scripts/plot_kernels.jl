@@ -90,16 +90,13 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
 # velocities
-μ_v_rot = CUDA.zeros(Float64, length(zs))
-σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-
-μ_v_mac = CUDA.zeros(Float64, length(zs)-1)
-σ_v_mac = CUDA.zeros(Float64, length(zs)-1)
+v_los_rot = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # get the formation temperature for a stationary star
-cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 flux_stationary = Array(FT.get_flux(cfunc_flux_struct))
 cum_cfunc_flux_stationary = Array(FT.get_cum_cfunc(cfunc_flux_struct))
 

@@ -92,25 +92,25 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # loop over mus
 μs = range(0.1, 1.0, step=0.1)
-μ_v = CUDA.zeros(Float64, length(zs))
-σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+v_los = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs))
 cfuncs_cum = zeros(length(zs)-1, length(λs_korg), length(μs))
 intensities = zeros(length(λs_korg), length(μs))
 continuum = zeros(length(λs_korg), length(μs))
 
 for i in eachindex(μs)
-    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], v_los, v_mic)
     cfuncs[:,:,i] .= Array(cfunc_intensity_struct.cfunc_dt)
     cfuncs_cum[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_struct))
     intensities[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
 
-    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], v_los, v_mic)
     continuum[:,i] .= Array(FT.get_intensity(cfunc_intensity_cont))
 end
 
 # get flux and flux cfunc
-cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 flux_disk_integrated = Array(FT.get_flux(cfunc_flux_struct))
 cfunc_flux = Array(cfunc_flux_struct.cfunc_dt)
 cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_struct))
@@ -218,10 +218,10 @@ plt.clf(); plt.close()
 
 
 # now plot the contribution functions
-μ_vals_to_plot = [1.0, 0.6, 0.3, 0.1]
+v_losals_to_plot = [1.0, 0.6, 0.3, 0.1]
 
 # make three panels
-fig, axs = plt.subplots(nrows=1, ncols=length(μ_vals_to_plot), sharey=true, figsize=(18.2, 4.2))#, layout="compressed")
+fig, axs = plt.subplots(nrows=1, ncols=length(v_losals_to_plot), sharey=true, figsize=(18.2, 4.2))#, layout="compressed")
 ax1 = axs[0]
 
 idx1 = findfirst(x -> x .>= first(wls) - 0.75, λs_korg)
@@ -253,9 +253,9 @@ yedges2 = elav(zs ./ 1e7)
 imgs = []
 
 # fig.colorbar(im, ax=axes.ravel().tolist())
-for i in eachindex(μ_vals_to_plot)
-    # !(i in μ_vals_to_plot) && continue
-    μ_idx = findfirst(μs .== μ_vals_to_plot[i])
+for i in eachindex(v_losals_to_plot)
+    # !(i in v_losals_to_plot) && continue
+    μ_idx = findfirst(μs .== v_losals_to_plot[i])
 
     # get view of cfunc
     cfunc_view = view(cfuncs,:,idx1:idx2,μ_idx)  ./ 10^(exponent)
@@ -272,7 +272,7 @@ for i in eachindex(μ_vals_to_plot)
     # axs[i].set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
     # ax3.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
     # ax3.set_ylabel(L"{\rm Physical\ Height\ [Mm]}")
-    mu_val = string(μ_vals_to_plot[i])
+    mu_val = string(v_losals_to_plot[i])
     axs[i - 1].set_title(L"\mu = %$mu_val")
 
     local fwd = interp1d(yedges2, yedges, fill_value="extrapolate")

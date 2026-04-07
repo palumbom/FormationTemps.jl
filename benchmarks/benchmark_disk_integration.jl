@@ -102,15 +102,15 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
         _calc_tau_cpu! = (μ_i, αs_in, τs_out) -> FT.calc_tau_anchored_cpu!(μ_i, atm_cpu.τs, α_ref, αs_in, τs_out)
     end
 
-    σ_v_scalar = star.ξ
+    v_mic_scalar = star.ξ
     ws = FT.CPUTileWorkspace(T, Natm, Nλ)
     μ_tile = μs_cpu[1]
-    μ_v_scalar = T(z_rot_cpu[1] * FT.c_ms)
+    v_los_scalar = T(z_rot_cpu[1] * FT.c_ms)
 
     # microturbulence (total + continuum)
     trial_micro = @benchmark begin
-        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $μ_v_scalar, $σ_v_scalar, $ws)
-        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $μ_v_scalar, $σ_v_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $v_los_scalar, $v_mic_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $v_los_scalar, $v_mic_scalar, $ws)
     end
 
     # tau integration (total + continuum); micro output needed as setup
@@ -118,8 +118,8 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
         $_calc_tau_cpu!($μ_tile, $ws.αs_broad, $ws.τs_int)
         $_calc_tau_cpu!($μ_tile, $ws.αs_cont_broad, $ws.τs_int_cont)
     end setup=begin
-        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $μ_v_scalar, $σ_v_scalar, $ws)
-        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $μ_v_scalar, $σ_v_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $v_los_scalar, $v_mic_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $v_los_scalar, $v_mic_scalar, $ws)
     end
 
     # cfunc (total + continuum); micro + tau output needed as setup
@@ -129,8 +129,8 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
         FT.calc_intensity_cfunc_cpu!($ws.cfunc_int_cont, $Ts, $λs_korg, $ws.τs_int_cont)
         @views $ws.cfunc_dt_int_cont .= $ws.cfunc_int_cont .* ($ws.τs_int_cont[2:end, :] .- $ws.τs_int_cont[1:end-1, :])
     end setup=begin
-        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $μ_v_scalar, $σ_v_scalar, $ws)
-        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $μ_v_scalar, $σ_v_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $v_los_scalar, $v_mic_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $v_los_scalar, $v_mic_scalar, $ws)
         $_calc_tau_cpu!($μ_tile, $ws.αs_broad, $ws.τs_int)
         $_calc_tau_cpu!($μ_tile, $ws.αs_cont_broad, $ws.τs_int_cont)
     end
@@ -140,8 +140,8 @@ function benchmark_cpu_pertile(αs, αs_cont, atm_cpu, λs_korg, star, μs_cpu, 
         FT._convolve_macro_inplace!($ws.macro_out, $λs_korg, $ws.cfunc_dt_int, $(star.ζ), $μ_tile, $ws)
         FT._convolve_macro_inplace!($ws.macro_out, $λs_korg, $ws.cfunc_dt_int_cont, $(star.ζ), $μ_tile, $ws)
     end setup=begin
-        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $μ_v_scalar, $σ_v_scalar, $ws)
-        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $μ_v_scalar, $σ_v_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_broad, $λs_korg, $αs, $v_los_scalar, $v_mic_scalar, $ws)
+        FT._convolve_micro_inplace!($ws.αs_cont_broad, $λs_korg, $αs_cont, $v_los_scalar, $v_mic_scalar, $ws)
         $_calc_tau_cpu!($μ_tile, $ws.αs_broad, $ws.τs_int)
         $_calc_tau_cpu!($μ_tile, $ws.αs_cont_broad, $ws.τs_int_cont)
         FT.calc_intensity_cfunc_cpu!($ws.cfunc_int, $Ts, $λs_korg, $ws.τs_int)
@@ -188,7 +188,7 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
 
     λs_T = T.(collect(λs_korg))
     λs_gpu = CuArray(λs_T)
-    σ_v = T(star.ξ)
+    v_mic = T(star.ξ)
     log_τ_ref = CuArray{T}(log.(atm_gpu.τs))
     ifactor_base = CuArray{T}(atm_gpu.τs ./ α_ref_T)
     Ts_gpu = CuArray{T}(atm_gpu.Ts)
@@ -202,19 +202,19 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     # pre-upload all tile parameters (matches production)
     all_μ_tiles_gpu = CuArray(T.(μs_cpu))
     all_dA_tiles_gpu = CuArray(T.(ones(Ntiles) .* 0.001))  # dummy dA for timing
-    all_μ_v_gpu = CuArray(repeat(T.(z_rot_cpu .* FT.c_ms), inner=Natm))
+    all_v_los_gpu = CuArray(repeat(T.(z_rot_cpu .* FT.c_ms), inner=Natm))
 
     # working arrays (fused kernel: no τs_batch needed for anchored path)
     cfdt_batch      = CUDA.zeros(T, B * Natm1, Nλ)
     cfdt_batch_cont = CUDA.zeros(T, B * Natm1, Nλ)
 
     # prime signal caches
-    μ_v_prime = CUDA.zeros(T, Natm)
+    v_los_prime = CUDA.zeros(T, Natm)
     bcmem.signal_cached = false
-    FT.convolve_wavelength_axis_batched!(bcmem, λs_T, αs_T, μ_v_prime, σ_v, 1)
+    FT.convolve_wavelength_axis_batched!(bcmem, λs_T, αs_T, v_los_prime, v_mic, 1)
     bcmem.signal_cached = true
     bcmem_cont.signal_cached = false
-    FT.convolve_wavelength_axis_batched!(bcmem_cont, λs_T, αs_cont_T, μ_v_prime, σ_v, 1)
+    FT.convolve_wavelength_axis_batched!(bcmem_cont, λs_T, αs_cont_T, v_los_prime, v_mic, 1)
     bcmem_cont.signal_cached = true
 
     # batched macro kernel precomputation (matches production)
@@ -223,12 +223,12 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     unique_μ_sorted = sort(unique(T.(μs_cpu)))
     N_unique = length(unique_μ_sorted)
     μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
-    μ_vals_gpu = CuArray(unique_μ_sorted)
+    v_losals_gpu = CuArray(unique_μ_sorted)
     kbuf_mac = CUDA.zeros(T, N_unique, L_mac)
     ts_kc = (32, 32)
     bs_kc = (cld(Nλ, ts_kc[1]), cld(N_unique, ts_kc[2]))
     @cuda threads=ts_kc blocks=bs_kc FT.compute_rt_macro_dft_layout_2d!(
-        kbuf_mac, λs_gpu, μ_vals_gpu, Int32(i0_mac), T(star.ζ),
+        kbuf_mac, λs_gpu, v_losals_gpu, Int32(i0_mac), T(star.ζ),
         Int32(Nλ), Int32(L_mac))
     kbuf_mac ./= sum(kbuf_mac, dims=2)
     plan_kc = CUDA.CUFFT.plan_rfft(kbuf_mac, 2)
@@ -259,11 +259,11 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     function run_micro!()
         CUDA.stream!(stream_total) do
             αs_conv[] = FT.convolve_wavelength_axis_batched!(bcmem, λs_T, αs_T,
-                all_μ_v_gpu, σ_v, B; tile_offset=0)
+                all_v_los_gpu, v_mic, B; tile_offset=0)
         end
         CUDA.stream!(stream_cont) do
             αs_conv_c[] = FT.convolve_wavelength_axis_batched!(bcmem_cont, λs_T, αs_cont_T,
-                all_μ_v_gpu, σ_v, B; tile_offset=0)
+                all_v_los_gpu, v_mic, B; tile_offset=0)
         end
         CUDA.synchronize()
     end

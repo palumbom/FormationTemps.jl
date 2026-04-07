@@ -21,7 +21,7 @@ struct CPUTileWorkspace{T<:AF, P1, P2}
     macro_out::Matrix{T}
 
     # per-tile velocity buffer (length Natm)
-    μ_v_buf::Vector{T}
+    v_los_buf::Vector{T}
 
     # FFT working buffers (padded length L)
     kernel_real::Vector{T}

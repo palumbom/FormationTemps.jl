@@ -88,21 +88,18 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 gpu_mem = isempty(atm_gpu.τs) ? FT.GPUMemory(λs_korg, atm_gpu) : FT.GPUMemory(λs_korg, atm_gpu, α_ref)
 
 # velocities
-μ_v_rot = CUDA.zeros(Float64, length(zs))
-σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
-
-μ_v_mac = CUDA.zeros(Float64, length(zs)-1)
-σ_v_mac = CUDA.zeros(Float64, length(zs)-1)
+v_los_rot = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
 # get the formation temperature for a stationary star
-cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 flux_stationary = Array(FT.get_flux(cfunc_flux_struct)')
 cfunc_flux_stationary = cfunc_flux_struct.cfunc_dt
 cum_cfunc_flux_stationary = Array(FT.get_cum_cfunc(cfunc_flux_struct))
 
-cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, v_mic)
 cfunc_flux_cont_stationary = cfunc_flux_cont_struct.cfunc_dt
 flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_struct)')
 
@@ -222,10 +219,10 @@ for k in eachindex(vsinis)
             μs_cpu[i] <= 0.0 && continue
 
             # set the rotational velocity
-            μ_v_rot .= z_rot_cpu[i] .* FT.c_ms
+            v_los_rot .= z_rot_cpu[i] .* FT.c_ms
 
             # get intensity stuff
-            cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+            cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], v_los_rot, v_mic)
 
             tbc = cfunc_intensity_struct.cfunc_dt
             cfunc_int_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmacs[j], μs_cpu[i])
@@ -233,7 +230,7 @@ for k in eachindex(vsinis)
             cfunc_flux_integration .+= cfunc_int_i_mac .* dA_cpu[i]
 
             # now do continuum intensity
-            cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v_rot, σ_v_mic)
+            cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[i], v_los_rot, v_mic)
 
             tbc_cont = cfunc_intensity_cont.cfunc_dt
             cfunc_int_cont_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, vmacs[j], μs_cpu[i])

@@ -387,13 +387,13 @@ end
 # ── batched macro kernel precomputation ───────────────────────────────────────
 
 """
-    compute_rt_macro_dft_layout_2d!(kbuf, xs, μ_vals, i0, ζ_rt, Nλ, L)
+    compute_rt_macro_dft_layout_2d!(kbuf, xs, v_losals, i0, ζ_rt, Nλ, L)
 
 CUDA kernel: evaluate the RT macroturbulence kernel for multiple μ values in parallel,
 writing directly in DFT layout (zero-lag at index 1). Each row of `kbuf` (N_unique, L)
 corresponds to one unique μ value. Skips the roll + ifftshift needed by the serial path.
 """
-function compute_rt_macro_dft_layout_2d!(kbuf, xs, μ_vals, i0, ζ_rt, Nλ, L)
+function compute_rt_macro_dft_layout_2d!(kbuf, xs, v_losals, i0, ζ_rt, Nλ, L)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     Nrows = size(kbuf, 1)
@@ -403,7 +403,7 @@ function compute_rt_macro_dft_layout_2d!(kbuf, xs, μ_vals, i0, ζ_rt, Nλ, L)
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
     v = c_ms * (xj - λ0) / λ0
-    μ = @inbounds μ_vals[row]
+    μ = @inbounds v_losals[row]
 
     ϵ = T(1e-6)
     cosθ = max(μ, ϵ)

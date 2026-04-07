@@ -35,14 +35,14 @@ mutable struct BatchedMicroConvMem{T<:AF} <: AbstractConvolutionMemory{T}
     conv_gpu::CuMatrix{T}                  # (B*Natm, L) inverse FFT result
     plan_bwd::AbstractFFTs.ScaledPlan      # C2R on (B*Natm, L)
 
-    # ── 1D R2C for real-space micro kernel (Tier 1: uniform σ_v) ──
+    # ── 1D R2C for real-space micro kernel (Tier 1: uniform v_mic) ──
     xs_gpu::CA{T,1}                        # wavelength grid (Nλ)
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
     plan_fwd_1d::CUDA.CUFFT.CuFFTPlan     # 1D R2C plan on kr_1d
     kernel_cached::Bool                     # base kernel FT is valid
 
-    # ── batched R2C for per-row kernels (Tier 2: varying σ_v) ──
+    # ── batched R2C for per-row kernels (Tier 2: varying v_mic) ──
     plan_fwd_kernel::CUDA.CUFFT.CuFFTPlan  # R2C on (B*Natm, L)
 end
 

@@ -35,10 +35,10 @@ let
                       α_ref_out=α_ref, ne_warn_thresh=Inf)
 
     # microturbulent broadening
-    σ_v = fill(ξ, Natm)
-    μ_v = zeros(T, Natm)
-    αs_broad = FT.convolve_wavelength_axis(λs_korg, αs, μ_v, σ_v)
-    αs_cont_broad = FT.convolve_wavelength_axis(λs_korg, αs_cont, μ_v, σ_v)
+    v_mic = fill(ξ, Natm)
+    v_los = zeros(T, Natm)
+    αs_broad = FT.convolve_wavelength_axis(λs_korg, αs, v_los, v_mic)
+    αs_cont_broad = FT.convolve_wavelength_axis(λs_korg, αs_cont, v_los, v_mic)
 
     # optical depth
     τs = zeros(T, Natm, Nλ)
@@ -138,5 +138,24 @@ let
                 @test maximum(abs.(result_convenience.flux .- result_convenience_gpu.flux)) < 1e-3
             end
         end
+    end
+
+    # --- vector v_micro: uniform vector must match scalar ---
+    @testset "vector v_micro matches scalar" begin
+        v_mic_vec = fill(ξ, Natm)
+        star_vec = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
+                                vsini=0.0, v_macro=0.0, v_micro=v_mic_vec)
+        star_sc = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
+                               vsini=0.0, v_macro=0.0, v_micro=ξ)
+
+        minλ = first(wls) - 2.0
+        maxλ = last(wls) + 2.0
+        result_vec = calc_formation_temp(star_vec, linelist; use_gpu=false,
+                                          minλ=minλ, maxλ=maxλ, ne_warn_thresh=Inf)
+        result_sc = calc_formation_temp(star_sc, linelist; use_gpu=false,
+                                         minλ=minλ, maxλ=maxλ, ne_warn_thresh=Inf)
+
+        @test result_vec.flux ≈ result_sc.flux atol=1e-10
+        @test result_vec.form_temps ≈ result_sc.form_temps atol=1e-10
     end
 end

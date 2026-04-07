@@ -75,8 +75,8 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # loop over mus
 μs = range(0.1, 1.0, step=0.1)
-μ_v = CUDA.zeros(Float64, length(zs))
-σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+v_los = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs))
 cfuncs_cum = zeros(length(zs)-1, length(λs_korg), length(μs))
 intensities = zeros(length(λs_korg), length(μs))
@@ -89,17 +89,17 @@ norm = mpl.colors.Normalize(vmin=minimum(μs), vmax=1.075)
 colors = cmap(norm(μs))
 
 for i in eachindex(μs)
-    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], v_los, v_mic)
     cfuncs[:,:,i] .= Array(cfunc_intensity_struct.cfunc_dt)
     cfuncs_cum[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_struct))
     intensities[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
 
-    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], μ_v, σ_v)
+    cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], v_los, v_mic)
     continuum[:,i] .= Array(FT.get_intensity(cfunc_intensity_cont))
 end
 
 # get flux and flux cfunc
-cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 flux_disk_integrated = Array(FT.get_flux(cfunc_flux_struct))
 cfunc_flux = Array(cfunc_flux_struct.cfunc_dt)
 cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_struct))

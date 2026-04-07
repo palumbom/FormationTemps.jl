@@ -21,7 +21,7 @@ vsini = 4200.0
 u1    = 0.4
 u2    = 0.26
 ζ_rt  = 1200.0
-μ_val = 0.9
+v_losal = 0.9
 
 # test at three representative wavelength spacings
 steps = [0.001, 0.002, 0.005]
@@ -51,15 +51,15 @@ rotmacro_error = zeros(length(steps))
     cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
     gpu_mem  = FT.GPUMemory(λs_korg, atm_gpu)
 
-    σ_v_val = 1200.0
+    v_mic_val = 1200.0
 
     # microturbulence broadening (scalar overload)
-    αs_cpu_new = FT.convolve_wavelength_axis(λs_korg, αs, 0.0, σ_v_val)
-    αs_gpu_new = FT.convolve_wavelength_axis_gpu(cmem, CuArray(collect(λs_korg)), CuArray(αs), 0.0, σ_v_val)
+    αs_cpu_new = FT.convolve_wavelength_axis(λs_korg, αs, 0.0, v_mic_val)
+    αs_gpu_new = FT.convolve_wavelength_axis_gpu(cmem, CuArray(collect(λs_korg)), CuArray(αs), 0.0, v_mic_val)
     αs_error[i] = maximum(abs.((Array(αs_gpu_new) .- αs_cpu_new) ./ αs_cpu_new))
 
     # contribution function for convolution tests
-    cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_val)
+    cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic_val)
     tbc = Array(cfunc_flux_stationary.cfunc_dt)
 
     # Edge exclusion for compact-support (rotation) kernels: CPU uses circular FFT, GPU uses
@@ -79,8 +79,8 @@ rotmacro_error = zeros(length(steps))
     rt_error[i]  = maximum(abs.(cfunc_rt_cpu .- cfunc_rt_gpu)) / maximum(abs.(cfunc_rt_cpu))
 
     # anisotropic RT macro (normalize by max to avoid blow-up at near-zero continuum pixels)
-    cfunc_aniso_rt_cpu = FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, μ_val)
-    cfunc_aniso_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μ_val))
+    cfunc_aniso_rt_cpu = FT.convolve_rt_macro(λs_korg, tbc, ζ_rt, v_losal)
+    cfunc_aniso_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, v_losal))
     rt_aniso_error[i]  = maximum(abs.(cfunc_aniso_rt_cpu .- cfunc_aniso_rt_gpu)) / maximum(abs.(cfunc_aniso_rt_cpu))
 
     # Hirano combined rotation+macro (interior only — contains rotation, same edge artifact)

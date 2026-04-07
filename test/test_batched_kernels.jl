@@ -30,16 +30,16 @@ Nλ = length(λs_korg)
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X;
                   α_ref_out=α_ref, ne_warn_thresh=Inf)
 
-σ_v = CUDA.zeros(Float64, Natm) .+ ξ
+v_mic = CUDA.zeros(Float64, Natm) .+ ξ
 log_τ_ref = CuArray{Float64}(log.(atm_gpu.τs))
 ifactor_base = CuArray{Float64}(atm_gpu.τs ./ α_ref)
 Ts_gpu = CuArray{Float64}(atm_gpu.Ts)
 λs_gpu = CuArray{Float64}(collect(λs_korg))
 
 # test tiles with different velocities and μ values
-μ_vals = [0.95, 0.7, 0.4]
+v_losals = [0.95, 0.7, 0.4]
 v_vals = [0.0, 1500.0, 3000.0]
-B = length(μ_vals)
+B = length(v_losals)
 Natm1 = Natm - 1
 
 @testset "Batched kernel equivalence" begin
@@ -49,23 +49,23 @@ Natm1 = Natm - 1
         bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)
 
         # build batched velocity array
-        μ_v_batch_cpu = zeros(B * Natm)
+        v_los_batch_cpu = zeros(B * Natm)
         for bi in 1:B
             for k in 1:Natm
-                μ_v_batch_cpu[(bi-1)*Natm + k] = v_vals[bi]
+                v_los_batch_cpu[(bi-1)*Natm + k] = v_vals[bi]
             end
         end
-        μ_v_batch = CuArray{Float64}(μ_v_batch_cpu)
+        v_los_batch = CuArray{Float64}(v_los_batch_cpu)
 
         # batched result
         bcmem.signal_cached = false
-        αs_batch = Array(FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs, μ_v_batch, σ_v, B))
+        αs_batch = Array(FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs, v_los_batch, v_mic, B))
 
         # single-tile results
         for bi in 1:B
             cmem.signal_cached = false
-            μ_v = CUDA.zeros(Float64, Natm) .+ v_vals[bi]
-            αs_single = Array(FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, μ_v, σ_v))
+            v_los = CUDA.zeros(Float64, Natm) .+ v_vals[bi]
+            αs_single = Array(FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, v_los, v_mic))
             αs_batch_tile = αs_batch[(bi-1)*Natm+1 : bi*Natm, :]
             @test αs_batch_tile ≈ αs_single atol=1e-10
         end
@@ -76,16 +76,16 @@ Natm1 = Natm - 1
         bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)
 
         # set up batched convolved opacities
-        μ_v_batch_cpu = zeros(B * Natm)
+        v_los_batch_cpu = zeros(B * Natm)
         for bi in 1:B
-            for k in 1:Natm; μ_v_batch_cpu[(bi-1)*Natm+k] = v_vals[bi]; end
+            for k in 1:Natm; v_los_batch_cpu[(bi-1)*Natm+k] = v_vals[bi]; end
         end
-        μ_v_batch = CuArray{Float64}(μ_v_batch_cpu)
+        v_los_batch = CuArray{Float64}(v_los_batch_cpu)
         bcmem.signal_cached = false
-        αs_conv = FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs, μ_v_batch, σ_v, B)
+        αs_conv = FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs, v_los_batch, v_mic, B)
 
         # batched tau
-        μ_tiles = CuArray{Float64}(μ_vals)
+        μ_tiles = CuArray{Float64}(v_losals)
         τs_batch = CUDA.zeros(Float64, B * Natm, Nλ)
         FT.calc_tau_anchored_batched!(μ_tiles, log_τ_ref, ifactor_base, αs_conv, τs_batch, Natm, B)
         τs_batch_h = Array(τs_batch)
@@ -94,9 +94,9 @@ Natm1 = Natm - 1
         gpu_mem = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
         for bi in 1:B
             cmem.signal_cached = false
-            μ_v = CUDA.zeros(Float64, Natm) .+ v_vals[bi]
-            αs_single = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, μ_v, σ_v)
-            FT.calc_tau_anchored_gpu!(μ_vals[bi], log_τ_ref, ifactor_base, αs_single, gpu_mem.τs)
+            v_los = CUDA.zeros(Float64, Natm) .+ v_vals[bi]
+            αs_single = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, v_los, v_mic)
+            FT.calc_tau_anchored_gpu!(v_losals[bi], log_τ_ref, ifactor_base, αs_single, gpu_mem.τs)
             τs_single = Array(gpu_mem.τs)
             τs_batch_tile = τs_batch_h[(bi-1)*Natm+1 : bi*Natm, :]
             @test τs_batch_tile ≈ τs_single atol=1e-10
@@ -115,16 +115,16 @@ Natm1 = Natm - 1
 
         bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)
 
-        μ_v_batch_cpu = zeros(B * Natm)
+        v_los_batch_cpu = zeros(B * Natm)
         for bi in 1:B
-            for k in 1:Natm; μ_v_batch_cpu[(bi-1)*Natm+k] = v_vals[bi]; end
+            for k in 1:Natm; v_los_batch_cpu[(bi-1)*Natm+k] = v_vals[bi]; end
         end
-        μ_v_batch = CuArray{Float64}(μ_v_batch_cpu)
-        μ_tiles = CuArray{Float64}(μ_vals)
+        v_los_batch = CuArray{Float64}(v_los_batch_cpu)
+        μ_tiles = CuArray{Float64}(v_losals)
 
         # batched pipeline: convolve → tau → cfunc_dt
         bcmem.signal_cached = false
-        αs_conv = FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs_fresh, μ_v_batch, σ_v, B)
+        αs_conv = FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs_fresh, v_los_batch, v_mic, B)
         τs_batch = CUDA.zeros(Float64, B * Natm, Nλ)
         FT.calc_tau_anchored_batched!(μ_tiles, log_τ_fresh, ifact_fresh, αs_conv, τs_batch, Natm, B)
         cfdt_batch = CUDA.zeros(Float64, B * Natm1, Nλ)
@@ -136,9 +136,9 @@ Natm1 = Natm - 1
             gpu_mem_bi = FT.GPUMemory(λs_korg, atm_gpu, α_ref_fresh)
             cmem_bi = FT.ConvolutionMemory(Nλ, Natm, Npad)
             cmem_bi.signal_cached = false
-            μ_v = CUDA.zeros(Float64, Natm) .+ v_vals[bi]
+            v_los = CUDA.zeros(Float64, Natm) .+ v_vals[bi]
             result = FT.calc_intensity_quantities_inplace!(αs_fresh, atm_gpu, gpu_mem_bi, cmem_bi,
-                μ_vals[bi], μ_v, σ_v)
+                v_losals[bi], v_los, v_mic)
             cfdt_single = Array(result.cfunc_dt)
             cfdt_batch_tile = cfdt_batch_h[(bi-1)*Natm1+1 : bi*Natm1, :]
             # looser tolerance: the batched and single-tile paths use different
@@ -180,19 +180,19 @@ Natm1 = Natm - 1
         cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
         Bcur = 2  # only use 2 of 8
 
-        μ_v_batch_cpu = zeros(Bcur * Natm)
+        v_los_batch_cpu = zeros(Bcur * Natm)
         for bi in 1:Bcur
-            for k in 1:Natm; μ_v_batch_cpu[(bi-1)*Natm+k] = v_vals[bi]; end
+            for k in 1:Natm; v_los_batch_cpu[(bi-1)*Natm+k] = v_vals[bi]; end
         end
-        μ_v_batch = CuArray{Float64}(μ_v_batch_cpu)
+        v_los_batch = CuArray{Float64}(v_los_batch_cpu)
 
         bcmem.signal_cached = false
-        αs_batch = Array(FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs, μ_v_batch, σ_v, Bcur))
+        αs_batch = Array(FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs, v_los_batch, v_mic, Bcur))
 
         for bi in 1:Bcur
             cmem.signal_cached = false
-            μ_v = CUDA.zeros(Float64, Natm) .+ v_vals[bi]
-            αs_single = Array(FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, μ_v, σ_v))
+            v_los = CUDA.zeros(Float64, Natm) .+ v_vals[bi]
+            αs_single = Array(FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, v_los, v_mic))
             @test αs_batch[(bi-1)*Natm+1:bi*Natm, :] ≈ αs_single atol=1e-10
         end
     end

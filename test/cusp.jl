@@ -33,18 +33,18 @@ cmem     = FT.ConvolutionMemory(Nλ, Natm, Npad)
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 gpu_mem  = FT.GPUMemory(λs_korg, atm_gpu)
 
-μ_v_rot = CUDA.zeros(Float64, length(zs))
-σ_v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+v_los_rot = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
-cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 tbc = cfunc_flux_stationary.cfunc_dt
 
 ζ_rt  = 3400.0
-μ_val = 1.0
+v_losal = 1.0
 
 # compare CPU vs GPU anisotropic RT macro convolution
-cfunc_flux_rt_cpu = FT.convolve_rt_macro(λs_korg, Array(tbc), ζ_rt, μ_val)
-cfunc_flux_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, μ_val))
+cfunc_flux_rt_cpu = FT.convolve_rt_macro(λs_korg, Array(tbc), ζ_rt, v_losal)
+cfunc_flux_rt_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, ζ_rt, v_losal))
 
 flux_cpu = 2π .* dropdims(sum(cfunc_flux_rt_cpu, dims=1), dims=1)
 flux_gpu = 2π .* dropdims(Array(sum(cfunc_flux_rt_gpu, dims=1)), dims=1)
@@ -64,7 +64,7 @@ if make_plots
     ax.plot(λs_korg, flux_err)
     ax.set_xlabel("{\\rm Wavelength [\\AA]}")
     ax.set_ylabel("{\\rm CPU} \$-\$ {\\rm GPU flux error [\\%]}")
-    ax.set_title("{\\rm Anisotropic RT macro (mu = $(μ_val))}")
+    ax.set_title("{\\rm Anisotropic RT macro (mu = $(v_losal))}")
     fig.savefig(joinpath(test_plotdir, "cusp.pdf"), bbox_inches="tight")
     plt.close()
 end

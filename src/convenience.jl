@@ -96,7 +96,13 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
                    linelist, atm_cpu, star.A_X;
                    α_ref_out=α_ref, kwargs...)
 
-    σ_v_scalar = star.ξ
+    # populate atmosphere v_mic from stellar params
+    star.ξ isa AbstractVector && @assert length(star.ξ) == Natm "v_micro vector length ($(length(star.ξ))) must match Natm ($Natm)"
+    if star.ξ isa AbstractVector
+        copyto!(atm_cpu.v_mic, T.(star.ξ))
+    else
+        fill!(atm_cpu.v_mic, star.ξ)
+    end
 
     # dispatch between anchored (preferred) and Bezier (fallback when tau_ref unavailable)
     _calc_tau_cpu! = _make_tau_integrator(atm_cpu, zs, α_ref)
@@ -104,10 +110,9 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     # convolution or numerical integration
     if convolve
         # stationary (μ=1) flux quantities needed by the Hirano convolution path
-        σ_v = fill(star.ξ, Natm)
-        μ_v = zeros(T, Natm)
-        αs_broad = convolve_wavelength_axis(λs_korg, αs, μ_v, σ_v)
-        αs_cont_broad = convolve_wavelength_axis(λs_korg, αs_cont, μ_v, σ_v)
+        v_los = zeros(T, Natm)
+        αs_broad = convolve_wavelength_axis(λs_korg, αs, v_los, atm_cpu.v_mic)
+        αs_cont_broad = convolve_wavelength_axis(λs_korg, αs_cont, v_los, atm_cpu.v_mic)
 
         τs = zeros(T, Natm, Nλ)
         τs_cont = zeros(T, Natm, Nλ)
@@ -153,10 +158,11 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
             ws = workspaces[Threads.threadid()]
             μ_tile = μs_cpu[i]
             dA_i = dA_cpu[i]
-            μ_v_tile = T(z_rot_cpu[i] * c_ms)
+            # additive v_los: atmosphere base + rotation
+            ws.v_los_buf .= atm_cpu.v_los .+ T(z_rot_cpu[i] * c_ms)
 
             # total absorption → macro_out → accumulate immediately
-            _convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, μ_v_tile, σ_v_scalar, ws)
+            _convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, ws.v_los_buf, atm_cpu.v_mic, ws)
             _calc_tau_cpu!(μ_tile, ws.αs_broad, ws.τs_int)
             calc_intensity_cfunc_cpu!(ws.cfunc_int, Ts, λs_korg, ws.τs_int)
             @views ws.cfunc_dt_int .= ws.cfunc_int .* (ws.τs_int[2:end, :] .- ws.τs_int[1:end-1, :])
@@ -164,7 +170,7 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
             ws.cfunc_flux_acc .+= ws.macro_out .* dA_i
 
             # continuum absorption → macro_out → accumulate immediately
-            _convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, μ_v_tile, σ_v_scalar, ws)
+            _convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, ws.v_los_buf, atm_cpu.v_mic, ws)
             _calc_tau_cpu!(μ_tile, ws.αs_cont_broad, ws.τs_int_cont)
             calc_intensity_cfunc_cpu!(ws.cfunc_int_cont, Ts, λs_korg, ws.τs_int_cont)
             @views ws.cfunc_dt_int_cont .= ws.cfunc_int_cont .* (ws.τs_int_cont[2:end, :] .- ws.τs_int_cont[1:end-1, :])
@@ -249,7 +255,13 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     Natm = size(αs, 1)
     Npad = 512
 
-    σ_v = G(star.ξ)
+    # populate atmosphere v_mic from stellar params
+    star.ξ isa AbstractVector && @assert length(star.ξ) == Natm "v_micro vector length ($(length(star.ξ))) must match Natm ($Natm)"
+    if star.ξ isa AbstractVector
+        copyto!(atm_gpu.v_mic, G.(star.ξ))
+    else
+        fill!(atm_gpu.v_mic, G(star.ξ))
+    end
 
     # convolution or numerical integration
     if convolve
@@ -259,9 +271,9 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         cmem_cont = ConvolutionMemory(Nλ, Natm, Npad; T=G)
         cmem_mac = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
 
-        cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+        cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, atm_gpu.v_mic)
         cfunc_dt_flux = cfunc_flux_struct.cfunc_dt
-        cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem_cont, cmem_cont, σ_v)
+        cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem_cont, cmem_cont, atm_gpu.v_mic)
         cfunc_dt_flux_cont = cfunc_flux_struct_cont.cfunc_dt
 
         @assert !isnan(u1)
@@ -313,7 +325,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         bytes_bcmem_shared = 2 * Natm * (Nλ * bpe + L_est * bpe + nfreq * bpc)
         #   accumulators: cfunc_flux + cfunc_comp, dual-stream = 4 × (Natm1×Nλ)
         bytes_accumulators = 4 * Natm1 * Nλ * bpe
-        #   tile parameters: μ_tiles (Ntiles) + dA (Ntiles) + μ_v (Ntiles×Natm)
+        #   tile parameters: μ_tiles (Ntiles) + dA (Ntiles) + v_los (Ntiles×Natm)
         bytes_tile_params = Ntiles * (2 * bpe + Natm * bpe)
 
         bytes_fixed = bytes_bcmem_shared + bytes_accumulators + bytes_tile_params
@@ -350,12 +362,12 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         # is tile-independent (only the Doppler filter changes per tile). The priming
         # call writes a throw-away Doppler filter and convolution product for Bcur=1,
         # which are overwritten by the first real batch — only signal_ft_gpu persists.
-        μ_v_prime = CUDA.zeros(G, Natm)
+        v_los_prime = CUDA.zeros(G, Natm)
         bcmem.signal_cached = false
-        convolve_wavelength_axis_batched!(bcmem, λs_G, αs, μ_v_prime, σ_v, 1)
+        convolve_wavelength_axis_batched!(bcmem, λs_G, αs, v_los_prime, atm_gpu.v_mic, 1)
         bcmem.signal_cached = true
         bcmem_cont.signal_cached = false
-        convolve_wavelength_axis_batched!(bcmem_cont, λs_G, αs_cont, μ_v_prime, σ_v, 1)
+        convolve_wavelength_axis_batched!(bcmem_cont, λs_G, αs_cont, v_los_prime, atm_gpu.v_mic, 1)
         bcmem_cont.signal_cached = true
 
         # batched working arrays (dual-stream)
@@ -365,7 +377,10 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         # pre-upload all tile parameters (single H2D transfer replaces per-batch uploads)
         all_μ_tiles_gpu = CuArray(G.(μs_cpu))
         all_dA_tiles_gpu = CuArray(G.(dA_cpu))
-        all_μ_v_gpu = CuArray(repeat(G.(z_rot_cpu .* c_ms), inner=Natm))
+        # additive v_los: atmosphere base + rotation per tile
+        rot_v_los = repeat(G.(z_rot_cpu .* c_ms), inner=Natm)
+        base_v_los = repeat(Array(atm_gpu.v_los), Ntiles)
+        all_v_los_gpu = CuArray(rot_v_los .+ base_v_los)
 
         # Bezier work arrays (only allocated when needed)
         if !use_anchored
@@ -396,17 +411,17 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             unique_μ_sorted = sort(unique(G.(μs_cpu)))
             N_unique = length(unique_μ_sorted)
             μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
-            μ_vals_gpu = CuArray(unique_μ_sorted)
+            v_losals_gpu = CuArray(unique_μ_sorted)
 
             # evaluate all kernels in DFT layout with one 2D kernel launch
             kbuf_mac = CUDA.zeros(G, N_unique, L_mac)
             ts_kc = (32, 32)
             bs_kc = (cld(Nλ, ts_kc[1]), cld(N_unique, ts_kc[2]))
             @cuda threads=ts_kc blocks=bs_kc compute_rt_macro_dft_layout_2d!(
-                kbuf_mac, gpu_mem.λs, μ_vals_gpu, Int32(i0_mac), G(star.ζ),
+                kbuf_mac, gpu_mem.λs, v_losals_gpu, Int32(i0_mac), G(star.ζ),
                 Int32(Nλ), Int32(L_mac))
             kbuf_mac ./= sum(kbuf_mac, dims=2)
-            CUDA.unsafe_free!(μ_vals_gpu)
+            CUDA.unsafe_free!(v_losals_gpu)
 
             # batched R2C FFT → kernel_cache_flat; free temporary kbuf_mac afterward
             plan_kc = CUDA.CUFFT.plan_rfft(kbuf_mac, 2)
@@ -463,7 +478,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             # total absorption on stream_total
             CUDA.stream!(stream_total) do
                 αs_conv = convolve_wavelength_axis_batched!(bcmem, λs_G, αs,
-                    all_μ_v_gpu, σ_v, Bcur; tile_offset=tile_offset)
+                    all_v_los_gpu, atm_gpu.v_mic, Bcur; tile_offset=tile_offset)
                 if use_anchored
                     calc_tau_cfunc_dt_fused!(cfdt_batch, αs_conv,
                         log_τ_ref, ifactor_base, all_μ_tiles_gpu,
@@ -497,7 +512,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             # continuum absorption on stream_cont
             CUDA.stream!(stream_cont) do
                 αs_conv_c = convolve_wavelength_axis_batched!(bcmem_cont, λs_G, αs_cont,
-                    all_μ_v_gpu, σ_v, Bcur; tile_offset=tile_offset)
+                    all_v_los_gpu, atm_gpu.v_mic, Bcur; tile_offset=tile_offset)
                 if use_anchored
                     calc_tau_cfunc_dt_fused!(cfdt_batch_cont, αs_conv_c,
                         log_τ_ref, ifactor_base, all_μ_tiles_gpu,

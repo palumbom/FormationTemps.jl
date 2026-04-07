@@ -24,46 +24,46 @@ let
     ws = FT.CPUTileWorkspace(Float64, Natm, Nλ)
 
     @testset "In-place convolution correctness" begin
-        @testset "Microturbulence: uniform σ_v matches allocating version" begin
-            σ_v = fill(ξ, Natm)
-            μ_v = fill(500.0, Natm)
+        @testset "Microturbulence: uniform v_mic matches allocating version" begin
+            v_mic = fill(ξ, Natm)
+            v_los = fill(500.0, Natm)
 
-            ref = FT.convolve_wavelength_axis(λs, αs, μ_v, σ_v)
+            ref = FT.convolve_wavelength_axis(λs, αs, v_los, v_mic)
             out = zeros(Natm, Nλ)
-            FT._convolve_micro_inplace!(out, collect(λs), αs, μ_v, σ_v, ws)
+            FT._convolve_micro_inplace!(out, collect(λs), αs, v_los, v_mic, ws)
 
             @test size(out) == size(ref)
             @test maximum(abs.(out .- ref)) < 1e-12
         end
 
-        @testset "Microturbulence: non-uniform σ_v matches allocating version" begin
-            σ_v = collect(range(700.0, 1000.0, length=Natm))
-            μ_v = fill(300.0, Natm)
+        @testset "Microturbulence: non-uniform v_mic matches allocating version" begin
+            v_mic = collect(range(700.0, 1000.0, length=Natm))
+            v_los = fill(300.0, Natm)
 
-            ref = FT.convolve_wavelength_axis(λs, αs, μ_v, σ_v)
+            ref = FT.convolve_wavelength_axis(λs, αs, v_los, v_mic)
             out = zeros(Natm, Nλ)
-            FT._convolve_micro_inplace!(out, collect(λs), αs, μ_v, σ_v, ws)
+            FT._convolve_micro_inplace!(out, collect(λs), αs, v_los, v_mic, ws)
 
             @test maximum(abs.(out .- ref)) < 1e-12
         end
 
-        @testset "Microturbulence: non-uniform μ_v matches allocating version" begin
-            σ_v = fill(ξ, Natm)
-            μ_v = collect(range(-200.0, 200.0, length=Natm))
+        @testset "Microturbulence: non-uniform v_los matches allocating version" begin
+            v_mic = fill(ξ, Natm)
+            v_los = collect(range(-200.0, 200.0, length=Natm))
 
-            ref = FT.convolve_wavelength_axis(λs, αs, μ_v, σ_v)
+            ref = FT.convolve_wavelength_axis(λs, αs, v_los, v_mic)
             out = zeros(Natm, Nλ)
-            FT._convolve_micro_inplace!(out, collect(λs), αs, μ_v, σ_v, ws)
+            FT._convolve_micro_inplace!(out, collect(λs), αs, v_los, v_mic, ws)
 
             @test maximum(abs.(out .- ref)) < 1e-12
         end
 
         @testset "Microturbulence: zero velocity is identity-like" begin
-            σ_v = fill(0.0, Natm)
-            μ_v = fill(0.0, Natm)
+            v_mic = fill(0.0, Natm)
+            v_los = fill(0.0, Natm)
 
             out = zeros(Natm, Nλ)
-            FT._convolve_micro_inplace!(out, collect(λs), αs, μ_v, σ_v, ws)
+            FT._convolve_micro_inplace!(out, collect(λs), αs, v_los, v_mic, ws)
 
             # with σ=0 the kernel degenerates to a delta; output should match input
             # (subject to the σ_floor clamp producing a very narrow Gaussian)
@@ -108,20 +108,20 @@ let
 
     @testset "Workspace buffer isolation" begin
         @testset "Successive calls do not leak state" begin
-            σ_v = fill(ξ, Natm)
-            μ_v1 = fill(500.0, Natm)
-            μ_v2 = fill(-500.0, Natm)
+            v_mic = fill(ξ, Natm)
+            v_los1 = fill(500.0, Natm)
+            v_los2 = fill(-500.0, Natm)
 
             out1 = zeros(Natm, Nλ)
             out2 = zeros(Natm, Nλ)
 
-            FT._convolve_micro_inplace!(out1, collect(λs), αs, μ_v1, σ_v, ws)
+            FT._convolve_micro_inplace!(out1, collect(λs), αs, v_los1, v_mic, ws)
             ref1 = copy(out1)
 
-            FT._convolve_micro_inplace!(out2, collect(λs), αs, μ_v2, σ_v, ws)
+            FT._convolve_micro_inplace!(out2, collect(λs), αs, v_los2, v_mic, ws)
 
             # re-run first call; should reproduce exactly
-            FT._convolve_micro_inplace!(out1, collect(λs), αs, μ_v1, σ_v, ws)
+            FT._convolve_micro_inplace!(out1, collect(λs), αs, v_los1, v_mic, ws)
             @test out1 == ref1
         end
     end

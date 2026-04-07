@@ -45,16 +45,16 @@ Ts_gpu = CuArray{Float64}(atm_gpu.Ts)
 
 # 6 tiles with varying μ and velocity
 Ntiles = 6
-μ_vals = [0.95, 0.8, 0.7, 0.5, 0.3, 0.15]
+v_losals = [0.95, 0.8, 0.7, 0.5, 0.3, 0.15]
 v_vals = [0.0, 800.0, 1500.0, 2500.0, 3000.0, 3500.0]
 dA_vals = [0.001, 0.0015, 0.002, 0.0012, 0.001, 0.0005]
 
 # pre-upload all tile parameters (mimics production layout)
-all_μ_tiles = CuArray(Float64.(μ_vals))
+all_μ_tiles = CuArray(Float64.(v_losals))
 all_dA_tiles = CuArray(Float64.(dA_vals))
-all_μ_v = CuArray(repeat(Float64.(v_vals), inner=Natm))
+all_v_los = CuArray(repeat(Float64.(v_vals), inner=Natm))
 
-σ_v = Float64(ξ)
+v_mic = Float64(ξ)
 
 @testset "tile_offset correctness" begin
 
@@ -62,16 +62,16 @@ all_μ_v = CuArray(repeat(Float64.(v_vals), inner=Natm))
         B = 4
         bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)
 
-        # reference: tiles 3-4 with offset=0 using a sliced μ_v array
+        # reference: tiles 3-4 with offset=0 using a sliced v_los array
         bcmem.signal_cached = false
-        μ_v_slice = CuArray(repeat(Float64.(v_vals[3:4]), inner=Natm))
+        v_los_slice = CuArray(repeat(Float64.(v_vals[3:4]), inner=Natm))
         ref = Array(FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs,
-            μ_v_slice, σ_v, 2))
+            v_los_slice, v_mic, 2))
 
         # test: tiles 3-4 via tile_offset=2 into the full array
         bcmem.signal_cached = false
         test = Array(FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs,
-            all_μ_v, σ_v, 2; tile_offset=2))
+            all_v_los, v_mic, 2; tile_offset=2))
 
         @test test ≈ ref atol=1e-12
     end
@@ -83,10 +83,10 @@ all_μ_v = CuArray(repeat(Float64.(v_vals), inner=Natm))
         # convolve tiles 3-4 to get realistic αs input
         bcmem.signal_cached = false
         αs_conv = FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs,
-            all_μ_v, σ_v, 2; tile_offset=2)
+            all_v_los, v_mic, 2; tile_offset=2)
 
         # reference: τ with offset=0 using sliced μ_tiles
-        μ_slice = CuArray(Float64.(μ_vals[3:4]))
+        μ_slice = CuArray(Float64.(v_losals[3:4]))
         τs_ref = CUDA.zeros(Float64, 2 * Natm, Nλ)
         FT.calc_tau_anchored_batched!(μ_slice, log_τ_ref, ifactor_base,
             αs_conv, τs_ref, Natm, 2)
@@ -138,8 +138,8 @@ all_μ_v = CuArray(repeat(Float64.(v_vals), inner=Natm))
         nfreq_mac = fld(L_mac, 2) + 1
 
         macro_kernel_cache = Dict{Float64, CuVector{Complex{Float64}}}()
-        for μ_val in μ_vals
-            macro_kernel_cache[μ_val] = FT.precompute_rt_macro_kernel_ft(cmem_mac, λs_korg, ζ_rt, μ_val)
+        for v_losal in v_losals
+            macro_kernel_cache[v_losal] = FT.precompute_rt_macro_kernel_ft(cmem_mac, λs_korg, ζ_rt, v_losal)
         end
         unique_μ_sorted = sort(collect(keys(macro_kernel_cache)))
         μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
@@ -147,7 +147,7 @@ all_μ_v = CuArray(repeat(Float64.(v_vals), inner=Natm))
         for (i, μ) in enumerate(unique_μ_sorted)
             copyto!(view(kernel_cache_flat, i, :), macro_kernel_cache[μ])
         end
-        μ_idx_all = CuArray(Int32[μ_to_idx[μ_vals[i]] for i in 1:Ntiles])
+        μ_idx_all = CuArray(Int32[μ_to_idx[v_losals[i]] for i in 1:Ntiles])
 
         cfdt_6_h = rand(Float64, Ntiles * Natm1, Nλ) .* 1e-10
         ts_pad = (32, 32)

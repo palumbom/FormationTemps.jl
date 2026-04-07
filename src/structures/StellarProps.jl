@@ -1,11 +1,11 @@
-struct StellarProps{T<:AF}
+struct StellarProps{T<:AF, V<:Union{T, AbstractVector{T}}}
     Teff::T
     logg::T
     Fe_H::T
     A_X::Vector{T}
     vsini::T
     ζ::T
-    ξ::T
+    ξ::V
     ρstar::T
     istar::T
 end
@@ -22,13 +22,15 @@ Keyword arguments:
 - `Fe_H`: metallicity [Fe/H] (dex); used to build the abundance vector `A_X`.
 - `vsini`: projected rotational velocity (m/s).
 - `v_macro`: macroturbulent velocity scale ζ (m/s); if `NaN`, uses `vmac_fit(Teff, logg)`.
-- `v_micro`: microturbulent velocity ξ (m/s); if `NaN`, uses `vmic_fit(Teff)`.
+- `v_micro`: microturbulent velocity ξ (m/s). Scalar for uniform broadening; vector of
+  length `Natm` for per-layer broadening. If scalar `NaN`, uses `vmic_fit(Teff)`.
 - `ρstar`: stellar radius scale factor for disk integration (dimensionless; default 1).
 - `istar`: stellar inclination (degrees; 90 = equator-on).
 
 Struct fields:
 - `Teff`, `logg`, `Fe_H`, `A_X`: atmosphere parameters (A_X is the full abundance vector).
 - `vsini`, `ζ`, `ξ`: rotational, macroturbulent, and microturbulent velocities (m/s).
+  `ξ` is `T` (scalar) or `AbstractVector{T}` (per-layer).
 - `ρstar`, `istar`: disk integration parameters.
 
 See also: [`vmac_fit`](@ref), [`vmic_fit`](@ref), [`calc_formation_temp`](@ref)
@@ -46,9 +48,11 @@ function StellarProps(;Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_m
     end
 
     # get micro
-    if isnan(v_micro)
+    if v_micro isa AbstractVector
+        ξ = v_micro
+    elseif isnan(v_micro)
         ξ = vmic_fit(Teff)
-    else 
+    else
         ξ = v_micro
     end
 

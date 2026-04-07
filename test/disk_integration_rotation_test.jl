@@ -81,11 +81,11 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
 # velocities
-μ_v = CUDA.zeros(Float64, length(zs))
-σ_v = CUDA.zeros(Float64, length(zs)) .+ 1200.0
+v_los = CUDA.zeros(Float64, length(zs))
+v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get the nominal answer
-cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 cfunc_flux_cum_stationary = Array(FT.get_cum_cfunc(cfunc_flux_stationary))
 flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
 
@@ -109,10 +109,10 @@ cfunc_flux_rotating = zeros(length(zs)-1, length(λs_korg))
 
 @showprogress for i in eachindex(μs_cpu)
     # set rotational velocity
-    μ_v .= z_rot_cpu[i] .* FT.c_ms
+    v_los .= z_rot_cpu[i] .* FT.c_ms
 
     # get the cfunc and stuff
-    cfunc_intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], μ_v, σ_v)
+    cfunc_intensity = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[i], v_los, v_mic)
     
     # tabulate
     ints[:,i] .= Array(FT.get_intensity(cfunc_intensity))

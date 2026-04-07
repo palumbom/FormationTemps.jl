@@ -41,9 +41,9 @@ FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, 
                   α_ref_out=α_ref, ne_warn_thresh=Inf)
 
 # geometry for a few test tiles with distinct μ values
-μ_vals = [0.95, 0.7, 0.4, 0.2]
+v_losals = [0.95, 0.7, 0.4, 0.2]
 dA_vals = [0.001, 0.002, 0.0015, 0.0008]
-B = length(μ_vals)
+B = length(v_losals)
 
 # macro kernel setup
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm1, Npad)
@@ -53,8 +53,8 @@ nfreq_mac = fld(L_mac, 2) + 1
 
 # precompute per-μ kernel FFTs
 macro_kernel_cache = Dict{Float64, CuVector{Complex{Float64}}}()
-for μ_val in μ_vals
-    macro_kernel_cache[μ_val] = FT.precompute_rt_macro_kernel_ft(cmem_mac, λs_korg, ζ_rt, μ_val)
+for v_losal in v_losals
+    macro_kernel_cache[v_losal] = FT.precompute_rt_macro_kernel_ft(cmem_mac, λs_korg, ζ_rt, v_losal)
 end
 
 # generate synthetic cfdt data (mimics contribution function structure)
@@ -72,7 +72,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         for bi in 1:B
             tile_cfdt = @view cfdt_batch[(bi-1)*Natm1+1 : bi*Natm1, :]
             convolved = FT.convolve_rt_macro_gpu_cached(cmem_mac, tile_cfdt,
-                                                         macro_kernel_cache[μ_vals[bi]])
+                                                         macro_kernel_cache[v_losals[bi]])
             FT.accumulate_tile!(ref_flux, ref_cfunc, ref_flux_comp, ref_cfunc_comp,
                                 convolved, Float64(dA_vals[bi]))
         end
@@ -86,7 +86,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         for (i, μ) in enumerate(unique_μ_sorted)
             copyto!(view(kernel_cache_flat, i, :), macro_kernel_cache[μ])
         end
-        μ_idx = CuArray(Int32[μ_to_idx[μ_vals[bi]] for bi in 1:B])
+        μ_idx = CuArray(Int32[μ_to_idx[v_losals[bi]] for bi in 1:B])
         dA_gpu = CuArray(Float64.(dA_vals))
 
         # pad + batched FFT
@@ -123,12 +123,12 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         Bcur = 3  # only first 3 tiles
 
         cfdt_big = CUDA.rand(Float64, B_big * Natm1, Nλ) .* 1e-10
-        μ_vals_big = [0.95, 0.7, 0.4, 0.2, 0.8, 0.6, 0.3, 0.15]
+        v_losals_big = [0.95, 0.7, 0.4, 0.2, 0.8, 0.6, 0.3, 0.15]
         dA_vals_big = [0.001, 0.002, 0.0015, 0.0008, 0.001, 0.002, 0.001, 0.001]
 
-        for μ_val in μ_vals_big
-            if !haskey(macro_kernel_cache, μ_val)
-                macro_kernel_cache[μ_val] = FT.precompute_rt_macro_kernel_ft(cmem_mac, λs_korg, ζ_rt, μ_val)
+        for v_losal in v_losals_big
+            if !haskey(macro_kernel_cache, v_losal)
+                macro_kernel_cache[v_losal] = FT.precompute_rt_macro_kernel_ft(cmem_mac, λs_korg, ζ_rt, v_losal)
             end
         end
 
@@ -140,7 +140,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         for bi in 1:Bcur
             tile_cfdt = @view cfdt_big[(bi-1)*Natm1+1 : bi*Natm1, :]
             convolved = FT.convolve_rt_macro_gpu_cached(cmem_mac, tile_cfdt,
-                                                         macro_kernel_cache[μ_vals_big[bi]])
+                                                         macro_kernel_cache[v_losals_big[bi]])
             FT.accumulate_tile!(ref_flux, ref_cfunc, ref_flux_comp, ref_comp,
                                 convolved, Float64(dA_vals_big[bi]))
         end
@@ -152,7 +152,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         for (i, μ) in enumerate(unique_μ_sorted)
             copyto!(view(kernel_cache_flat, i, :), macro_kernel_cache[μ])
         end
-        μ_idx = CuArray(Int32[μ_to_idx[μ_vals_big[bi]] for bi in 1:B_big])
+        μ_idx = CuArray(Int32[μ_to_idx[v_losals_big[bi]] for bi in 1:B_big])
         dA_gpu = CuArray(Float64.(dA_vals_big))
 
         mac_pad = CUDA.zeros(Float64, B_big * Natm1, L_mac)
@@ -186,7 +186,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         B2 = 2
         cfdt_4_h = rand(Float64, 4 * Natm1, Nλ) .* 1e-10
         cfdt_4 = CuArray(cfdt_4_h)
-        μ_vals_4 = [0.95, 0.7, 0.4, 0.2]
+        v_losals_4 = [0.95, 0.7, 0.4, 0.2]
         dA_vals_4 = Float64[0.001, 0.002, 0.0015, 0.0008]
 
         unique_μ_sorted = sort(collect(keys(macro_kernel_cache)))
@@ -195,7 +195,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         for (i, μ) in enumerate(unique_μ_sorted)
             copyto!(view(kernel_cache_flat, i, :), macro_kernel_cache[μ])
         end
-        μ_idx_4 = CuArray(Int32[μ_to_idx[μ_vals_4[bi]] for bi in 1:4])
+        μ_idx_4 = CuArray(Int32[μ_to_idx[v_losals_4[bi]] for bi in 1:4])
         dA_gpu_4 = CuArray(dA_vals_4)
 
         # single batch of 4
@@ -265,7 +265,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
                 copyto!(view(kernel_cache_flat, i, :), macro_kernel_cache[μ])
             end
         end
-        μ_idx = CuArray(Int32[μ_to_idx[μ_vals[bi]] for bi in 1:B])
+        μ_idx = CuArray(Int32[μ_to_idx[v_losals[bi]] for bi in 1:B])
         dA_gpu = CuArray(Float64.(dA_vals))
         FT.batched_macro_multiply_accumulate!(acc_fresh, mac_ft_fresh, kernel_cache_flat,
                                                μ_idx, dA_gpu, Natm1, B)

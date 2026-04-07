@@ -19,8 +19,8 @@ spike_positions = [20, Nλ ÷ 2, Nλ - 20]
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
 
-σ_v_tiny = CUDA.zeros(Float64, Natm) .+ 1.0
-μ_v_zero = CUDA.zeros(Float64, Natm)
+v_mic_tiny = CUDA.zeros(Float64, Natm) .+ 1.0
+v_los_zero = CUDA.zeros(Float64, Natm)
 
 # ── tests ──────────────────────────────────────────────────────────────────────
 @testset "Convolution alignment" begin
@@ -29,7 +29,7 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
             ys = zeros(Natm, Nλ)
             ys[:, spike_idx] .= 1.0
             cmem.signal_cached = false
-            result = Array(FT.convolve_wavelength_axis_gpu(cmem, λs, ys, μ_v_zero, σ_v_tiny))
+            result = Array(FT.convolve_wavelength_axis_gpu(cmem, λs, ys, v_los_zero, v_mic_tiny))
             peak_idx = argmax(result[1, :])
             @test peak_idx == spike_idx
         end
@@ -37,7 +37,7 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
 
     @testset "Microturbulence: Doppler shift direction" begin
         vsini_test = 2000.0
-        μ_v_shift = CUDA.zeros(Float64, Natm) .+ vsini_test
+        v_los_shift = CUDA.zeros(Float64, Natm) .+ vsini_test
         λ0 = λs[Nλ ÷ 2 + 1]
         expected_shift_pix = vsini_test / FT.c_ms * λ0 / Δλ
 
@@ -45,7 +45,7 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
         ys = zeros(Natm, Nλ)
         ys[:, spike_idx] .= 1.0
         cmem.signal_cached = false
-        result = Array(FT.convolve_wavelength_axis_gpu(cmem, λs, ys, μ_v_shift, σ_v_tiny))
+        result = Array(FT.convolve_wavelength_axis_gpu(cmem, λs, ys, v_los_shift, v_mic_tiny))
         peak_idx = argmax(result[1, :])
         actual_shift = peak_idx - spike_idx
         @test abs(actual_shift - round(Int, expected_shift_pix)) <= 1
@@ -53,11 +53,11 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
 
     @testset "RT macroturbulence: spike recovery (near-identity)" begin
         ζ_tiny = 10.0
-        μ_val = 0.9
+        v_losal = 0.9
         for spike_idx in spike_positions
             ys = zeros(Natm, Nλ)
             ys[:, spike_idx] .= 1.0
-            result = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs, ys, ζ_tiny, μ_val))
+            result = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs, ys, ζ_tiny, v_losal))
             peak_idx = argmax(result[1, :])
             @test peak_idx == spike_idx
         end
@@ -65,11 +65,11 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
 
     @testset "RT macroturbulence: spike recovery with real broadening" begin
         ζ_real = 3000.0
-        μ_val = 0.9
+        v_losal = 0.9
         for spike_idx in spike_positions
             ys = zeros(Natm, Nλ)
             ys[:, spike_idx] .= 1.0
-            result = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs, ys, ζ_real, μ_val))
+            result = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs, ys, ζ_real, v_losal))
             peak_idx = argmax(result[1, :])
             @test peak_idx == spike_idx
         end
@@ -100,12 +100,12 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
 
     @testset "CPU/GPU zero lag: rt_macro" begin
         ζ_real = 3000.0
-        μ_val = 0.9
+        v_losal = 0.9
         ys_full = randn(Natm, Nλ) .* 1e-10 .+ 1e-8
         ys_full[:, Nλ÷2] .+= 1e-6
 
-        result_cpu = FT.convolve_rt_macro(λs, ys_full, ζ_real, μ_val)
-        result_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs, ys_full, ζ_real, μ_val))
+        result_cpu = FT.convolve_rt_macro(λs, ys_full, ζ_real, v_losal)
+        result_gpu = Array(FT.convolve_rt_macro_gpu(cmem_mac, λs, ys_full, ζ_real, v_losal))
 
         cpu_row = result_cpu[1, :] .- mean(result_cpu[1, :])
         gpu_row = result_gpu[1, :] .- mean(result_gpu[1, :])
@@ -119,18 +119,18 @@ cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm, Npad)
     end
 
     @testset "CPU/GPU zero lag: microturbulence" begin
-        σ_v_real = 1200.0
+        v_mic_real = 1200.0
         ys_full = randn(Natm, Nλ) .* 1e-10 .+ 1e-8
         ys_full[:, Nλ÷2] .+= 1e-6
 
-        μ_v_zero_cpu = zeros(Natm)
-        σ_v_cpu = fill(σ_v_real, Natm)
-        σ_v_gpu = CUDA.zeros(Float64, Natm) .+ σ_v_real
-        μ_v_gpu = CUDA.zeros(Float64, Natm)
+        v_los_zero_cpu = zeros(Natm)
+        v_mic_cpu = fill(v_mic_real, Natm)
+        v_mic_gpu = CUDA.zeros(Float64, Natm) .+ v_mic_real
+        v_los_gpu = CUDA.zeros(Float64, Natm)
 
         cmem.signal_cached = false
-        result_cpu = FT.convolve_wavelength_axis(λs, ys_full, μ_v_zero_cpu, σ_v_cpu)
-        result_gpu = Array(FT.convolve_wavelength_axis_gpu(cmem, λs, ys_full, μ_v_gpu, σ_v_gpu))
+        result_cpu = FT.convolve_wavelength_axis(λs, ys_full, v_los_zero_cpu, v_mic_cpu)
+        result_gpu = Array(FT.convolve_wavelength_axis_gpu(cmem, λs, ys_full, v_los_gpu, v_mic_gpu))
 
         cpu_row = result_cpu[1, :] .- mean(result_cpu[1, :])
         gpu_row = result_gpu[1, :] .- mean(result_gpu[1, :])

@@ -33,9 +33,9 @@ FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, 
 Npad = 512
 gpu_mem = FT.GPUMemory(λs_korg, atm_gpu, α_ref)
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-σ_v = CUDA.zeros(Float64, Natm) .+ ξ
+v_mic = CUDA.zeros(Float64, Natm) .+ ξ
 μ_tile = 0.85
-μ_v_rot = CUDA.zeros(Float64, Natm) .+ 1200.0
+v_los_rot = CUDA.zeros(Float64, Natm) .+ 1200.0
 
 # ── tests ──────────────────────────────────────────────────────────────────────
 @testset "Fused kernel equivalence" begin
@@ -43,13 +43,13 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
     @testset "Fused cfunc+cfunc_dt vs separate (intensity)" begin
         # non-fused path: calc_intensity_quantities uses separate cfunc + compute_cfunc_dt
         cmem.signal_cached = false
-        result_nonfused = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
+        result_nonfused = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μ_tile, v_los_rot, v_mic)
         cfunc_nf = Array(result_nonfused.cfunc)
         cfunc_dt_nf = Array(result_nonfused.cfunc_dt)
 
         # fused path: calc_intensity_quantities_inplace! uses calc_intensity_cfunc_dt!
         cmem.signal_cached = false
-        result_fused = FT.calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
+        result_fused = FT.calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μ_tile, v_los_rot, v_mic)
         cfunc_f = Array(result_fused.cfunc)
         cfunc_dt_f = Array(result_fused.cfunc_dt)
 
@@ -60,14 +60,14 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
     @testset "Fused cfunc+cfunc_dt vs separate (flux)" begin
         # non-fused path: call the old wrapper + compute_cfunc_dt separately
         cmem.signal_cached = false
-        FT.calc_flux_cfunc!(αs, atm_gpu, gpu_mem, cmem, σ_v)
+        FT.calc_flux_cfunc!(αs, atm_gpu, gpu_mem, cmem, v_mic)
         FT.compute_cfunc_dt!(gpu_mem.cfunc_dt, gpu_mem.cfunc, gpu_mem.τs)
         cfunc_nf = Array(gpu_mem.cfunc)
         cfunc_dt_nf = Array(gpu_mem.cfunc_dt)
 
         # fused path: calc_flux_quantities uses calc_flux_cfunc_dt!
         cmem.signal_cached = false
-        result_fused = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v)
+        result_fused = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
         cfunc_f = Array(result_fused.cfunc)
         cfunc_dt_f = Array(result_fused.cfunc_dt)
 
@@ -78,7 +78,7 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
     @testset "Fused accumulation vs separate copyto+sum+broadcast" begin
         # create a source matrix (use cfunc_dt from a real computation)
         cmem.signal_cached = false
-        result = FT.calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μ_tile, μ_v_rot, σ_v)
+        result = FT.calc_intensity_quantities_inplace!(αs, atm_gpu, gpu_mem, cmem, μ_tile, v_los_rot, v_mic)
         src = copy(result.cfunc_dt)
         Natm1 = Natm - 1
         dA_i = 0.00123

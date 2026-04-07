@@ -79,20 +79,20 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
                           ne_warn_thresh=Inf)
 
         # Float64 reference
-        σ_v_64 = CUDA.zeros(Float64, Natm) .+ ξ
-        μ_v_64 = CUDA.zeros(Float64, Natm) .+ 1500.0
+        v_mic_64 = CUDA.zeros(Float64, Natm) .+ ξ
+        v_los_64 = CUDA.zeros(Float64, Natm) .+ 1500.0
         cmem64 = FT.ConvolutionMemory(Nλ, Natm, Npad; T=Float64)
         cmem64.signal_cached = false
-        ref = Array(FT.convolve_wavelength_axis_gpu(cmem64, collect(λs_korg), αs, μ_v_64, σ_v_64))
+        ref = Array(FT.convolve_wavelength_axis_gpu(cmem64, collect(λs_korg), αs, v_los_64, v_mic_64))
 
         # Float32
         αs32 = Float32.(αs)
         λs32 = Float32.(collect(λs_korg))
-        σ_v_32 = CUDA.zeros(Float32, Natm) .+ Float32(ξ)
-        μ_v_32 = CUDA.zeros(Float32, Natm) .+ Float32(1500.0)
+        v_mic_32 = CUDA.zeros(Float32, Natm) .+ Float32(ξ)
+        v_los_32 = CUDA.zeros(Float32, Natm) .+ Float32(1500.0)
         cmem32 = FT.ConvolutionMemory(Nλ, Natm, Npad; T=Float32)
         cmem32.signal_cached = false
-        res32 = Array(FT.convolve_wavelength_axis_gpu(cmem32, λs32, αs32, μ_v_32, σ_v_32))
+        res32 = Array(FT.convolve_wavelength_axis_gpu(cmem32, λs32, αs32, v_los_32, v_mic_32))
 
         @test size(res32) == size(ref)
         @test eltype(res32) == Float32
@@ -125,29 +125,29 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
         λs32 = Float32.(collect(λs_korg))
         λs64 = collect(Float64, λs_korg)
 
-        μ_vals_f32 = Float32[0.95, 0.7, 0.4]
-        μ_vals_f64 = Float64[0.95, 0.7, 0.4]
+        v_losals_f32 = Float32[0.95, 0.7, 0.4]
+        v_losals_f64 = Float64[0.95, 0.7, 0.4]
         v_vals_f32 = Float32[0.0, 1500.0, 3000.0]
         v_vals_f64 = Float64[0.0, 1500.0, 3000.0]
         Natm1 = Natm - 1
 
         # ── Float64 reference path ──
-        σ_v_64 = Float64(ξ)
+        v_mic_64 = Float64(ξ)
         log_τ_ref_64 = CuArray{Float64}(log.(atm_f64.τs))
         ifactor_base_64 = CuArray{Float64}(atm_f64.τs ./ α_ref)
         Ts_gpu_64 = CuArray{Float64}(atm_f64.Ts)
         λs_gpu_64 = CuArray{Float64}(λs64)
 
         bcmem_64 = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad; T=Float64)
-        μ_v_batch_cpu_64 = zeros(Float64, B * Natm)
+        v_los_batch_cpu_64 = zeros(Float64, B * Natm)
         for bi in 1:B, k in 1:Natm
-            μ_v_batch_cpu_64[(bi-1)*Natm+k] = v_vals_f64[bi]
+            v_los_batch_cpu_64[(bi-1)*Natm+k] = v_vals_f64[bi]
         end
-        μ_v_batch_64 = CuArray{Float64}(μ_v_batch_cpu_64)
+        v_los_batch_64 = CuArray{Float64}(v_los_batch_cpu_64)
         bcmem_64.signal_cached = false
-        αs_conv_64 = FT.convolve_wavelength_axis_batched!(bcmem_64, λs64, αs, μ_v_batch_64, σ_v_64, B)
+        αs_conv_64 = FT.convolve_wavelength_axis_batched!(bcmem_64, λs64, αs, v_los_batch_64, v_mic_64, B)
 
-        μ_tiles_64 = CuArray{Float64}(μ_vals_f64)
+        μ_tiles_64 = CuArray{Float64}(v_losals_f64)
         τs_batch_64 = CUDA.zeros(Float64, B * Natm, Nλ)
         FT.calc_tau_anchored_batched!(μ_tiles_64, log_τ_ref_64, ifactor_base_64,
                                       αs_conv_64, τs_batch_64, Natm, B)
@@ -157,23 +157,23 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
         cfdt_ref = Array(cfdt_batch_64)
 
         # ── Float32 path ──
-        σ_v_32 = Float32(ξ)
+        v_mic_32 = Float32(ξ)
         log_τ_ref_32 = CuArray{Float32}(log.(atm32.τs))
         ifactor_base_32 = CuArray{Float32}(atm32.τs ./ α_ref32)
         Ts_gpu_32 = CuArray{Float32}(atm32.Ts)
         λs_gpu_32 = CuArray{Float32}(λs32)
 
         bcmem_32 = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad; T=Float32)
-        μ_v_batch_cpu_32 = zeros(Float32, B * Natm)
+        v_los_batch_cpu_32 = zeros(Float32, B * Natm)
         for bi in 1:B, k in 1:Natm
-            μ_v_batch_cpu_32[(bi-1)*Natm+k] = v_vals_f32[bi]
+            v_los_batch_cpu_32[(bi-1)*Natm+k] = v_vals_f32[bi]
         end
-        μ_v_batch_32 = CuArray{Float32}(μ_v_batch_cpu_32)
+        v_los_batch_32 = CuArray{Float32}(v_los_batch_cpu_32)
         bcmem_32.signal_cached = false
-        αs_conv_32 = FT.convolve_wavelength_axis_batched!(bcmem_32, λs32, αs32, μ_v_batch_32, σ_v_32, B)
+        αs_conv_32 = FT.convolve_wavelength_axis_batched!(bcmem_32, λs32, αs32, v_los_batch_32, v_mic_32, B)
         @test eltype(αs_conv_32) == Float32
 
-        μ_tiles_32 = CuArray{Float32}(μ_vals_f32)
+        μ_tiles_32 = CuArray{Float32}(v_losals_f32)
         τs_batch_32 = CUDA.zeros(Float32, B * Natm, Nλ)
         FT.calc_tau_anchored_batched!(μ_tiles_32, log_τ_ref_32, ifactor_base_32,
                                       αs_conv_32, τs_batch_32, Natm, B)
@@ -301,8 +301,8 @@ star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
         # Float64 reference cfunc_dt
         gpu_mem = FT.GPUMemory(collect(λs), atm_f64, α_ref)
         cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
-        σ_v = CUDA.zeros(Float64, Natm) .+ ξ
-        cfunc_struct = FT.calc_flux_quantities(αs, atm_f64, gpu_mem, cmem, σ_v)
+        v_mic = CUDA.zeros(Float64, Natm) .+ ξ
+        cfunc_struct = FT.calc_flux_quantities(αs, atm_f64, gpu_mem, cmem, v_mic)
         tbc_f64 = Array(cfunc_struct.cfunc_dt)
         tbc = Float32.(tbc_f64)
 

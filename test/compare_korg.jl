@@ -30,16 +30,16 @@ Ts_gpu = atm_gpu.Ts_gpu
 
 # microturbulence velocity
 val  = 2400.0
-σ_v  = CuArray{Float64}(fill(val, Natm))
-μ_v  = CUDA.zeros(Float64, Natm)
+v_mic  = CuArray{Float64}(fill(val, Natm))
+v_los  = CUDA.zeros(Float64, Natm)
 
 # disk angles (only flux comparison below)
-μ_vals = 0.2:0.05:1.0
+v_losals = 0.2:0.05:1.0
 
 # canonical Korg synthesis on the resampled atmosphere
 sol = Korg.synthesize(atm_resampled, linelist, A_X, λs_korg;
                       vmic=val / 1e3, tau_scheme="anchored",
-                      mu_values=μ_vals, hydrogen_lines=false)
+                      mu_values=v_losals, hydrogen_lines=false)
 
 # absorption coefficients via FT
 αs      = zeros(Natm, length(λs_korg))
@@ -52,9 +52,9 @@ FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, 
 Nλ   = length(λs_korg)
 Npad = 100
 cmem        = FT.ConvolutionMemory(Nλ, Natm, Npad)
-αs_gpu      = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs,      μ_v, σ_v)
+αs_gpu      = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs,      v_los, v_mic)
 cmem        = FT.ConvolutionMemory(Nλ, Natm, Npad)
-αs_cont_gpu = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs_cont, μ_v, σ_v)
+αs_cont_gpu = FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs_cont, v_los, v_mic)
 
 # anchored-τ reference arrays
 log_τ_ref_gpu    = CuArray(log.(atm_gpu.τs))

@@ -106,8 +106,8 @@ end
     cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
     gpu_mem = FT.GPUMemory(λs_korg, atm_gpu)
 
-    σ_v_mic = CUDA.zeros(Float64, Natm) .+ 1200.0
-    cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    v_mic = CUDA.zeros(Float64, Natm) .+ 1200.0
+    cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
     tbc = Array(cfunc_flux.cfunc_dt)
 
     vsini = 4200.0

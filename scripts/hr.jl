@@ -100,11 +100,8 @@ Npad = 512
 cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 
 # velocities
-μ_v_rot = CUDA.zeros(Float64, Natm)
-σ_v_mic = CUDA.zeros(Float64, Natm)
-
-μ_v_mac = CUDA.zeros(Float64, Natm-1)
-σ_v_mac = CUDA.zeros(Float64, Natm-1)
+v_los_rot = CUDA.zeros(Float64, Natm)
+v_mic = CUDA.zeros(Float64, Natm)
 
 cmem_mac = FT.MacroConvolutionMemory(Nλ, Natm - 1, Npad)
 
@@ -165,15 +162,15 @@ for i in eachindex(T_effs)
     @show vmic
     @show vsinis[i]
     @show vmacs[i]
-    σ_v_mic .= vmic
+    v_mic .= vmic
 
     # get limb darkening
     for k in eachindex(μs)
-        μ_v_rot .= 0.0
-        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[k], μ_v_rot, σ_v_mic)
+        v_los_rot .= 0.0
+        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[k], v_los_rot, v_mic)
         ints[:,k] .= Array(FT.get_intensity(cfunc_intensity_struct))
 
-        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[k], μ_v_rot, σ_v_mic)
+        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[k], v_los_rot, v_mic)
         ints_cont[:,k] .= Array(FT.get_intensity(cfunc_intensity_cont))
     end
     ints ./= ints_cont[1,1]
@@ -199,11 +196,11 @@ for i in eachindex(T_effs)
     println()
 
     # get cfunc for flux
-    cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
     flux_stationary = Array(FT.get_flux(cfunc_flux_struct)')
 
     # get disk integrated continuum
-    cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, σ_v_mic)
+    cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, v_mic)
     flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_struct)')
 
     # convolution
@@ -236,17 +233,17 @@ for i in eachindex(T_effs)
 
     for k in eachindex(μs_cpu)
         # set the rotational velocity
-        μ_v_rot .= z_rot_cpu[k] .* FT.c_ms
+        v_los_rot .= z_rot_cpu[k] .* FT.c_ms
 
         # get intensity stuff
-        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
+        cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs_cpu[k], v_los_rot, v_mic)
 
         tbc = cfunc_intensity_struct.cfunc_dt
         cfunc_int_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc, vmacs[i], μs_cpu[k])
         flux_integration .+= sum(cfunc_int_i_mac, dims=1)' .* dA_cpu[k]
 
         # now do continuum intensity
-        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[k], μ_v_rot, σ_v_mic)
+        cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs_cpu[k], v_los_rot, v_mic)
 
         tbc_cont = cfunc_intensity_cont.cfunc_dt
         cfunc_int_cont_i_mac = FT.convolve_rt_macro_gpu(cmem_mac, λs_korg, tbc_cont, vmacs[i], μs_cpu[k])
