@@ -75,6 +75,25 @@ v_los_rot = CUDA.zeros(Float64, Natm) .+ 1200.0
         @test cfunc_dt_f == cfunc_dt_nf
     end
 
+    @testset "Fused Bézier τ+cfunc+reduce vs unfused (intensity)" begin
+        # non-anchored GPUMemory (Bézier path)
+        gpu_mem_bez = FT.GPUMemory(λs_korg, atm_gpu)
+
+        # unfused: calc_intensity_cfunc! writes τs + cfunc, then reduce_intensity!
+        cmem.signal_cached = false
+        FT.calc_intensity_cfunc!(αs, atm_gpu, gpu_mem_bez, cmem, μ_tile, v_los_rot, v_mic)
+        out_unfused = CUDA.zeros(Float64, Nλ)
+        FT.reduce_intensity!(out_unfused, gpu_mem_bez.cfunc, gpu_mem_bez.τs)
+
+        # fused: calc_intensity_direct! uses calc_tau_cfunc_reduce_bezier!
+        out_fused = CUDA.zeros(Float64, Nλ)
+        cmem.signal_cached = false
+        FT.calc_intensity_direct!(out_fused, αs, atm_gpu, gpu_mem_bez, cmem,
+                                  μ_tile, v_los_rot, v_mic)
+
+        @test Array(out_fused) ≈ Array(out_unfused) rtol=1e-12
+    end
+
     @testset "Fused accumulation vs separate copyto+sum+broadcast" begin
         # create a source matrix (use cfunc_dt from a real computation)
         cmem.signal_cached = false

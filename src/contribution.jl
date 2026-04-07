@@ -134,7 +134,8 @@ function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GP
 end
 
 # Like calc_intensity_cfunc! but writes intensity directly (fused cfunc+reduce).
-# Does NOT populate mem.cfunc — use calc_intensity_cfunc! if you need the cfunc matrix.
+# Does NOT populate mem.cfunc. Bézier path also skips mem.τs.
+# Use calc_intensity_cfunc! if you need the cfunc or τs matrices.
 function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::AtmosphereGPU{T},
                                 mem::GPUMemory, cmem::AbstractConvolutionMemory, μ_tile::T,
                                 v_los::CA{T,1}, v_mic::Union{T, CA{T,1}}) where T<:AF
@@ -142,11 +143,12 @@ function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::Atmosphere
     αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, v_los, v_mic)
     if mem.use_anchored
         calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
+        cfunc_reduce_intensity!(out, μ_tile, atm.Ts_gpu, mem.λs, mem.τs)
     else
-        calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_gpu, mem.τs,
-                                mem.tau_ds, mem.tau_alphaC)
+        calc_tau_cfunc_reduce_bezier!(out, μ_tile, atm.zs_gpu, αs_gpu,
+                                      mem.tau_ds, mem.tau_alphaC,
+                                      atm.Ts_gpu, mem.λs)
     end
-    cfunc_reduce_intensity!(out, μ_tile, atm.Ts_gpu, mem.λs, mem.τs)
     return nothing
 end
 
@@ -397,6 +399,150 @@ function cfunc_reduce_intensity!(out::CA{T,1}, μ_i::T, Ts::CA{T,1},
     shmem_bytes = prod(ts) * sizeof(T)
     @cuda threads=ts blocks=bs shmem=shmem_bytes cfunc_reduce_intensity_kernel!(
         out, Ts, λs, τs, Natm1, Nλ)
+    return nothing
+end
+
+# ── Fused Bézier τ + cfunc + intensity-reduction ─────────────────────────────
+
+# GL cfunc integrand accumulated in-register. Pure (no mutation).
+@inline function _accumulate_cfunc(I_acc::T, τ0::T, τ1::T, T0::T, T1::T,
+                                    bb_num::T, bb_x::T, half::T,
+                                    one_over_sqrt3::T, frac1::T, frac2::T) where T
+    Δτ = τ1 - τ0
+    τ_mid = half * (τ0 + τ1)
+    τp1 = τ_mid - half * Δτ * one_over_sqrt3
+    τp2 = τ_mid + half * Δτ * one_over_sqrt3
+    dT = T1 - T0
+    Tg1 = T0 + dT * frac1
+    Tg2 = T0 + dT * frac2
+    B1 = bb_num / (exp(bb_x / Tg1) - one(T))
+    B2 = bb_num / (exp(bb_x / Tg2) - one(T))
+    f1 = B1 * exp(-τp1)
+    f2 = B2 * exp(-τp2)
+    cfunc_k = half * (f1 + f2) * T(ANGSTROM_TO_CM)
+    return muladd(cfunc_k, Δτ, I_acc)
+end
+
+# Fused kernel: Bézier τ integration + cfunc evaluation + intensity reduction
+# in a single pass. One thread per wavelength, sequential z-loop.
+# Mirrors calc_tau_bezier_cached_kernel! (tau.jl) with in-register cfunc accumulation.
+# Writes only out[j] — no τs or cfunc matrices.
+function calc_tau_cfunc_reduce_bezier_kernel!(out::CDV{T}, αs::CDM{T},
+                                              ds::CDV{T}, alphaC::CDV{T},
+                                              Ts::CDV{T}, λs::CDV{T},
+                                              Nλ::Int32) where T<:AF
+    j = Int32(threadIdx().x) + Int32(blockDim().x) * (Int32(blockIdx().x) - Int32(1))
+    j > Nλ && return nothing
+
+    N = Int32(size(αs, 1))
+    one_third = inv(T(3))
+    half = T(0.5)
+    zeroT = zero(T)
+    oneT = one(T)
+
+    # Planck and GL constants (loop-invariant, hoisted)
+    λ_cm = λs[j] * T(ANGSTROM_TO_CM)
+    λ5 = λ_cm * λ_cm * λ_cm * λ_cm * λ_cm
+    bb_num = T(2) * T(h) * T(c)^2 / λ5
+    bb_x = T(h) * T(c) / (λ_cm * T(kB))
+    one_over_sqrt3 = oneT / sqrt(T(3))
+    frac1 = half * (oneT - one_over_sqrt3)
+    frac2 = half * (oneT + one_over_sqrt3)
+
+    # αmax scan — Bézier overshoot clamping
+    @inbounds α_prev = αs[1, j]
+    αmax = α_prev
+    @inbounds for p in Int32(2):N
+        v = αs[p, j]
+        αmax = max(αmax, v)
+    end
+    hi = max(T(2) * αmax, zeroT)
+
+    # init
+    τ_prev = T(TAU_FLOOR)
+    I_acc = zeroT
+    @inbounds T_prev = Ts[1]
+
+    # first iteration (c=2): load α1, α2, α3 fresh
+    @inbounds ds_prev = ds[1]
+    @inbounds ds_curr = ds[2]
+    @inbounds α_curr = αs[2, j]
+    @inbounds α_next = αs[3, j]
+    prev_dC = (α_curr - α_prev) / ds_prev
+    dC = (α_next - α_curr) / ds_curr
+
+    @inbounds αC = alphaC[2]
+    ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                  (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+    C0 = α_curr + half * ds_prev * ybar
+    C1 = α_curr - half * ds_curr * ybar
+    Cf = min(max(C0, zeroT), hi)
+    τ_curr = τ_prev - ds_prev * one_third * (α_prev + α_curr + Cf)
+
+    # accumulate cfunc for interval [1, 2]
+    @inbounds T_curr = Ts[2]
+    I_acc = _accumulate_cfunc(I_acc, τ_prev, τ_curr, T_prev, T_curr,
+                              bb_num, bb_x, half, one_over_sqrt3, frac1, frac2)
+
+    prev_dC = dC
+    prev_C1 = C1
+    α_prev = α_curr
+    α_curr = α_next
+    ds_prev = ds_curr
+    τ_prev = τ_curr
+    T_prev = T_curr
+
+    # main loop (lyr=3..N-1). Named 'lyr' to avoid shadowing speed-of-light constant 'c'.
+    @inbounds for lyr in Int32(3):(N - Int32(1))
+        ds_curr = ds[lyr]
+        αC = alphaC[lyr]
+        α_next = αs[lyr + Int32(1), j]
+        dC = (α_next - α_curr) / ds_curr
+
+        ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                      (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+        C0 = α_curr + half * ds_prev * ybar
+        C1 = α_curr - half * ds_curr * ybar
+        Cf = min(max(half * (C0 + prev_C1), zeroT), hi)
+        τ_curr = τ_prev - ds_prev * one_third * (α_prev + α_curr + Cf)
+
+        # accumulate cfunc for interval [lyr-1, lyr]
+        T_curr = Ts[lyr]
+        I_acc = _accumulate_cfunc(I_acc, τ_prev, τ_curr, T_prev, T_curr,
+                                  bb_num, bb_x, half, one_over_sqrt3, frac1, frac2)
+
+        prev_dC = dC
+        prev_C1 = C1
+        α_prev = α_curr
+        α_curr = α_next
+        ds_prev = ds_curr
+        τ_prev = τ_curr
+        T_prev = T_curr
+    end
+
+    # last step (lyr=N)
+    Cf = min(max(prev_C1, zeroT), hi)
+    τ_curr = τ_prev - ds_prev * one_third * (α_prev + α_curr + Cf)
+    @inbounds T_curr = Ts[N]
+    I_acc = _accumulate_cfunc(I_acc, τ_prev, τ_curr, T_prev, T_curr,
+                              bb_num, bb_x, half, one_over_sqrt3, frac1, frac2)
+
+    @inbounds out[j] = I_acc
+    return nothing
+end
+
+function calc_tau_cfunc_reduce_bezier!(out::CA{T,1}, μ_i::T, zs::CA{T,1},
+                                       αs::CA{T,2}, ds::CA{T,1}, alphaC::CA{T,1},
+                                       Ts::CA{T,1}, λs::CA{T,1}) where T<:AF
+    N = length(zs)
+    Nλ = Int32(size(αs, 2))
+    t_geom = 128
+    b_geom = cld(N, t_geom)
+    @cuda threads=t_geom blocks=b_geom precompute_bezier_geometry!(μ_i, zs, ds, alphaC)
+    threads = 32
+    blocks = cld(Int(Nλ), threads)
+    @cuda threads=threads blocks=blocks calc_tau_cfunc_reduce_bezier_kernel!(
+        out, αs, ds, alphaC, Ts, λs, Nλ)
     return nothing
 end
 
