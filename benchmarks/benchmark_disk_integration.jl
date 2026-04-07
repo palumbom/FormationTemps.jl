@@ -188,7 +188,7 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
 
     λs_T = T.(collect(λs_korg))
     λs_gpu = CuArray(λs_T)
-    v_mic = T(star.ξ)
+    v_mic = CUDA.fill(T(star.ξ), Natm)  # CuVector matches production (atm_gpu.v_mic path)
     log_τ_ref = CuArray{T}(log.(atm_gpu.τs))
     ifactor_base = CuArray{T}(atm_gpu.τs ./ α_ref_T)
     Ts_gpu = CuArray{T}(atm_gpu.Ts)

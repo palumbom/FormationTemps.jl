@@ -21,4 +21,4 @@ identifiers:
     value: '10.5281/zenodo.18343828'
 repository-code: 'https://github.com/palumbom/FormationTemps.jl'
 license: MIT
-version: 1.0.1
+version: 2.0.0
