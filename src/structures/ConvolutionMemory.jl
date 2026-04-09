@@ -45,7 +45,8 @@ mutable struct ConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     plan_bwd::AbstractFFTs.ScaledPlan
 
     # 1D R2C FFT for real-space micro kernel (Tier 1: uniform v_mic)
-    xs_gpu::CA{T,1}                        # wavelength grid (Nλ)
+    xs_gpu::CA{T,1}                        # wavelength grid (Nλ); may be used as scratch by macro kernels
+    xs_cpu::Vector{T}                      # CPU cache of wavelength grid, set once in _init_micro_params!
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
     plan_fwd_1d::CUDA.CUFFT.CuFFTPlan     # 1D R2C plan on kr_1d
@@ -85,7 +86,8 @@ mutable struct MacroConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     plan_bwd::AbstractFFTs.ScaledPlan
 
     # ── macro-specific fields ──
-    xs_gpu::CA{T,1}                        # wavelength grid for kernel evaluation (Nλ)
+    xs_gpu::CA{T,1}                        # wavelength grid for kernel evaluation (Nλ); hirano.jl reuses as scratch
+    xs_cpu::Vector{T}                      # CPU cache of wavelength grid, set once in _init_micro_params!
     padded_kernel_gpu::CA{T,1}             # 1D padded kernel work buffer (L)
     shift_kernel_gpu::CA{T,1}              # 1D shifted kernel work buffer (L)
     out_gpu::CA{T,2}                       # output extraction buffer (Natm, Nλ)
@@ -268,7 +270,8 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                                 ys_gpu, signal_gpu,
                                 kernel_ft_gpu, signal_ft_gpu, conv_ft_gpu, conv_gpu,
                                 plan_fwd, plan_bwd,
-                                xs_gpu, kr_1d, kernel_row_ft_1d, plan_fwd_1d, false)
+                                xs_gpu, Vector{T}(undef, 0),
+                                kr_1d, kernel_row_ft_1d, plan_fwd_1d, false)
 end
 
 """
@@ -312,7 +315,8 @@ function MacroConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                                      ys_gpu, signal_gpu,
                                      kernel_ft_gpu, signal_ft_gpu, conv_ft_gpu, conv_gpu,
                                      plan_fwd, plan_bwd,
-                                     xs_gpu, padded_kernel_gpu, shift_kernel_gpu, out_gpu,
+                                     xs_gpu, Vector{T}(undef, 0),
+                                     padded_kernel_gpu, shift_kernel_gpu, out_gpu,
                                      kr_1d, kernel_row_ft_1d, plan_fwd_1d, false,
                                      kc_1d, plan_bwd_1d)
 end

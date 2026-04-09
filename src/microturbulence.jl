@@ -232,8 +232,12 @@ end
 
 # ── GPU host helpers ─────────────────────────────────────────────────────────
 
+# NB: xs_gpu may be repurposed as scratch by macro kernels (e.g. hirano.jl stores
+# frequency-domain σ values there). xs_cpu is the authoritative wavelength grid
+# after initialization; never re-read xs_gpu to recover the grid.
 function _init_micro_params!(cmem, xs_h::AbstractVector{T}) where T<:AF
     copyto!(cmem.xs_gpu, xs_h)
+    cmem.xs_cpu = collect(T, xs_h)
     cmem.doppler_ready = true
     return nothing
 end
@@ -357,8 +361,7 @@ function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory,
         _init_micro_params!(cmem, Array(xs_d))
     end
     _pad_and_fft_signal!(cmem, ys_d)
-    xs_h = Array(cmem.xs_gpu)
-    _build_kernel_ft_1d!(cmem, xs_h, v_los, v_mic)
+    _build_kernel_ft_1d!(cmem, cmem.xs_cpu, v_los, v_mic)
     kft = reshape(cmem.kernel_row_ft_1d, 1, :)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* kft
     return _irfft_and_extract(cmem)
@@ -383,8 +386,7 @@ function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory,
         _init_micro_params!(cmem, Array(xs_d))
     end
     _pad_and_fft_signal!(cmem, ys_d)
-    xs_h = Array(cmem.xs_gpu)
-    _build_per_row_kernels!(cmem, xs_h, v_los, v_mic)
+    _build_per_row_kernels!(cmem, cmem.xs_cpu, v_los, v_mic)
     mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.conv_gpu)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     return _irfft_and_extract(cmem)
@@ -409,8 +411,7 @@ function convolve_wavelength_axis_gpu(cmem::AbstractConvolutionMemory,
         _init_micro_params!(cmem, Array(xs_d))
     end
     _pad_and_fft_signal!(cmem, ys_d)
-    xs_h = Array(cmem.xs_gpu)
-    _build_per_row_kernels!(cmem, xs_h, v_los, v_mic)
+    _build_per_row_kernels!(cmem, cmem.xs_cpu, v_los, v_mic)
     mul!(cmem.kernel_ft_gpu, cmem.plan_fwd, cmem.conv_gpu)
     cmem.conv_ft_gpu .= cmem.signal_ft_gpu .* cmem.kernel_ft_gpu
     return _irfft_and_extract(cmem)
@@ -432,9 +433,9 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
                                            Bcur::Int; tile_offset::Int=0) where {T<:AF}
     Natm = bcmem.Natm
     BNatm = Bcur * Natm
-    xs_h = xs isa CuArray ? Array(xs) : collect(T, xs)
 
     if !bcmem.doppler_ready
+        xs_h = xs isa CuArray ? Array(xs) : collect(T, xs)
         _init_micro_params!(bcmem, xs_h)
     end
 
@@ -449,8 +450,8 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     # per-row kernels with scalar v_mic
     i0 = bcmem.Nλ ÷ 2 + 1
-    Δλ = median(diff(xs_h))
-    σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
+    Δλ = median(diff(bcmem.xs_cpu))
+    σ_floor = T(max(eps(T) * mean(bcmem.xs_cpu), T(0.25) * Δλ))
     ts2 = (32, 32)
 
     fill!(bcmem.conv_gpu, zero(T))
@@ -479,9 +480,9 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
                                            Bcur::Int; tile_offset::Int=0) where {T<:AF}
     Natm = bcmem.Natm
     BNatm = Bcur * Natm
-    xs_h = xs isa CuArray ? Array(xs) : collect(T, xs)
 
     if !bcmem.doppler_ready
+        xs_h = xs isa CuArray ? Array(xs) : collect(T, xs)
         _init_micro_params!(bcmem, xs_h)
     end
 
@@ -496,8 +497,8 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     # per-row kernels with vector v_mic (modular indexing wraps across tiles)
     i0 = bcmem.Nλ ÷ 2 + 1
-    Δλ = median(diff(xs_h))
-    σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
+    Δλ = median(diff(bcmem.xs_cpu))
+    σ_floor = T(max(eps(T) * mean(bcmem.xs_cpu), T(0.25) * Δλ))
     ts2 = (32, 32)
 
     fill!(bcmem.conv_gpu, zero(T))
