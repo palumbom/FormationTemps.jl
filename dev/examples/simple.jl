@@ -1,0 +1,37 @@
+using Korg
+using PythonPlot; plt = PythonPlot.pyplot
+using FormationTemps; FT = FormationTemps
+plt.style.use(joinpath(FT.moddir, "fig.mplstyle"))
+
+# get the linelist
+linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16100]
+
+# set stellar parameters
+Teff = 5777.0
+logg = 4.44
+Fe_H = 0.0
+vsini = 2100.0
+ζ_RT = 3400.0   # radial-tangential macroturbulent broadening 
+ξ = 850.0       # microturbulent broadening
+
+# create StellarProps composite type to hold everything 
+star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, 
+                          vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
+
+# get the flux + formation temperature spectra
+form_temp_result = FT.calc_formation_temp(star_props, linelist; Δλ=0.01)
+
+# parse the result
+wavs = form_temp_result.wavs
+flux = form_temp_result.flux
+temp = form_temp_result.form_temps
+
+# plot the result
+fig, ax1 = plt.subplots(figsize=(9.6,4.8))
+ax1.plot(wavs, temp, c="k")
+ax1.set_xlabel("{\\rm Vacuum Wavelength [\\AA]}")
+ax1.set_ylabel("{\\rm Formation Temperature [K]}")
+fname = joinpath(FT.moddir, "docs", "src", "static", "temp_example_jl.png")
+fig.savefig(fname, bbox_inches="tight")
+plt.show()
+plt.clf(); plt.close()

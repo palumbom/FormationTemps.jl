@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Broadening &amp; Convolutions · FormationTemps.jl</title><meta name="title" content="Broadening &amp; Convolutions · FormationTemps.jl"/><meta property="og:title" content="Broadening &amp; Convolutions · FormationTemps.jl"/><meta property="twitter:title" content="Broadening &amp; Convolutions · FormationTemps.jl"/><meta name="description" content="Documentation for FormationTemps.jl."/><meta property="og:description" content="Documentation for FormationTemps.jl."/><meta property="twitter:description" content="Documentation for FormationTemps.jl."/><meta property="og:url" content="https://palumbom.github.io/FormationTemps.jl/convolutions/"/><meta property="twitter:url" content="https://palumbom.github.io/FormationTemps.jl/convolutions/"/><link rel="canonical" href="https://palumbom.github.io/FormationTemps.jl/convolutions/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.png" alt="FormationTemps.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">FormationTemps.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Quickstart</a></li><li><span class="tocitem">Guides</span><ul><li><a class="tocitem" href="../tutorial/">Basic Tutorial</a></li><li><a class="tocitem" href="../cont_func/">Contribution Functions</a></li><li class="is-active"><a class="tocitem" href>Broadening &amp; Convolutions</a><ul class="internal"><li><a class="tocitem" href="#Disk-integration-vs.-convolution-approximation"><span>Disk integration vs. convolution approximation</span></a></li><li><a class="tocitem" href="#Broadening-kernels"><span>Broadening kernels</span></a></li><li><a class="tocitem" href="#Applying-convolutions-to-a-spectrum"><span>Applying convolutions to a spectrum</span></a></li><li><a class="tocitem" href="#Disk-integration-convergence"><span>Disk integration convergence</span></a></li></ul></li><li><a class="tocitem" href="../chunked/">Large Linelists</a></li><li><a class="tocitem" href="../parallelization/">Parallelization</a></li><li><a class="tocitem" href="../python/">Python Tutorial</a></li></ul></li><li><a class="tocitem" href="../internals/">Public Functions</a></li><li><a class="tocitem" href="../longlist/">Full Index</a></li><li><a class="tocitem" href="../license/">License</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Guides</a></li><li class="is-active"><a href>Broadening &amp; Convolutions</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Broadening &amp; Convolutions</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/palumbom/FormationTemps.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/palumbom/FormationTemps.jl/blob/main/docs/src/convolutions.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Broadening-and-Convolutions"><a class="docs-heading-anchor" href="#Broadening-and-Convolutions">Broadening &amp; Convolutions</a><a id="Broadening-and-Convolutions-1"></a><a class="docs-heading-anchor-permalink" href="#Broadening-and-Convolutions" title="Permalink"></a></h1><p>FormationTemps.jl exposes the broadening kernels and convolution routines it uses internally so they can be applied directly to any spectrum. This page demonstrates each option and compares the convolution approximation to full disk integration.</p><p>See the <a href="../internals/#Public-Functions">Public Functions</a> page for full API documentation on each function.</p><h2 id="Disk-integration-vs.-convolution-approximation"><a class="docs-heading-anchor" href="#Disk-integration-vs.-convolution-approximation">Disk integration vs. convolution approximation</a><a id="Disk-integration-vs.-convolution-approximation-1"></a><a class="docs-heading-anchor-permalink" href="#Disk-integration-vs.-convolution-approximation" title="Permalink"></a></h2><p>By default <code>calc_formation_temp</code> performs a numerical disk integration over the stellar surface. Passing <code>convolve=true</code> instead applies the Hirano et al. (2011) combined rotation + macroturbulence kernel in the Fourier domain. This is much faster, but ultimately an approximation. The code below shows both modes and their difference:</p><pre><code class="language-julia hljs">
+# --- compare disk integration vs. convolution approximation ---
+
+# disk integration (default, convolve=false)
+star_props = FT.StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
+                             vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
+result_int = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, convolve=false)
+
+# convolution approximation (convolve=true uses Hirano et al. 2011 kernel;
+# u1 and u2 are linear and quadratic limb-darkening coefficients)
+u1 = 0.43
+u2 = 0.31
+result_conv = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, convolve=true, u1=u1, u2=u2)
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9.6, 7.2), sharex=true)
+ax1.plot(wavs, result_int.flux,  label=&quot;{\\rm integration}&quot;, lw=2.0, c=&quot;k&quot;)
+ax1.plot(wavs, result_conv.flux, label=&quot;{\\rm convolution}&quot;, lw=2.0, ls=&quot;--&quot;)
+ax1.set_ylabel(&quot;{\\rm Normalized Flux}&quot;)
+ax1.legend()
+
+ax2.plot(wavs, result_int.flux .- result_conv.flux, c=&quot;k&quot;, lw=0.8)
+ax2.axhline(0, ls=&quot;:&quot;, c=&quot;gray&quot;)
+ax2.set_xlabel(&quot;{\\rm Vacuum Wavelength [\\AA]}&quot;)
+ax2.set_ylabel(&quot;{\\rm Integration} \$-\$ {\\rm Convolution}&quot;)
+ax2.set_xlim(5410, 5415)
+
+fig.tight_layout()
+fname = joinpath(FT.moddir, &quot;docs&quot;, &quot;src&quot;, &quot;static&quot;, &quot;convolution_vs_integration.png&quot;)
+fig.savefig(fname, bbox_inches=&quot;tight&quot;)
+plt.show()
+plt.clf(); plt.close()
+
+</code></pre><p><img src="../static/convolution_vs_integration.png" alt="convolution vs integration"/></p><h2 id="Broadening-kernels"><a class="docs-heading-anchor" href="#Broadening-kernels">Broadening kernels</a><a id="Broadening-kernels-1"></a><a class="docs-heading-anchor-permalink" href="#Broadening-kernels" title="Permalink"></a></h2><p>Three macroturbulence kernels are available. The Gray rotation kernel handles rotational broadening only; the isotropic and anisotropic radial-tangential (RT) kernels handle macroturbulent broadening. The Hirano kernel (used with <code>convolve=true</code>) combines rotation and RT macro in a single Fourier-domain operation.</p><pre><code class="language-julia hljs">
+# --- compare the broadening kernels directly ---
+
+# build a velocity grid for kernel visualization
+Δλ = wavs[2] - wavs[1]
+λ0 = wavs[length(wavs) ÷ 2 + 1]
+Δv = FT.c_ms * Δλ / λ0
+vs = collect((-length(wavs)÷2 : length(wavs)÷2 - 1)) .* Δv
+
+# evaluate the three macroturbulence kernels at disk center (μ=1)
+k_gray_rot  = FT.gray_rot_kernel(vs, vsini, u1)
+k_iso = FT.gray_iso_rt_macro_kernel(vs, ζ_RT)
+k_rt = FT.rt_macro_kernel(vs, ζ_RT, 1.0)
+
+fig, ax1 = plt.subplots(figsize=(9.6, 4.8))
+ax1.plot(vs ./ 1e3, k_gray_rot, lw=2.0, label=&quot;{\\rm Gray rotation (vsini = $(round(Int, vsini/1e3)) km/s)}&quot;)
+ax1.plot(vs ./ 1e3, k_iso, lw=2.0, label=&quot;{\\rm Isotropic RT macro (}\$\\zeta\$ {\\rm = $(round(Int, ζ_RT/1e3)) km/s)}&quot;)
+ax1.plot(vs ./ 1e3, k_rt, lw=2.0, label=&quot;{\\rm Anisotropic RT macro at }\$\\mu=1\${\\rm  (}\$\\zeta\$ {\\rm = $(round(Int, ζ_RT/1e3)) km/s)}&quot;)
+ax1.set_xlabel(&quot;{\\rm Velocity [km/s]}&quot;)
+ax1.set_ylabel(&quot;{\\rm Kernel Amplitude}&quot;)
+ax1.set_xlim(-1.5*max(vsini, ζ_RT)/1e3, 1.5*max(vsini, ζ_RT)/1e3)
+ax1.legend(fontsize=12)
+fig.tight_layout()
+fname = joinpath(FT.moddir, &quot;docs&quot;, &quot;src&quot;, &quot;static&quot;, &quot;broadening_kernels.png&quot;)
+fig.savefig(fname, bbox_inches=&quot;tight&quot;)
+plt.show()
+plt.clf(); plt.close()
+
+</code></pre><p><img src="../static/broadening_kernels.png" alt="broadening kernels"/></p><h2 id="Applying-convolutions-to-a-spectrum"><a class="docs-heading-anchor" href="#Applying-convolutions-to-a-spectrum">Applying convolutions to a spectrum</a><a id="Applying-convolutions-to-a-spectrum-1"></a><a class="docs-heading-anchor-permalink" href="#Applying-convolutions-to-a-spectrum" title="Permalink"></a></h2><p>Each kernel has a matching <code>convolve_*</code> function that accepts a wavelength grid and spectrum vector (or matrix):</p><pre><code class="language-julia hljs">
+# --- apply the convolution functions to the base spectrum ---
+
+flux_gray_rot = FT.convolve_gray_rotation(wavs, flux_base, vsini, u1)
+flux_iso = FT.convolve_iso_rt_macro(wavs, flux_base, ζ_RT)
+flux_hirano = FT.convolve_hirano_rotmacro(wavs, flux_base, vsini, ζ_RT, u1, u2)
+
+fig, ax1 = plt.subplots(figsize=(9.6, 4.8))
+ax1.plot(wavs, flux_base, label=&quot;{\\rm Unbroadened}&quot;, lw=0.8)
+ax1.plot(wavs, flux_gray_rot, label=&quot;{\\rm Gray rotation only}&quot;, lw=2.0, ls=&quot;--&quot;)
+ax1.plot(wavs, flux_iso, label=&quot;{\\rm Isotropic RT macro only}&quot;, lw=2.0, ls=&quot;-.&quot;)
+ax1.plot(wavs, flux_hirano, label=&quot;{\\rm Hirano rotation + macro}&quot;, lw=2.0, ls=&quot;:&quot;)
+ax1.set_xlim(5410, 5415)
+ax1.set_xlabel(&quot;{\\rm Vacuum Wavelength [\\AA]}&quot;)
+ax1.set_ylabel(&quot;{\\rm Normalized Flux}&quot;)
+ax1.legend()
+fig.tight_layout()
+fname = joinpath(FT.moddir, &quot;docs&quot;, &quot;src&quot;, &quot;static&quot;, &quot;broadened_spectra.png&quot;)
+fig.savefig(fname, bbox_inches=&quot;tight&quot;)
+plt.show()
+plt.clf(); plt.close()
+
+</code></pre><p><img src="../static/broadened_spectra.png" alt="broadened spectra"/></p><h2 id="Disk-integration-convergence"><a class="docs-heading-anchor" href="#Disk-integration-convergence">Disk integration convergence</a><a id="Disk-integration-convergence-1"></a><a class="docs-heading-anchor-permalink" href="#Disk-integration-convergence" title="Permalink"></a></h2><p>The numerical disk integration approximates the stellar surface with an <span>$N_\phi \times 2N_\phi$</span> grid of tiles. The plot below shows how the integrated flux converges toward the direct (no-integration) reference as the grid resolution increases. Both the mean and maximum absolute percent error across all wavelength bins are shown.</p><p><img src="../static/disk_int_convergence.png" alt="disk integration convergence"/></p><p>At <span>$N_\phi = 128$</span> (the default), the mean error is well below 1% and the maximum error is on the order of a few tenths of a percent. Doubling to <span>$N_\phi = 256$</span> or <span>$512$</span> reduces the error further but with diminishing returns and quadratically increasing cost (since the number of visible tiles scales as <span>$\sim N_\phi^2$</span>). For most applications <span>$N_\phi = 128$</span> provides a good balance between accuracy and runtime.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../cont_func/">« Contribution Functions</a><a class="docs-footer-nextpage" href="../chunked/">Large Linelists »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Thursday 9 April 2026 18:57">Thursday 9 April 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

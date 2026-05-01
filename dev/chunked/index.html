@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Large Linelists · FormationTemps.jl</title><meta name="title" content="Large Linelists · FormationTemps.jl"/><meta property="og:title" content="Large Linelists · FormationTemps.jl"/><meta property="twitter:title" content="Large Linelists · FormationTemps.jl"/><meta name="description" content="Documentation for FormationTemps.jl."/><meta property="og:description" content="Documentation for FormationTemps.jl."/><meta property="twitter:description" content="Documentation for FormationTemps.jl."/><meta property="og:url" content="https://palumbom.github.io/FormationTemps.jl/chunked/"/><meta property="twitter:url" content="https://palumbom.github.io/FormationTemps.jl/chunked/"/><link rel="canonical" href="https://palumbom.github.io/FormationTemps.jl/chunked/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.png" alt="FormationTemps.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">FormationTemps.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Quickstart</a></li><li><span class="tocitem">Guides</span><ul><li><a class="tocitem" href="../tutorial/">Basic Tutorial</a></li><li><a class="tocitem" href="../cont_func/">Contribution Functions</a></li><li><a class="tocitem" href="../convolutions/">Broadening &amp; Convolutions</a></li><li class="is-active"><a class="tocitem" href>Large Linelists</a><ul class="internal"><li><a class="tocitem" href="#In-memory-workflow"><span>In-memory workflow</span></a></li><li><a class="tocitem" href="#Streaming-to-disk"><span>Streaming to disk</span></a></li><li><a class="tocitem" href="#Chunking-parameters"><span>Chunking parameters</span></a></li><li><a class="tocitem" href="#Stitching-chunks"><span>Stitching chunks</span></a></li><li><a class="tocitem" href="#Complete-example"><span>Complete example</span></a></li></ul></li><li><a class="tocitem" href="../parallelization/">Parallelization</a></li><li><a class="tocitem" href="../python/">Python Tutorial</a></li></ul></li><li><a class="tocitem" href="../internals/">Public Functions</a></li><li><a class="tocitem" href="../longlist/">Full Index</a></li><li><a class="tocitem" href="../license/">License</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Guides</a></li><li class="is-active"><a href>Large Linelists</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Large Linelists</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/palumbom/FormationTemps.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/palumbom/FormationTemps.jl/blob/main/docs/src/chunked.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Large-Linelists-and-Chunked-Synthesis"><a class="docs-heading-anchor" href="#Large-Linelists-and-Chunked-Synthesis">Large Linelists &amp; Chunked Synthesis</a><a id="Large-Linelists-and-Chunked-Synthesis-1"></a><a class="docs-heading-anchor-permalink" href="#Large-Linelists-and-Chunked-Synthesis" title="Permalink"></a></h1><p>When synthesizing spectra from large linelists (thousands of lines spanning hundreds of Angstroms), the full wavelength range may not fit in GPU memory at once, or the single-call computation may be impractically slow. <a href="../internals/#FormationTemps.calc_formation_temp_chunked"><code>calc_formation_temp_chunked</code></a> solves this by dividing the wavelength range into fixed-width chunks, computing each independently, and returning the raw per-chunk results for the caller to stitch together.</p><h2 id="In-memory-workflow"><a class="docs-heading-anchor" href="#In-memory-workflow">In-memory workflow</a><a id="In-memory-workflow-1"></a><a class="docs-heading-anchor-permalink" href="#In-memory-workflow" title="Permalink"></a></h2><p>For linelists that fit in RAM after chunking, the simplest approach returns a <code>Vector{FormTempResult}</code>:</p><pre><code class="language-julia hljs">using Korg
+using FormationTemps; FT = FormationTemps
+
+linelist = Korg.read_linelist(joinpath(FT.datdir, &quot;Sun_VALD.lin&quot;))
+star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0,
+                    vsini=2100.0, v_macro=3400.0, v_micro=850.0)
+
+# returns Vector{FormTempResult}, one per chunk
+chunks = calc_formation_temp_chunked(star, linelist;
+    chunk_width=50.0, wing_padding=30.0, overlap=5.0,
+    Δλ=0.01, convolve=false, Nϕ=32)</code></pre><p>Each element of <code>chunks</code> is a full <a href="../internals/#FormationTemps.FormTempResult"><code>FormTempResult</code></a> with <code>wavs</code>, <code>flux</code>, <code>form_temps</code>, <code>cont_func</code>, and <code>atmosphere</code> fields. Adjacent chunks overlap by <code>overlap</code> Angstroms, so the caller can blend or cut at the midpoint.</p><h2 id="Streaming-to-disk"><a class="docs-heading-anchor" href="#Streaming-to-disk">Streaming to disk</a><a id="Streaming-to-disk-1"></a><a class="docs-heading-anchor-permalink" href="#Streaming-to-disk" title="Permalink"></a></h2><p>For very large linelists where even the accumulated <code>Vector{FormTempResult}</code> would exceed available memory, pass a <code>callback</code> function. This streams each chunk to disk as it completes, and <code>calc_formation_temp_chunked</code> returns <code>nothing</code>.</p><p>The following example is from <code>scripts/generate_temp_spectrum.jl</code> and writes each chunk to an HDF5 group:</p><pre><code class="language-julia hljs">println(&quot;&gt;&gt;&gt; Synthesizing chunks...&quot;)
+let chunk_idx = Ref(0)
+    h5open(outfile, &quot;w&quot;) do h5
+        # metadata
+        HDF5.attributes(h5)[&quot;chunk_width&quot;] = chunk_width
+        HDF5.attributes(h5)[&quot;wing_padding&quot;] = wing_padding
+        HDF5.attributes(h5)[&quot;overlap&quot;] = overlap
+        HDF5.attributes(h5)[&quot;n_lines&quot;] = length(linelist)
+        HDF5.attributes(h5)[&quot;Teff&quot;] = star_props.Teff
+        HDF5.attributes(h5)[&quot;logg&quot;] = star_props.logg
+        HDF5.attributes(h5)[&quot;Fe_H&quot;] = star_props.Fe_H
+        HDF5.attributes(h5)[&quot;vsini&quot;] = star_props.vsini
+        HDF5.attributes(h5)[&quot;zeta_RT&quot;] = star_props.ζ
+        HDF5.attributes(h5)[&quot;xi&quot;] = star_props.ξ
+        HDF5.attributes(h5)[&quot;rho_star&quot;] = star_props.ρstar
+        HDF5.attributes(h5)[&quot;i_star&quot;] = star_props.istar
+        HDF5.attributes(h5)[&quot;wavelength_frame&quot;] = wav_label
+
+        # include atmosphere data in the same output file
+        g_atm = create_group(h5, &quot;model_atmosphere&quot;)
+        g_atm[&quot;zs&quot;] = zs
+        g_atm[&quot;nd&quot;] = nd
+        g_atm[&quot;Ts&quot;] = Ts
+        g_atm[&quot;τs_ref&quot;] = τs_ref
+
+        # callback writes each chunk to HDF5 as it completes
+        function write_chunk(ci, result, ll_chunk)
+            chunk_idx[] = ci
+            wavs = collect(result.wavs)
+            line_centers = [l.wl * 1e8 for l in ll_chunk]
+            g = create_group(h5, @sprintf(&quot;chunk_%04d&quot;, ci))
+            g[&quot;line_centers&quot;] = line_centers
+            g[&quot;wavs&quot;] = wavs
+            g[&quot;flux&quot;] = result.flux
+            g[&quot;temp&quot;] = result.form_temps
+            g[&quot;cfunc&quot;] = result.cont_func
+        end
+
+        FT.calc_formation_temp_chunked(star_props, linelist;
+                                        chunk_width=chunk_width,
+                                        wing_padding=wing_padding,
+                                        overlap=overlap,
+                                        Δλ=Δλ, buffer=buffer,
+                                        convolve=false, Nϕ=Nϕ,
+                                        ne_warn_thresh=Inf,
+                                        callback=write_chunk)
+    end
+end</code></pre><p>The <code>callback</code> signature is <code>(chunk_idx::Int, result::FormTempResult, ll_chunk) -&gt; nothing</code>, where <code>ll_chunk</code> is the padded linelist view used for that chunk.</p><h2 id="Chunking-parameters"><a class="docs-heading-anchor" href="#Chunking-parameters">Chunking parameters</a><a id="Chunking-parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Chunking-parameters" title="Permalink"></a></h2><pre><code class="language-julia hljs"># chunked computation parameters
+chunk_width = 50.0    # Å per wavelength chunk
+wing_padding = 30.0   # Å beyond chunk edges for linelist selection
+overlap = 5.0         # Å overlap between chunks for stitching
+Δλ = 0.001
+Nϕ = 128
+buffer = 3.0</code></pre><p>The key parameters are:</p><table><tr><th style="text-align: left">Parameter</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr><tr><td style="text-align: left"><code>chunk_width</code></td><td style="text-align: left">50.0</td><td style="text-align: left">Width of each wavelength chunk in Angstroms.</td></tr><tr><td style="text-align: left"><code>wing_padding</code></td><td style="text-align: left">30.0</td><td style="text-align: left">Extra range (Angstroms) beyond each chunk edge for linelist selection. Ensures that broad line wings (e.g., H-alpha, Ca II) contribute correctly at chunk boundaries.</td></tr><tr><td style="text-align: left"><code>overlap</code></td><td style="text-align: left">5.0</td><td style="text-align: left">Overlap width (Angstroms) between adjacent chunks. Used during post-hoc stitching to blend or cut.</td></tr><tr><td style="text-align: left"><code>Δλ</code></td><td style="text-align: left">0.001</td><td style="text-align: left">Wavelength step size in Angstroms.</td></tr><tr><td style="text-align: left"><code>buffer</code></td><td style="text-align: left">2.0</td><td style="text-align: left">Extra wavelength range (Angstroms) beyond the linelist edges.</td></tr></table><div class="admonition is-success" id="Choosing-wing_padding-a1ce87e0d770d462"><header class="admonition-header">Choosing `wing_padding`<a class="admonition-anchor" href="#Choosing-wing_padding-a1ce87e0d770d462" title="Permalink"></a></header><div class="admonition-body"><p>Too small a <code>wing_padding</code> causes lines near chunk edges to be computed without their full wings, introducing residuals at stitch boundaries. 30 Angstroms is conservative; 15 Angstroms suffices for most lines but not for very broad resonant lines (e.g., H-alpha).</p></div></div><h2 id="Stitching-chunks"><a class="docs-heading-anchor" href="#Stitching-chunks">Stitching chunks</a><a id="Stitching-chunks-1"></a><a class="docs-heading-anchor-permalink" href="#Stitching-chunks" title="Permalink"></a></h2><p><code>calc_formation_temp_chunked</code> returns raw chunks that need to be stitched together.</p><p>The below example from <code>scripts/generate_temp_spectrum.jl</code> linearly crossfades flux, formation temperatures, and contribution functions across the overlap region.</p><pre><code class="language-julia hljs">println(&quot;&gt;&gt;&gt; Splicing chunks (blend)...&quot;)
+h5open(outfile, &quot;r&quot;) do h5in
+    chunk_names = sort(filter(name -&gt; startswith(name, &quot;chunk_&quot;), collect(keys(h5in))))
+    nchunks = length(chunk_names)
+    if nchunks == 0
+        error(&quot;No chunk groups found in $(outfile).&quot;)
+    end
+
+    # read all chunks into memory for blending
+    raw_wavs  = Vector{Vector{Float64}}(undef, nchunks)
+    raw_flux  = Vector{Vector{Float64}}(undef, nchunks)
+    raw_temp  = Vector{Vector{Float64}}(undef, nchunks)
+    raw_cfunc = Vector{Matrix{Float64}}(undef, nchunks)
+    raw_lc    = Vector{Vector{Float64}}(undef, nchunks)
+    for (i, gn) in enumerate(chunk_names)
+        g = h5in[gn]
+        raw_wavs[i]  = vec(read(g[&quot;wavs&quot;]))
+        raw_flux[i]  = vec(read(g[&quot;flux&quot;]))
+        raw_temp[i]  = vec(read(g[&quot;temp&quot;]))
+        raw_cfunc[i] = read(g[&quot;cfunc&quot;])
+        raw_lc[i]    = vec(read(g[&quot;line_centers&quot;]))
+    end
+
+    # blend: accumulate starting from chunk 1, linearly crossfade in overlap
+    N_ov = max(0, round(Int, overlap / Δλ) + 1)
+
+    all_wavs  = copy(raw_wavs[1])
+    all_flux  = copy(raw_flux[1])
+    all_temps = copy(raw_temp[1])
+    all_cfunc = copy(raw_cfunc[1])
+    all_lc    = copy(raw_lc[1])
+
+    for i in 2:nchunks
+        Nλ_new = length(raw_wavs[i])
+        N_ov_actual = min(N_ov, length(all_wavs), Nλ_new)
+
+        # blend the overlap region
+        for k in 1:N_ov_actual
+            w_new = Float64(k) / Float64(N_ov_actual + 1)
+            w_old = 1.0 - w_new
+            acc_idx = length(all_wavs) - N_ov_actual + k
+            all_flux[acc_idx]  = w_old * all_flux[acc_idx]  + w_new * raw_flux[i][k]
+            all_temps[acc_idx] = w_old * all_temps[acc_idx] + w_new * raw_temp[i][k]
+            all_cfunc[:, acc_idx] .= w_old .* all_cfunc[:, acc_idx] .+ w_new .* raw_cfunc[i][:, k]
+        end
+
+        # append the non-overlapping tail
+        if N_ov_actual &lt; Nλ_new
+            tail = (N_ov_actual + 1):Nλ_new
+            append!(all_wavs, raw_wavs[i][tail])
+            append!(all_flux, raw_flux[i][tail])
+            append!(all_temps, raw_temp[i][tail])
+            all_cfunc = hcat(all_cfunc, raw_cfunc[i][:, tail])
+            append!(all_lc, raw_lc[i][filter(j -&gt; raw_lc[i][j] &gt; all_wavs[end - length(tail)], eachindex(raw_lc[i]))])
+        end
+    end
+    all_lc = sort(unique(all_lc))
+
+    # trim to actual linelist extent + buffer
+    wls_Å = [l.wl * 1e8 for l in linelist]
+    trim_lo = first(wls_Å) - buffer
+    trim_hi = last(wls_Å) + buffer
+    keep = (all_wavs .&gt;= trim_lo) .&amp; (all_wavs .&lt;= trim_hi)
+    all_wavs  = all_wavs[keep]
+    all_flux  = all_flux[keep]
+    all_temps = all_temps[keep]
+    all_cfunc = all_cfunc[:, keep]
+    all_lc = all_lc[(all_lc .&gt;= trim_lo) .&amp; (all_lc .&lt;= trim_hi)]
+
+    # write blended result as a single group
+    h5open(outfile_1d, &quot;w&quot;) do h5out
+        HDF5.attributes(h5out)[&quot;chunk_width&quot;] = chunk_width
+        HDF5.attributes(h5out)[&quot;n_lines&quot;] = length(linelist)
+        HDF5.attributes(h5out)[&quot;n_chunks&quot;] = nchunks
+        HDF5.attributes(h5out)[&quot;spliced&quot;] = 1
+        HDF5.attributes(h5out)[&quot;stitch_mode&quot;] = &quot;blend&quot;
+        HDF5.attributes(h5out)[&quot;Teff&quot;] = star_props.Teff
+        HDF5.attributes(h5out)[&quot;logg&quot;] = star_props.logg
+        HDF5.attributes(h5out)[&quot;Fe_H&quot;] = star_props.Fe_H
+        HDF5.attributes(h5out)[&quot;vsini&quot;] = star_props.vsini
+        HDF5.attributes(h5out)[&quot;zeta_RT&quot;] = star_props.ζ
+        HDF5.attributes(h5out)[&quot;xi&quot;] = star_props.ξ
+        HDF5.attributes(h5out)[&quot;rho_star&quot;] = star_props.ρstar
+        HDF5.attributes(h5out)[&quot;i_star&quot;] = star_props.istar
+        HDF5.attributes(h5out)[&quot;wavelength_frame&quot;] = wav_label
+
+        g_atm = create_group(h5out, &quot;model_atmosphere&quot;)
+        g_atm[&quot;zs&quot;] = zs
+        g_atm[&quot;nd&quot;] = nd
+        g_atm[&quot;Ts&quot;] = Ts
+        g_atm[&quot;τs_ref&quot;] = τs_ref
+
+        g_out = create_group(h5out, &quot;chunk_0001&quot;)
+        g_out[&quot;line_centers&quot;] = all_lc
+        g_out[&quot;wavs&quot;] = all_wavs
+        g_out[&quot;flux&quot;] = all_flux
+        g_out[&quot;temp&quot;] = all_temps
+        g_out[&quot;cfunc&quot;] = all_cfunc
+    end
+end</code></pre><h2 id="Complete-example"><a class="docs-heading-anchor" href="#Complete-example">Complete example</a><a id="Complete-example-1"></a><a class="docs-heading-anchor-permalink" href="#Complete-example" title="Permalink"></a></h2><p>The full production script combining all of the above is at <code>scripts/generate_temp_spectrum.jl</code>. It:</p><ol><li>Loads a large VALD linelist and converts to air wavelengths.</li><li>Streams chunked results to HDF5.</li><li>Reads the raw chunks back and stitches them.</li><li>Trims the result to the linelist extent and writes the final spliced output.</li></ol></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../convolutions/">« Broadening &amp; Convolutions</a><a class="docs-footer-nextpage" href="../parallelization/">Parallelization »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Thursday 9 April 2026 18:57">Thursday 9 April 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
