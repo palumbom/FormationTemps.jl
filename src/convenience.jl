@@ -420,6 +420,9 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             @cuda threads=ts_kc blocks=bs_kc compute_rt_macro_dft_layout_2d!(
                 kbuf_mac, gpu_mem.λs, v_losals_gpu, Int32(i0_mac), G(star.ζ),
                 Int32(Nλ), Int32(L_mac))
+            # TODO(zero-sum-guard): unguarded normalization; can produce NaN if
+            # kernel underflows. See microturbulence.jl pattern +
+            # .claude/CLAUDE.md "Kernel normalization underflow guard".
             kbuf_mac ./= sum(kbuf_mac, dims=2)
             CUDA.unsafe_free!(v_losals_gpu)
 

@@ -27,6 +27,7 @@ include("test_kernels.jl")
 include("test_convenience.jl")
 include("test_threading.jl")
 include("test_inplace_convolutions.jl")
+include("test_underflow_guard.jl")
 
 # GPU-required tests
 if use_gpu

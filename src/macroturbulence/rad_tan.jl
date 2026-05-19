@@ -30,6 +30,9 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     t1 = @. A_R * exp(-(vs / (ζ_rt * cosθ))^2.0) / (sqrt_π * ζ_rt * cosθ)
     t2 = @. A_T * exp(-(vs / (ζ_rt * sinθ))^2.0) / (sqrt_π * ζ_rt * sinθ)
     kernel = t1 + t2
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
+    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
+    # normalization underflow guard".
     return kernel ./ sum(kernel)
 end
 
@@ -108,6 +111,9 @@ function _convolve_macro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
         kvec[j] = t1 + t2
     end
     s = sum(kvec)
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
+    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
+    # normalization underflow guard".
     kvec ./= s
 
     # place kernel in DFT layout, then R2C FFT
@@ -201,6 +207,9 @@ function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                                               cmem.pad_left)
 
     # normalize the kernel
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
+    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
+    # normalization underflow guard".
     normval = CUDA.sum(kernel_row)
     kernel_row ./= normval
 
@@ -273,6 +282,9 @@ function precompute_rt_macro_kernel_ft(cmem::MacroConvolutionMemory, xs::AA{T,1}
                                                               cmem.pad_left)
 
     # normalize
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
+    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
+    # normalization underflow guard".
     normval = CUDA.sum(kernel_row)
     kernel_row ./= normval
 

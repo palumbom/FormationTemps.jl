@@ -21,7 +21,9 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::T, v_mic::T) 
     λc = (v_los / c_ms) * λ0 + λ0
 
     kernel = g.(xs, λc)
-    kernel ./= sum(kernel)
+    s = sum(kernel)
+    kernel ./= ifelse(iszero(s), one(T), s)
+    iszero(s) && @warn "Doppler kernel underflowed (zero-sum); convolved αs set to zero. v_los probably exceeds wavelength window." maxlog=3
 
     return _padded_convolve(collect(T, ys), kernel)
 end
@@ -40,6 +42,7 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::AA{T,1}, v_mi
     kbuf = zeros(T, L)
     kvec = Vector{T}(undef, Nλ)
     sig = zeros(T, L)
+    n_underflow = 0
 
     for t in axes(ys, 1)
         σ(x) = max(x * (v_mic[t] / c_ms), σ_floor)
@@ -50,7 +53,8 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::AA{T,1}, v_mi
             kvec[j] = g(xs[j], λc)
         end
         s = sum(kvec)
-        kvec ./= s
+        kvec ./= ifelse(iszero(s), one(T), s)
+        n_underflow += Int(iszero(s))
 
         _kernel_to_dft_layout!(kbuf, kvec, i0)
         _pad_edges!(sig, view(ys, t, :), pad_left, Nλ)
@@ -63,6 +67,7 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::AA{T,1}, v_mi
             ys_out[t, j] = conv[pad_left + j]
         end
     end
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $(size(ys, 1)) row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     return ys_out
 end
 
@@ -93,7 +98,9 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
         σx = max(xs[j] * (v_mic / c_ms), σ_floor)
         kvec[j] = exp(-((xs[j] - λc) / σx)^2.0)
     end
-    kvec ./= sum(kvec)
+    s = sum(kvec)
+    kvec ./= ifelse(iszero(s), one(T), s)
+    iszero(s) && @warn "Doppler kernel underflowed (zero-sum); convolved αs set to zero for all $Natm layer(s). v_los probably exceeds wavelength window." maxlog=3
 
     _kernel_to_dft_layout!(ws.kernel_real, kvec, i0)
     mul!(ws.kernel_ft, ws.fft_plan, ws.kernel_real)
@@ -111,6 +118,7 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
     i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
     kvec = Vector{T}(undef, Nλ)
+    n_underflow = 0
 
     for t in 1:Natm
         λc = (v_los[t] / c_ms) * λ0 + λ0
@@ -118,7 +126,9 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
             σx = max(xs[j] * (v_mic[t] / c_ms), σ_floor)
             kvec[j] = exp(-((xs[j] - λc) / σx)^2.0)
         end
-        kvec ./= sum(kvec)
+        s = sum(kvec)
+        kvec ./= ifelse(iszero(s), one(T), s)
+        n_underflow += Int(iszero(s))
 
         _kernel_to_dft_layout!(ws.kernel_real, kvec, i0)
         mul!(ws.kernel_ft, ws.fft_plan, ws.kernel_real)
@@ -131,6 +141,7 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
             out[t, j] = ws.result_buf[ws.pad_left + j]
         end
     end
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $Natm row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     return nothing
 end
 
@@ -283,7 +294,8 @@ function _build_kernel_ft_1d!(cmem, xs_h::AbstractVector{T}, v_los_val::T, v_mic
         cmem.kr_1d, cmem.xs_gpu, T(λ0), v_los_val, v_mic_val, σ_floor,
         Int32(i0), Int32(Nλ), Int32(L))
     normval = CUDA.sum(cmem.kr_1d)
-    cmem.kr_1d ./= normval
+    cmem.kr_1d ./= ifelse(iszero(normval), one(T), normval)
+    iszero(normval) && @warn "Doppler kernel underflowed (zero-sum) in 1D scalar path; convolved αs set to zero for ALL atmosphere layers. v_los probably exceeds wavelength window." maxlog=3
     mul!(cmem.kernel_row_ft_1d, cmem.plan_fwd_1d, cmem.kr_1d)
     return nothing
 end
@@ -302,7 +314,10 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
         cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L))
-    cmem.conv_gpu ./= sum(cmem.conv_gpu, dims=2)
+    row_sums = sum(cmem.conv_gpu, dims=2)
+    cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
+    n_underflow = Int(CUDA.sum(iszero.(row_sums)))
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     return nothing
 end
 
@@ -319,7 +334,10 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_gpu!(
         cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows))
-    cmem.conv_gpu ./= sum(cmem.conv_gpu, dims=2)
+    row_sums = sum(cmem.conv_gpu, dims=2)
+    cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
+    n_underflow = Int(CUDA.sum(iszero.(row_sums)))
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     return nothing
 end
 
@@ -460,7 +478,12 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
         bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L))
-    bcmem.conv_gpu ./= sum(bcmem.conv_gpu, dims=2)
+    row_sums = sum(bcmem.conv_gpu, dims=2)
+    bcmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
+    # Restrict underflow count to the first BNatm rows; trailing rows of
+    # bcmem.conv_gpu are pre-zeroed by `fill!` and are not active.
+    n_underflow = Int(CUDA.sum(iszero.(@view row_sums[1:BNatm, :])))
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $BNatm active row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     mul!(bcmem.kernel_ft_gpu, bcmem.plan_fwd_kernel, bcmem.conv_gpu)
 
     nfreq = size(bcmem.kernel_ft_gpu, 2)
@@ -507,7 +530,12 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_gpu!(
         bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(Natm))
-    bcmem.conv_gpu ./= sum(bcmem.conv_gpu, dims=2)
+    row_sums = sum(bcmem.conv_gpu, dims=2)
+    bcmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
+    # Restrict underflow count to the first BNatm rows; trailing rows of
+    # bcmem.conv_gpu are pre-zeroed by `fill!` and are not active.
+    n_underflow = Int(CUDA.sum(iszero.(@view row_sums[1:BNatm, :])))
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $BNatm active row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     mul!(bcmem.kernel_ft_gpu, bcmem.plan_fwd_kernel, bcmem.conv_gpu)
 
     nfreq = size(bcmem.kernel_ft_gpu, 2)

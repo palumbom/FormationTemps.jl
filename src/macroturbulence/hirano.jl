@@ -131,6 +131,9 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
     K_dft = Kσ ./ Δv
     k_circ = real(ifft(K_dft))
     kernel = FFTW.fftshift(k_circ)
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
+    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
+    # normalization underflow guard".
     kernel ./= sum(kernel)
 
     return _padded_convolve(collect(T, ys), kernel)
@@ -151,6 +154,9 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     K_dft = Kσ ./ Δv
     k_circ = real(ifft(K_dft))
     kernel = FFTW.fftshift(k_circ)
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
+    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
+    # normalization underflow guard".
     kernel ./= sum(kernel)
 
     return _padded_convolve(collect(T, ys), kernel)
@@ -168,6 +174,9 @@ function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0
     K_dft = Kσ ./ Δv
     k_circ = real(ifft(K_dft))      # circular kernel, zero-lag at index 1
     kernel = FFTW.fftshift(k_circ)  # center at v=0
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
+    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
+    # normalization underflow guard".
     kernel ./= sum(kernel)
     return kernel
 end
