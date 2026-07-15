@@ -194,11 +194,13 @@ end
 # Natm_v is the period for v_mic indexing: v_mic[(row-1) % Natm_v + 1].
 # When length(v_mic) == Nrows the modulo is a no-op; when Nrows = B*Natm
 # the Natm-length v_mic wraps across batched tiles without tiling allocation.
-function kernel_to_dft_layout_2d_gpu!(kbuf, xs, v_los, v_los_off, v_mic, σ_floor, i0, Nλ, L, Natm_v)
+function kernel_to_dft_layout_2d_gpu!(kbuf, xs, v_los, v_los_off, v_mic, σ_floor, i0, Nλ, L, Natm_v, BNatm)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
-    Nrows = size(kbuf, 1)
-    (row > Nrows || j > Nλ) && return nothing
+    # guard on the ACTIVE batch height (Bcur*Natm), not size(kbuf,1): the launch
+    # ceil-rounds BNatm up to the block size, so over-spawned rows must return
+    # before reading v_los (length Ntiles*Natm) past its end on the final batch.
+    (row > BNatm || j > Nλ) && return nothing
     T = eltype(kbuf)
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
@@ -213,11 +215,13 @@ function kernel_to_dft_layout_2d_gpu!(kbuf, xs, v_los, v_los_off, v_mic, σ_floo
 end
 
 # Build per-row kernels in DFT layout (vector v_los, scalar v_mic).
-function kernel_to_dft_layout_2d_scalar_v_mic_gpu!(kbuf, xs, v_los, v_los_off, v_mic_val, σ_floor, i0, Nλ, L)
+function kernel_to_dft_layout_2d_scalar_v_mic_gpu!(kbuf, xs, v_los, v_los_off, v_mic_val, σ_floor, i0, Nλ, L, BNatm)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
-    Nrows = size(kbuf, 1)
-    (row > Nrows || j > Nλ) && return nothing
+    # guard on the ACTIVE batch height (Bcur*Natm), not size(kbuf,1): the launch
+    # ceil-rounds BNatm up to the block size, so over-spawned rows must return
+    # before reading v_los (length Ntiles*Natm) past its end on the final batch.
+    (row > BNatm || j > Nλ) && return nothing
     T = eltype(kbuf)
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
@@ -313,7 +317,7 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     bs = (cld(cmem.Nλ, ts[1]), cld(Nrows, ts[2]))
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
         cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
-        Int32(i0), Int32(cmem.Nλ), Int32(cmem.L))
+        Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows))
     row_sums = sum(cmem.conv_gpu, dims=2)
     cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
     n_underflow = Int(CUDA.sum(iszero.(row_sums)))
@@ -333,7 +337,7 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     bs = (cld(cmem.Nλ, ts[1]), cld(Nrows, ts[2]))
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_gpu!(
         cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
-        Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows))
+        Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows), Int32(Nrows))
     row_sums = sum(cmem.conv_gpu, dims=2)
     cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
     n_underflow = Int(CUDA.sum(iszero.(row_sums)))
@@ -477,7 +481,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     v_los_off = Int32(tile_offset * Natm)
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
         bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
-        Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L))
+        Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(BNatm))
     row_sums = sum(bcmem.conv_gpu, dims=2)
     bcmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
     # Restrict underflow count to the first BNatm rows; trailing rows of
@@ -529,7 +533,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     v_los_off = Int32(tile_offset * Natm)
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_gpu!(
         bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
-        Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(Natm))
+        Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(Natm), Int32(BNatm))
     row_sums = sum(bcmem.conv_gpu, dims=2)
     bcmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
     # Restrict underflow count to the first BNatm rows; trailing rows of

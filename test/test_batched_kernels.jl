@@ -71,6 +71,34 @@ Natm1 = Natm - 1
         end
     end
 
+    @testset "Over-spawn guard: partial batch, tightly-sized v_los" begin
+        # Regression for an OOB where over-spawned threads (the launch ceil-rounds
+        # Bcur*Natm up to the 32-row block) read v_los past its end on a partial
+        # batch. Allocate for Balloc > Bcur so the buffer is taller than the active
+        # batch, and size v_los to exactly Bcur*Natm so any over-spawn read is OOB.
+        # Natm=$(Natm) is not a multiple of 32, so Bcur=1 already over-spawns.
+        Balloc = 3
+        Bcur = 1
+        v_los_tight = CuArray{Float64}(fill(1500.0, Bcur * Natm))   # length == Bcur*Natm
+        v_los_single = CUDA.zeros(Float64, Natm) .+ 1500.0
+
+        # vector-v_mic kernel
+        bcmem = FT.BatchedMicroConvMem(Nλ, Natm, Balloc, Npad)
+        cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
+        bcmem.signal_cached = false
+        αs_batch = Array(FT.convolve_wavelength_axis_batched!(bcmem, λs_korg, αs, v_los_tight, v_mic, Bcur))
+        cmem.signal_cached = false
+        αs_single = Array(FT.convolve_wavelength_axis_gpu(cmem, λs_korg, αs, v_los_single, v_mic))
+        @test size(αs_batch, 1) == Bcur * Natm
+        @test αs_batch ≈ αs_single atol=1e-10
+
+        # scalar-v_mic kernel (same constant ξ ⇒ must match the vector path)
+        bcmem_s = FT.BatchedMicroConvMem(Nλ, Natm, Balloc, Npad)
+        bcmem_s.signal_cached = false
+        αs_batch_s = Array(FT.convolve_wavelength_axis_batched!(bcmem_s, λs_korg, αs, v_los_tight, ξ, Bcur))
+        @test αs_batch_s ≈ αs_batch atol=1e-10
+    end
+
     @testset "Batched anchored tau matches single-tile" begin
         cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
         bcmem = FT.BatchedMicroConvMem(Nλ, Natm, B, Npad)

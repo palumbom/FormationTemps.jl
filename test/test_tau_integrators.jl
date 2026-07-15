@@ -127,8 +127,13 @@ v_losals = [1.0, 0.8, 0.5, 0.2]
         cfdt_f = Array(cfdt_fused)
 
         @test all(isfinite, cfdt_f)
-        # identical math and thread mapping → bit-exact
-        @test cfdt_f ≈ cfdt_u atol=1e-14
+        # Fused (τ in registers) and unfused (τ via a global round-trip) are SEPARATE
+        # kernels, so FMA contraction differs — they agree only to ~1 ULP, not bit-
+        # exactly. cfdt values reach ~1e5, so an absolute atol is meaningless here;
+        # compare relatively. Observed max rel diff ~1.5e-14; rtol=1e-12 keeps orders
+        # of margin while still catching any real formula/indexing regression.
+        # (The tile_offset test below is SAME-kernel, hence genuinely bit-exact.)
+        @test cfdt_f ≈ cfdt_u rtol=1e-12
     end
 
     @testset "fused kernel with tile_offset" begin

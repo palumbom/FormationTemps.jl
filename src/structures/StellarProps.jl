@@ -8,11 +8,13 @@ struct StellarProps{T<:AF, V<:Union{T, AbstractVector{T}}}
     ξ::V
     ρstar::T
     istar::T
+    α₂::T
+    α₄::T
 end
 
 """
     StellarProps(; Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_micro=NaN,
-                  ρstar=1.0, istar=90.0)
+                  ρstar=1.0, istar=90.0, α₂=0.0, α₄=0.0)
 
 Container for stellar parameters and broadening properties used by `calc_formation_temp`.
 
