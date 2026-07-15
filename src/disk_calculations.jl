@@ -16,7 +16,7 @@ Returns:
 - `z_rot::CuArray`: Line-of-sight rotational velocity per tile.
 - `z_cbs::CuArray`: Additional per-tile velocity term. Disused in this implementation. 
 """
-function calc_stellar_grid(ρs::T1, i::T1, vsini::T1, Nϕ::Int) where T1<:AF
+function calc_stellar_grid(ρs::T1, i::T1, vsini::T1, Nϕ::Int; α₂::T1=zero(T1), α₄::T1=zero(T1)) where T1<:AF
     # allocate on GPU
     μs = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
     dA = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
@@ -24,11 +24,11 @@ function calc_stellar_grid(ρs::T1, i::T1, vsini::T1, Nϕ::Int) where T1<:AF
     z_cbs = CUDA.zeros(T1, Nϕ, 2 * Nϕ)
 
     # calculate in place and return
-    calc_stellar_grid!(ρs, i, vsini, Nϕ, μs, dA, z_rot, z_cbs)
+    calc_stellar_grid!(ρs, i, vsini, Nϕ, μs, dA, z_rot, z_cbs; α₂=α₂, α₄=α₄)
     return μs, dA, z_rot, z_cbs
 end
 
-function calc_stellar_grid_cpu(ρs::T, i::T, vsini::T, Nϕ::Int) where T<:AF
+function calc_stellar_grid_cpu(ρs::T, i::T, vsini::T, Nϕ::Int; α₂::T=zero(T), α₄::T=zero(T)) where T<:AF
     ϕe = range(deg2rad(-90.0), deg2rad(90.0), length=Nϕ + 1)
     ϕc = get_grid_centers(ϕe)
 
@@ -67,9 +67,11 @@ function calc_stellar_grid_cpu(ρs::T, i::T, vsini::T, Nϕ::Int) where T<:AF
             μs[m, n] = μ_tile
             dA[m, n] = calc_dA(ρs, ϕc_m, dϕ, dθ) * μ_tile
 
-            # projected solid-body LOS velocity; vsini is the projected velocity,
-            # so this is independent of inclination: v_los = vsini * x_sky / ρs
-            z_rot[m, n] = -(vsini / c_ms) * (x_sky / ρs)
+            # projected LOS velocity: rigid field × differential-rotation factor f(ϕ).
+            # vsini is the equatorial projected velocity, so the rigid part is
+            # inclination-independent; f(ϕ)=1-α₂sin²ϕ-α₄sin⁴ϕ scales it per latitude.
+            f = diff_rot_factor(sin(ϕc_m), α₂, α₄)
+            z_rot[m, n] = -(vsini / c_ms) * f * (x_sky / ρs)
         end
     end
     if iszero(vsini)
@@ -80,13 +82,16 @@ end
 
 function calc_stellar_grid!(ρs::T1, inclination::T1, vsini::T1, Nϕ::Int,
                             μs::CuArray{T2,2}, dA::CuArray{T2,2},
-                            z_rot::CuArray{T2,2}, z_cbs::CuArray{T2,2}) where {T1<:AF, T2<:AF}
+                            z_rot::CuArray{T2,2}, z_cbs::CuArray{T2,2};
+                            α₂::T1=zero(T1), α₄::T1=zero(T1)) where {T1<:AF, T2<:AF}
     # get precision from GPU allocs
     precision = eltype(μs)
 
     # convert scalars from disk params to desired precision
     ρs = convert(precision, ρs)
     vsini = convert(precision, vsini)
+    α₂ = convert(precision, α₂)
+    α₄ = convert(precision, α₄)
 
     # get latitude grid
     ϕe = range(deg2rad(-90.0), deg2rad(90.0), length=Nϕ+1)
@@ -126,7 +131,7 @@ function calc_stellar_grid!(ρs::T1, inclination::T1, vsini::T1, Nϕ::Int,
     blocks1 = cld(Nϕ * Nθ_max, prod(threads1))
     @cusync @captured @cuda threads=threads1 blocks=blocks1 calc_stellar_grid!(μs, dA, z_rot, Nϕ,
                                                                                Nθ_max, Nθ, R_x, O⃗,
-                                                                               ρs, vsini)
+                                                                               ρs, vsini, α₂, α₄)
 
     # safety for vsini = 1
     if iszero(vsini)
@@ -135,7 +140,7 @@ function calc_stellar_grid!(ρs::T1, inclination::T1, vsini::T1, Nϕ::Int,
     return nothing
 end
 
-function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, vsini)
+function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, vsini, α₂, α₄)
     # get indices from GPU blocks + threads
     idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
     sdx = gridDim().x * blockDim().x
@@ -184,10 +189,11 @@ function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, v
         # get projected area element
         @inbounds dA[m,n] = calc_dA(ρs, ϕc, dϕ, dθ) * μ_tile
 
-        # projected solid-body LOS velocity; vsini is the projected velocity, so
-        # this is independent of inclination: v_los = vsini * x_sky / ρs
-        # TODO differential rotation
-        @inbounds z_rot[m,n] = -(vsini / c_ms) * (x_sky / ρs)
+        # projected LOS velocity: rigid field × differential-rotation factor f(ϕ).
+        # vsini is the equatorial projected velocity; f(ϕ)=1-α₂sin²ϕ-α₄sin⁴ϕ scales
+        # it per latitude (α₂=α₄=0 → solid body).
+        f = diff_rot_factor(sin(ϕc), α₂, α₄)
+        @inbounds z_rot[m,n] = -(vsini / c_ms) * f * (x_sky / ρs)
     end
     return nothing
 end

@@ -64,6 +64,10 @@ function rotation_period(ϕ, A, B, C)
     return 360.0/(A + B * sinϕ^2.0 + C * sinϕ^4.0)
 end
 
+# normalized differential-rotation rate factor f(ϕ) = Ω(ϕ)/Ω_eq, given sin(ϕ).
+# α₂=α₄=0 → solid body (f≡1); positive α = equator faster than poles (solar-like).
+diff_rot_factor(sinϕ, α₂, α₄) = one(sinϕ) - α₂ * sinϕ^2 - α₄ * sinϕ^4
+
 function calc_dA(ρs, ϕc, dϕ, dθ)
     return ρs^2.0 * cos(ϕc) * dϕ * dθ
 end

@@ -56,4 +56,22 @@ Nϕ = 16
     @test all(result_gpu.form_temps .<= T_max)
 end
 
+@testset "CPU vs GPU disk integration with differential rotation" begin
+    # α≠0 with istar≠90 exercises the differential-rotation path on both devices.
+    # CPU/GPU agreement here also guards against either path silently dropping α:
+    # if the GPU ignored α it would compute the rigid field and diverge from CPU.
+    star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini,
+                        v_macro=ζ_RT, v_micro=ξ, istar=45.0, α₂=0.2, α₄=0.1)
+
+    result_cpu = calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
+                                      use_gpu=false, convolve=false,
+                                      showprogress=false, ne_warn_thresh=Inf)
+    result_gpu = calc_formation_temp(star, linelist; Δλ=Δλ, Nϕ=Nϕ,
+                                      use_gpu=true, convolve=false,
+                                      showprogress=false, ne_warn_thresh=Inf)
+
+    @test maximum(abs.(result_gpu.flux .- result_cpu.flux)) < 1e-6
+    @test mean(abs.(result_gpu.flux .- result_cpu.flux)) < 1e-7
+end
+
 end

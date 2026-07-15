@@ -27,21 +27,26 @@ Keyword arguments:
 - `v_micro`: microturbulent velocity ξ (m/s). Scalar for uniform broadening; vector of
   length `Natm` for per-layer broadening. If scalar `NaN`, uses `vmic_fit(Teff)`.
 - `ρstar`: stellar radius scale factor for disk integration (dimensionless; default 1).
-- `istar`: stellar inclination (degrees; 90 = equator-on). Currently a no-op for
-  rigid rotation: the rotational broadening depends only on the projected `vsini`,
-  which is inclination-independent for a featureless sphere. Reserved for future
-  differential-rotation / starspot / gravity-darkening work.
+- `istar`: stellar inclination (degrees; 90 = equator-on). A no-op for rigid rotation
+  (`α₂=α₄=0`), since the broadening then depends only on the projected `vsini`; it
+  becomes physically meaningful once differential rotation is enabled, because the
+  visible latitude bands (which rotate at different rates) depend on inclination.
+- `α₂`, `α₄`: differential-rotation coefficients in the normalized rate law
+  `Ω(ϕ)/Ω_eq = f(ϕ) = 1 - α₂·sin²ϕ - α₄·sin⁴ϕ`. Default `0` (solid body). Positive
+  values make the equator rotate faster than the poles (solar-like). `vsini` remains
+  the equatorial projected velocity (`f(0)=1`).
 
 Struct fields:
 - `Teff`, `logg`, `Fe_H`, `A_X`: atmosphere parameters (A_X is the full abundance vector).
 - `vsini`, `ζ`, `ξ`: rotational, macroturbulent, and microturbulent velocities (m/s).
   `ξ` is `T` (scalar) or `AbstractVector{T}` (per-layer).
-- `ρstar`, `istar`: disk integration parameters.
+- `ρstar`, `istar`, `α₂`, `α₄`: disk integration parameters (`α₂`, `α₄` are the
+  differential-rotation coefficients).
 
 See also: [`vmac_fit`](@ref), [`vmic_fit`](@ref), [`calc_formation_temp`](@ref)
 """
 function StellarProps(;Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_micro=NaN,
-                      ρstar=1.0, istar=90.0)
+                      ρstar=1.0, istar=90.0, α₂=0.0, α₄=0.0)
     # get the abundances
     A_X = Korg.format_A_X(Fe_H)
 
@@ -61,5 +66,5 @@ function StellarProps(;Teff=NaN, logg=NaN, Fe_H=NaN, vsini=0.0, v_macro=NaN, v_m
         ξ = v_micro
     end
 
-    return StellarProps(Teff, logg, Fe_H, A_X, vsini, ζ, ξ, ρstar, istar)
+    return StellarProps(Teff, logg, Fe_H, A_X, vsini, ζ, ξ, ρstar, istar, α₂, α₄)
 end

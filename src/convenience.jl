@@ -137,7 +137,7 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
         end
 
         # get stellar grid
-        μs, dA, z_rot = calc_stellar_grid_cpu(star.ρstar, star.istar, star.vsini, Nϕ)
+        μs, dA, z_rot = calc_stellar_grid_cpu(star.ρstar, star.istar, star.vsini, Nϕ; α₂=star.α₂, α₄=star.α₄)
         idx = findall(x -> x .> zero(T), μs)
         μs_cpu = μs[idx]
         dA_cpu = dA[idx]
@@ -286,7 +286,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         end
 
         # get stellar grid
-        μs_gpu, dA, z_rot, _ = calc_stellar_grid(star.ρstar, star.istar, star.vsini, Nϕ)
+        μs_gpu, dA, z_rot, _ = calc_stellar_grid(star.ρstar, star.istar, star.vsini, Nϕ; α₂=star.α₂, α₄=star.α₄)
         idx = findall(x -> x .> zero(eltype(μs_gpu)), Array(μs_gpu))
         μs_cpu = Array(μs_gpu)[idx]
         dA_cpu = Array(dA)[idx]
