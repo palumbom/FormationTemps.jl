@@ -13,7 +13,7 @@ using LaTeXStrings
 mpl = plt.matplotlib
 
 # matplotlib backend
-mpl.use("Qt5Agg")
+mpl.use("QtAgg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 colormaps = pyimport("colormaps")
@@ -69,8 +69,9 @@ cont_idx = findfirst(x -> x .>= wls[2] + 0.1, λs_korg)#findfirst(x -> x .>= 630
 # get some abundances
 A_X = Korg.asplund_2020_solar_abundances
 
-# get the atmosphere
-atm_gpu = FT.AtmosphereGPU(Korg.interpolate_marcs(5777.0, 4.44, A_X))
+# get the atmosphere (TEMP: upsample layers to smooth plots, as old get_marcs_atm did)
+atm_korg = FT._resample_log_tau(Korg.interpolate_marcs(5777.0, 4.44, A_X), n_layers=168*3)
+atm_gpu = FT.AtmosphereGPU(atm_korg)
 τ_500 = atm_gpu.τs
 zs = atm_gpu.zs
 Ts = atm_gpu.Ts
@@ -271,7 +272,7 @@ for i in eachindex(v_losals_to_plot)
 
     # axs[i].set_xlabel(L"{\rm Air\ Wavelength\ [\AA]}")
     # ax3.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
-    # ax3.set_ylabel(L"{\rm Physical\ Height\ [Mm]}")
+    # ax3.set_ylabel(L"{\rm Geometrical\ Height\ [Mm]}")
     mu_val = string(v_losals_to_plot[i])
     axs[i - 1].set_title(L"\mu = %$mu_val")
 
@@ -279,7 +280,7 @@ for i in eachindex(v_losals_to_plot)
     local inv = interp1d(yedges, yedges2, fill_value="extrapolate")
 
     # ax3_right = ax3.secondary_yaxis("right", functions=(fwd, inv))
-    # ax3_right.set_ylabel(L"{\rm Physical\ Height\ [Mm]}")
+    # ax3_right.set_ylabel(L"{\rm Geometrical\ Height\ [Mm]}")
     # ax3_right.set_ylabel(L"{\rm \log _{10} (\tau_{5000})}")
     # ax3_right.yaxis.set_ticks([0, -1, -2, -3, -4])
 end
@@ -325,7 +326,7 @@ ax1_b2.set_ylim(ax1.get_ylim()...)
 ax1_b2.grid(false)
 
 fig.supxlabel(L"{\rm Air\ Wavelength\ [\AA]}", y=-0.02, x=0.45)
-axs[0].set_ylabel(L"{\rm Physical\ Height\ [Mm]}")
+axs[0].set_ylabel(L"{\rm Geometrical\ Height\ [Mm]}")
 fig.subplots_adjust(wspace=0.05)
 
 cb = fig.colorbar(imgs[end], ax=axs, pad=0.01)
@@ -399,7 +400,7 @@ ax1_b2.set_xlim(ax1.get_xlim()...)
 ax1_b2.grid(false)
 
 wav_val = string(round(λs_korg[cont_idx], digits=1))
-ax1.set_xlabel(L"{\rm Physical\ Height\ [Mm]}")
+ax1.set_xlabel(L"{\rm Geometrical\ Height\ [Mm]}")
 ax1.set_ylabel(L"C_{\nu}(t_\nu, \mu)\ d t_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1} \ sr ^{-1} ]}")
 ax2.set_ylabel(L"\mathscr{C}_{\nu}(t_\nu)\ d t_\nu\ {\rm [10^{%$exponent}\ erg\ s ^{-1} \ cm ^{-4} \ \AA ^{-1}]}")
 ax1.legend()
@@ -413,8 +414,19 @@ derp2 = diff(pyconvert(Vector{Float64}, ax2.get_yticks()))
 # ax1.set_ylim(cb_lims[1], cb_lims[2] + derp2[end])
 # ax2.set_ylim(lims_cflux[1], lims_cflux[2] + derp2[end])
 
-ax1.set_yticks(range(cb_lims[1], cb_lims[2] + derp2[end], length=5))
-ax2.set_yticks(range(lims_cflux[1], lims_cflux[2] + derp2[end], length=5))
+yticks1 = range(cb_lims[1], cb_lims[2] + derp2[end], length=5)
+yticks2 = range(lims_cflux[1], lims_cflux[2] + derp2[end], length=5)
+ax1.set_yticks(yticks1)
+ax2.set_yticks(yticks2)
+
+# equal fractional margins put ticks at the same axes fractions
+pad1 = 0.05 * (last(yticks1) - first(yticks1))
+pad2 = 0.05 * (last(yticks2) - first(yticks2))
+ax1.set_ylim(first(yticks1) - pad1, last(yticks1) + pad1)
+ax2.set_ylim(first(yticks2) - pad2, last(yticks2) + pad2)
+
+# ax2 canvas draws above ax1 legend; aligned ax1 grid serves both
+ax2.grid(false)
 
 fig.savefig(joinpath(plotdir, "cont_at_lambda.pdf"), bbox_inches="tight")
 plt.clf(); plt.close()

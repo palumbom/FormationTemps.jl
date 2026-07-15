@@ -11,7 +11,7 @@ using ProgressMeter
 plt.ioff()
 
 # matplotlib backend
-mpl.use("Qt5Agg")
+mpl.use("QtAgg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 colormaps = pyimport("colormaps")

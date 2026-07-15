@@ -13,7 +13,7 @@ using LaTeXStrings
 mpl = plt.matplotlib
 
 # matplotlib backend
-mpl.use("Qt5Agg")
+mpl.use("QtAgg")
 mpl.style.use(joinpath(FT.moddir, "fig.mplstyle"))
 inset = pyimport("mpl_toolkits.axes_grid1.inset_locator")
 colormaps = pyimport("colormaps")

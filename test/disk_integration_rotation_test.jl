@@ -9,7 +9,7 @@ using PythonCall: pyimport
 mpl = plt.matplotlib
 
 # matplotlib backend
-mpl.use("Qt5Agg")
+mpl.use("QtAgg")
 mpl.style.use(FT.moddir * "fig.mplstyle")
 
 # get fancy fonts
