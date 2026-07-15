@@ -25,7 +25,10 @@ Keyword arguments:
 - `v_micro`: microturbulent velocity ξ (m/s). Scalar for uniform broadening; vector of
   length `Natm` for per-layer broadening. If scalar `NaN`, uses `vmic_fit(Teff)`.
 - `ρstar`: stellar radius scale factor for disk integration (dimensionless; default 1).
-- `istar`: stellar inclination (degrees; 90 = equator-on).
+- `istar`: stellar inclination (degrees; 90 = equator-on). Currently a no-op for
+  rigid rotation: the rotational broadening depends only on the projected `vsini`,
+  which is inclination-independent for a featureless sphere. Reserved for future
+  differential-rotation / starspot / gravity-darkening work.
 
 Struct fields:
 - `Teff`, `logg`, `Fe_H`, `A_X`: atmosphere parameters (A_X is the full abundance vector).

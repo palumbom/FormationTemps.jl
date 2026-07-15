@@ -56,21 +56,8 @@ function calc_stellar_grid_cpu(ρs::T, i::T, vsini::T, Nϕ::Int) where T<:AF
             y = coords[2]
             z = coords[3]
 
-            a = x
-            c = z
-            d = -ρs * c
-            e = zero(T)
-            f = ρs * a
-
-            def_norm = sqrt(d^2 + e^2 + f^2)
-            d /= def_norm
-            e /= def_norm
-            f /= def_norm
-
-            rp = vsini / c_ms
-            d *= rp
-            e *= rp
-            f *= rp
+            # sky-plane x-coordinate (⊥ projected spin axis); invariant under R_x
+            x_sky = x
 
             x, y, z = rotate_vector(x, y, z, R_x)
             μ_tile = calc_mu(x, y, z, O⃗)
@@ -80,15 +67,9 @@ function calc_stellar_grid_cpu(ρs::T, i::T, vsini::T, Nϕ::Int) where T<:AF
             μs[m, n] = μ_tile
             dA[m, n] = calc_dA(ρs, ϕc_m, dϕ, dθ) * μ_tile
 
-            d, e, f = rotate_vector(d, e, f, R_x)
-            a = x - O⃗[1]
-            b = y - O⃗[2]
-            c = z - O⃗[3]
-
-            n1 = sqrt(a^2 + b^2 + c^2)
-            n2 = sqrt(d^2 + e^2 + f^2)
-            angle = (a * d + b * e + c * f) / (n1 * n2)
-            z_rot[m, n] = n2 * angle
+            # projected solid-body LOS velocity; vsini is the projected velocity,
+            # so this is independent of inclination: v_los = vsini * x_sky / ρs
+            z_rot[m, n] = -(vsini / c_ms) * (x_sky / ρs)
         end
     end
     if iszero(vsini)
@@ -189,35 +170,11 @@ function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, v
         # get cartesian coords
         x, y, z = sphere_to_cart_gpu(ρs, ϕc, θc)
 
-        # get vector from spherical circle center to surface patch
-        a = x
-        b = CUDA.zero(CUDA.eltype(μs))
-        c = z
-
-        # take cross product to get vector in direction of rotation
-        d = - ρs * c
-        e = CUDA.zero(CUDA.eltype(μs))
-        f = ρs * a
-
-        # make it a unit vector
-        def_norm = CUDA.sqrt(d^2.0 + e^2.0 + f^2.0)
-        d /= def_norm
-        e /= def_norm
-        f /= def_norm
-
-        # set magnitude of rotation
-        rp = vsini / c_ms
-        # TODO differential rotation
-
-        # set magnitude of vector
-        d *= rp
-        e *= rp
-        f *= rp
-
-        # rotate xyz by inclination
-        x, y, z = rotate_vector(x, y, z, R_x)
+        # sky-plane x-coordinate (⊥ projected spin axis); invariant under R_x
+        x_sky = x
 
         # rotate xyz by inclination and calculate mu
+        x, y, z = rotate_vector(x, y, z, R_x)
         μ_tile = calc_mu(x, y, z, O⃗)
         if μ_tile <= 0.0
             continue
@@ -227,19 +184,10 @@ function calc_stellar_grid!(μs, dA, z_rot, Nϕ, Nθ_max, Nθ, R_x, O⃗, ρs, v
         # get projected area element
         @inbounds dA[m,n] = calc_dA(ρs, ϕc, dϕ, dθ) * μ_tile
 
-        # rotate the velocity vectors by inclination
-        d, e, f = rotate_vector(d, e, f, R_x)
-
-        # get vector pointing from observer to surface patch
-        a = x - O⃗[1]
-        b = y - O⃗[2]
-        c = z - O⃗[3]
-
-        # get angle between them
-        n1 = CUDA.sqrt(a^2.0 + b^2.0 + c^2.0)
-        n2 = CUDA.sqrt(d^2.0 + e^2.0 + f^2.0)
-        angle = (a * d + b * e + c * f) / (n1 * n2)
-        @inbounds z_rot[m,n] = n2 * angle
+        # projected solid-body LOS velocity; vsini is the projected velocity, so
+        # this is independent of inclination: v_los = vsini * x_sky / ρs
+        # TODO differential rotation
+        @inbounds z_rot[m,n] = -(vsini / c_ms) * (x_sky / ρs)
     end
     return nothing
 end

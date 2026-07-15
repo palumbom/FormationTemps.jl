@@ -22,6 +22,7 @@ end
 # run tests
 # include("Aqua.jl") # [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 include("test_definitions.jl")
+include("test_disk_velocity.jl")
 include("test_atmosphere.jl")
 include("test_kernels.jl")
 include("test_convenience.jl")
