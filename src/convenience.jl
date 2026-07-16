@@ -9,8 +9,9 @@ end
 
 """
     calc_formation_temp(star, linelist; use_gpu=GPU_DEFAULT, Δλ=0.01,
-                        gpu_precision=Float64, convolve=false,
-                        minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN, Nϕ=128,
+                        gpu_precision=Float64, method=:disk,
+                        minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN,
+                        Nϕ=128, Nμ=16, N_az=256,
                         showprogress=true, kwargs...)
 
 Compute flux formation temperatures, normalized flux, and flux contribution function for a given `star` and `linelist`.
@@ -25,26 +26,50 @@ Returns a `FormTempResult` with fields:
 - `cont_func`: contribution function, shape `(Natm - 1, Nλ)`.
 - `atmosphere`: atmosphere structure used for the calculation.
 
-If `convolve=true`, applies Hirano rotation + macroturbulent convolution using limb-darkening
-coefficients `u1` and `u2`. Otherwise, performs numerical disk integration using `Nϕ` latitude
-bins. Set `use_gpu=true` to use the GPU implementation when available.
-Set `showprogress=false` to suppress the progress bar during disk integration.
+# Disk-integration method
+
+`method` selects how the stellar disk is integrated (see the "Integration Methods" guide):
+- `:disk` (default) — explicit numerical disk integration over `Nϕ` latitude bins. The
+  reference; self-consistent limb darkening; supports inclination `istar` and
+  differential rotation (`α₂`, `α₄`) via `StellarProps`.
+- `:quadrature` — ring-by-ring Gauss–Legendre μ-quadrature (`Nμ` μ nodes, `N_az`
+  azimuth samples for the per-ring Doppler kernel). Reproduces the `:disk` physics
+  (inclination + differential rotation) at a fraction of the cost; CPU and GPU.
+- `:hirano` — analytic Hirano et al. (2011) rotation + macroturbulence convolution
+  using the quadratic limb-darkening coefficients `u1`, `u2`. Fastest, but approximate
+  (parametric limb darkening; no center-to-limb line-profile variation).
+
+The boolean `convolve` keyword is a **deprecated alias**: `convolve=false` ⇒ `:disk`,
+`convolve=true` ⇒ `:hirano`. Prefer `method`.
+
+Set `use_gpu=true` to use the GPU implementation when available (`:quadrature` and
+`:disk` and `:hirano` all support GPU). Set `showprogress=false` to suppress the
+progress bar during disk integration.
 
 Pass `gpu_precision=Float32` to run GPU computations at single precision. Absorption
 coefficients are always computed at Float64 (a Korg requirement) and converted to the target
 precision before GPU upload. This roughly halves GPU memory usage and can improve throughput
-on consumer GPUs. The default is `Float64`.
+on consumer GPUs. The default is `Float64`. (Note: `:quadrature` at Float32 is
+noticeably less accurate than at Float64 — prefer Float64 there.)
 
-The CPU disk integration path (`use_gpu=false, convolve=false`) is parallelized across tiles
-using `Threads.@threads`. Launch Julia with multiple threads (e.g. `julia -t auto`) to benefit.
-FFTW internal threading is disabled during the tile loop to avoid contention. See
-[Parallelization](parallelization.md) for details.
+The CPU disk-integration path (`method=:disk, use_gpu=false`) is parallelized across
+tiles using `Threads.@threads`. Launch Julia with multiple threads (e.g. `julia -t auto`)
+to benefit. FFTW internal threading is disabled during the tile loop to avoid contention.
+See [Parallelization](parallelization.md) for details.
 
 # Examples
 ```julia-repl
 star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0)
 linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[1:500]
-result = calc_formation_temp(star, linelist; Δλ=0.01, convolve=true, u1=0.43, u2=0.31)
+
+# explicit disk integration (default)
+result = calc_formation_temp(star, linelist; Δλ=0.01)
+
+# fast μ-quadrature (same physics, much faster)
+result_q = calc_formation_temp(star, linelist; Δλ=0.01, method=:quadrature)
+
+# analytic Hirano convolution (needs limb-darkening coefficients)
+result_h = calc_formation_temp(star, linelist; Δλ=0.01, method=:hirano, u1=0.43, u2=0.31)
 
 # Float32 GPU:
 result32 = calc_formation_temp(star, linelist; Δλ=0.01, gpu_precision=Float32)

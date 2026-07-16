@@ -70,7 +70,7 @@ end
 
 """
     _calc_formation_temp_quadrature_cpu(star, linelist; Δλ, minλ, maxλ, buffer,
-                                        Nμ=12, N_az=128, kwargs...)
+                                        Nμ=16, N_az=256, kwargs...)
 
 Ring-by-ring μ-quadrature evaluation of the disk-integrated flux formation
 temperatures (CPU). Produces the same `FormTempResult` as the explicit tiling path

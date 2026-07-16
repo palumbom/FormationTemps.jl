@@ -31,7 +31,7 @@ To compute a basic formation temperature spectrum:
 
 ```julia
 using Korg
-using PyPlot
+import PythonPlot; plt = PythonPlot
 using FormationTemps; FT = FormationTemps
 
 # get the linelist
@@ -50,7 +50,9 @@ vsini = 2100.0
 star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                           vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
-# get the flux + formation temperature spectra
+# get the flux + formation temperature spectra (default: explicit disk integration).
+# pass method=:quadrature for a much faster, near-identical result, or method=:hirano
+# (with u1, u2) for the fast analytic convolution — see the "Integration Methods" docs.
 form_temp_result = FT.calc_formation_temp(star_props, linelist; Δλ=0.01)
 
 # parse the result

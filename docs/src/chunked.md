@@ -17,7 +17,7 @@ star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0,
 # returns Vector{FormTempResult}, one per chunk
 chunks = calc_formation_temp_chunked(star, linelist;
     chunk_width=50.0, wing_padding=30.0, overlap=5.0,
-    Δλ=0.01, convolve=false, Nϕ=32)
+    Δλ=0.01, method=:disk, Nϕ=32)
 ```
 
 Each element of `chunks` is a full [`FormTempResult`](@ref) with `wavs`, `flux`, `form_temps`, `cont_func`, and `atmosphere` fields. Adjacent chunks overlap by `overlap` Angstroms, so the caller can blend or cut at the midpoint.

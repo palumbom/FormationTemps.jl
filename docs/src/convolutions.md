@@ -10,7 +10,7 @@ See the [Public Functions](@ref "Public Functions") page for full API documentat
 
 ## Disk integration vs. convolution approximation
 
-By default `calc_formation_temp` performs a numerical disk integration over the stellar surface. Passing `convolve=true` instead applies the Hirano et al. (2011) combined rotation + macroturbulence kernel in the Fourier domain. This is much faster, but ultimately an approximation. The code below shows both modes and their difference:
+By default `calc_formation_temp` performs a numerical disk integration over the stellar surface (`method=:disk`). Passing `method=:hirano` (equivalently the legacy `convolve=true`) instead applies the Hirano et al. (2011) combined rotation + macroturbulence kernel in the Fourier domain. This is much faster, but ultimately an approximation. A third option, `method=:quadrature`, recovers most of the disk-integration accuracy at a fraction of the cost — see [Integration Methods](@ref) for the full comparison. The code below shows the disk-integration and Hirano modes and their difference:
 
 ```@eval
 using Markdown
@@ -31,7 +31,7 @@ Markdown.parse("```julia\n" * code * "\n```")
 
 ## Broadening kernels
 
-Three macroturbulence kernels are available. The Gray rotation kernel handles rotational broadening only; the isotropic and anisotropic radial-tangential (RT) kernels handle macroturbulent broadening. The Hirano kernel (used with `convolve=true`) combines rotation and RT macro in a single Fourier-domain operation.
+Three macroturbulence kernels are available. The Gray rotation kernel handles rotational broadening only; the isotropic and anisotropic radial-tangential (RT) kernels handle macroturbulent broadening. The Hirano kernel (used with `method=:hirano`) combines rotation and RT macro in a single Fourier-domain operation.
 
 ```@eval
 using Markdown

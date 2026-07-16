@@ -4,11 +4,11 @@
 CurrentModule = FormationTemps
 ```
 
-FormationTemps.jl parallelizes the disk integration pipeline in two complementary ways: CPU multithreading across stellar surface tiles, and GPU acceleration via [CUDA.jl](https://cuda.juliagpu.org/stable/). Both target the same bottleneck — the per-tile radiative transfer loop that dominates wall-clock time when `convolve=false`.
+FormationTemps.jl parallelizes the disk integration pipeline in two complementary ways: CPU multithreading across stellar surface tiles, and GPU acceleration via [CUDA.jl](https://cuda.juliagpu.org/stable/). Both target the same bottleneck — the per-tile radiative transfer loop that dominates wall-clock time with `method=:disk`. (The [`:quadrature`](@ref "Integration Methods") method sidesteps most of this cost.)
 
 ## CPU Multithreading
 
-When `use_gpu=false` and `convolve=false`, `calc_formation_temp` distributes tiles across Julia threads. Start Julia with multiple threads to benefit:
+When `use_gpu=false` and `method=:disk`, `calc_formation_temp` distributes tiles across Julia threads. Start Julia with multiple threads to benefit:
 
 ```bash
 julia -t auto           # use all available cores

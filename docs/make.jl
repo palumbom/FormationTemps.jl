@@ -49,6 +49,7 @@ License = "License" => "license.md"
 Index = "Full Index" => "longlist.md"
 Guides = "Guides" => ["Basic Tutorial" => "tutorial.md",
                       "Contribution Functions" => "cont_func.md",
+                      "Integration Methods" => "methods.md",
                       "Broadening & Convolutions" => "convolutions.md",
                       "Large Linelists" => "chunked.md",
                       "Parallelization" => "parallelization.md",

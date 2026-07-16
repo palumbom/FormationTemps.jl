@@ -13,17 +13,19 @@ The high-level convenience function ```calc_formation_temp``` provides a few opt
 
 ## StellarProps
 
-`v_micro` (microturbulent velocity ξ) accepts either a scalar or a vector of length `Natm` for per-layer microturbulence. All other velocity parameters (`vsini`, `v_macro`) are scalars.
+`v_micro` (microturbulent velocity ξ) accepts either a scalar or a vector of length `Natm` for per-layer microturbulence. All other velocity parameters (`vsini`, `v_macro`) are scalars. `vsini` is the projected equatorial rotational velocity.
+
+Rotation geometry is set by `istar` (inclination in degrees; `90` = equator-on) and the differential-rotation coefficients `α₂`, `α₄` in the normalized rate law `Ω(ϕ)/Ω_eq = 1 - α₂·sin²ϕ - α₄·sin⁴ϕ` (default `0`, i.e. solid-body). For rigid rotation the broadening depends only on `vsini`, so `istar` has no effect; with differential rotation (`α ≠ 0`) `istar` selects which latitude bands are visible and therefore matters. See [Integration Methods](@ref).
 
 ## Convolution vs. Integration
 
-At low spectral resolving power, convolutions can be used to approximate the effects of macroturbulent and rotational broadening. As shown in Section 2.1.4 of the [paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), this approximation can fail at higher resolution. By default, ```calc_formation_temp``` performs an explicit disk integration to evaluate model spectra and formation temperatures. Though more accurate, this approach is slower. To use the convolution approximation, pass ```convolve=true``` to ```calc_formation_temp```. A plot comparing the convolution and integration fluxes and temperatures is shown below for a solar-like model star. As shown in the [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), the error incurred by the convolution approximation grows with $v \sin i$.
+At low spectral resolving power, convolutions can be used to approximate the effects of macroturbulent and rotational broadening. As shown in Section 2.1.4 of the [paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), this approximation can fail at higher resolution. By default, ```calc_formation_temp``` performs an explicit disk integration (```method=:disk```) to evaluate model spectra and formation temperatures. Though more accurate, this approach is slower. To use the convolution approximation, pass ```method=:hirano``` (equivalently the legacy ```convolve=true```) to ```calc_formation_temp```. A faster middle ground, ```method=:quadrature```, keeps most of the disk-integration accuracy; see [Integration Methods](@ref). A plot comparing the convolution and integration fluxes and temperatures is shown below for a solar-like model star. As shown in the [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), the error incurred by the convolution approximation grows with $v \sin i$.
 
 ![convolution_vs_integration](static/convolution_vs_integration.png)
 
 ## Parallelization
 
-Disk integration (`convolve=false`) is the most computationally intensive mode and benefits from parallelization on both CPU and GPU.
+Disk integration (`method=:disk`, the default) is the most computationally intensive mode and benefits from parallelization on both CPU and GPU.
 
 ### CPU multithreading
 
