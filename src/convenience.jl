@@ -52,21 +52,42 @@ result32 = calc_formation_temp(star, linelist; Δλ=0.01, gpu_precision=Float32)
 """
 function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEFAULT,
                              Δλ::T=0.01, gpu_precision::Type{<:AF}=Float64,
-                             convolve::Bool=false,
+                             method::Union{Nothing,Symbol}=nothing, convolve::Bool=false,
                              minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                              u1::T=NaN, u2::T=NaN, Nϕ::Int=128,
                              kwargs...) where T<:AF
-    if use_gpu
-        form_temps_flux = _calc_formation_temp_gpu(star, linelist; Δλ=Δλ,
-                                                   gpu_precision=gpu_precision,
-                                                   minλ, maxλ, buffer, convolve=convolve,
-                                                   u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
+    # resolve the disk-integration method. `method` (preferred) selects among
+    # :disk (explicit tiling), :hirano (analytic convolution), :quadrature
+    # (ring-by-ring μ-quadrature). `convolve` is the deprecated boolean alias.
+    resolved = if method === nothing
+        convolve ? :hirano : :disk
     else
-        form_temps_flux = _calc_formation_temp_cpu(star, linelist; Δλ=Δλ,
-                                                   minλ, maxλ, buffer, convolve=convolve,
-                                                   u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
+        method
     end
-    return form_temps_flux
+    @assert resolved in (:disk, :hirano, :quadrature) "method must be :disk, :hirano, or :quadrature (got :$resolved)"
+
+    if resolved === :quadrature
+        if use_gpu
+            return _calc_formation_temp_quadrature_gpu(star, linelist; Δλ=Δλ,
+                                                       gpu_precision=gpu_precision,
+                                                       minλ, maxλ, buffer, kwargs...)
+        else
+            return _calc_formation_temp_quadrature_cpu(star, linelist; Δλ=Δλ,
+                                                       minλ, maxλ, buffer, kwargs...)
+        end
+    end
+
+    conv = (resolved === :hirano)
+    if use_gpu
+        return _calc_formation_temp_gpu(star, linelist; Δλ=Δλ,
+                                        gpu_precision=gpu_precision,
+                                        minλ, maxλ, buffer, convolve=conv,
+                                        u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
+    else
+        return _calc_formation_temp_cpu(star, linelist; Δλ=Δλ,
+                                        minλ, maxλ, buffer, convolve=conv,
+                                        u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
+    end
 end
 
 function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,

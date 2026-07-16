@@ -288,15 +288,31 @@ function precompute_rt_macro_kernel_ft(cmem::MacroConvolutionMemory, xs::AA{T,1}
     normval = CUDA.sum(kernel_row)
     kernel_row ./= normval
 
-    # roll to align zero-lag
+    return _finalize_kernel_ft!(cmem, i0)
+end
+
+"""
+    _finalize_kernel_ft!(cmem, i0)
+
+Given a (already normalized) real-space kernel in `cmem.padded_kernel_gpu` — placed so
+its zero-lag sample sits at padded index `pad_left + i0` — roll it to the padded
+center, `ifftshift` to FFT (DFT) ordering, R2C-FFT via `plan_fwd_1d`, and return a copy
+of the resulting kernel FT (`CuVector{Complex}`) suitable for
+[`convolve_rt_macro_gpu_cached`](@ref). Uses `cmem.shift_kernel_gpu` / `cmem.kr_1d` /
+`cmem.kernel_row_ft_1d` as scratch. Shared by `precompute_rt_macro_kernel_ft` and the
+quadrature ring-kernel builder.
+"""
+function _finalize_kernel_ft!(cmem::MacroConvolutionMemory{T}, i0::Int) where {T<:AF}
+    kernel_row = cmem.padded_kernel_gpu
+    shifted_kernel_row = cmem.shift_kernel_gpu
+
+    ts1 = (256,)
     Ltot = length(kernel_row)
     center = Ltot ÷ 2
     r = center - (cmem.pad_left + i0)
     if r != 0
         @cuda threads=ts1 blocks=(cld(Ltot, ts1[1]),) roll_1d!(shifted_kernel_row, kernel_row, r, Ltot)
-        tmp = kernel_row
-        kernel_row = shifted_kernel_row
-        shifted_kernel_row = tmp
+        kernel_row, shifted_kernel_row = shifted_kernel_row, kernel_row
     end
 
     # center -> FFT indexing

@@ -72,6 +72,7 @@ include("disk_calculations.jl")
 
 # convenient high-level functions
 include("convenience.jl")
+include("quadrature.jl")
 include("chunked.jl")
 include("turb_fits.jl")
 
