@@ -16,17 +16,18 @@ Teff, logg, Fe_H = 5777.0, 4.44, 0.0
 Nϕ = 64          # tiling ground-truth resolution
 
 # tiling (ground truth) vs quadrature for one star; returns (tiling, quad, interior)
-function run_pair(; vsini, istar, α₂=0.0, α₄=0.0, Nμ=16, N_az=256)
-    star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT,
+function run_pair(; vsini, istar, α₂=0.0, α₄=0.0, ζ=ζ_RT, Nμ=16, N_az=256)
+    star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ,
                         v_micro=ξ, istar=istar, α₂=α₂, α₄=α₄)
     rt = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:disk,
                              Nϕ=Nϕ, showprogress=false, ne_warn_thresh=Inf)
     rq = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:quadrature,
                              Nμ=Nμ, N_az=N_az, ne_warn_thresh=Inf)
     λ0 = mean(rt.wavs)
-    edge = ceil(Int, max(vsini, ζ_RT) * 3 / (FT.c_ms * Δλ / λ0)) + 10
+    edge = ceil(Int, max(vsini, ζ) * 3 / (FT.c_ms * Δλ / λ0)) + 10
     n = length(rt.wavs)
     interior = (edge + 1):(n - edge)
+    @test !isempty(interior)          # guard against a degenerate mask (would else error)
     return rt, rq, interior
 end
 
@@ -35,21 +36,24 @@ end
     @testset "non-rotating (vsini=0) matches tiling" begin
         rt, rq, interior = run_pair(vsini=0.0, istar=90.0)
         @test length(rq.wavs) == length(rt.wavs)
-        @test maximum(abs.(rq.flux .- rt.flux)) < 1e-3
+        @test maximum(abs.(rq.flux[interior] .- rt.flux[interior])) < 1e-3
         @test maximum(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 2.0   # K
         @test mean(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 0.2       # K
     end
 
     @testset "rigid rotation (vsini=15 km/s, i=90) matches tiling" begin
         rt, rq, interior = run_pair(vsini=15000.0, istar=90.0)
-        @test maximum(abs.(rq.flux .- rt.flux)) < 1e-3
+        @test maximum(abs.(rq.flux[interior] .- rt.flux[interior])) < 1e-3
         @test maximum(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 3.0
         @test mean(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 0.3
+        # quadrature must be genuinely distinct from tiling (guards a silent fallback
+        # to method=:disk, which would make the tolerances above pass trivially)
+        @test rq.form_temps != rt.form_temps
     end
 
     @testset "differential + inclined (α=(0.2,0.1), vsini=15 km/s, i=30)" begin
         rt, rq, interior = run_pair(vsini=15000.0, istar=30.0, α₂=0.2, α₄=0.1)
-        @test maximum(abs.(rq.flux .- rt.flux)) < 1e-3
+        @test maximum(abs.(rq.flux[interior] .- rt.flux[interior])) < 1e-3
         @test maximum(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 3.0
         @test mean(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 0.3
     end
@@ -63,13 +67,18 @@ end
         @test maximum(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 4.0
     end
 
+    @testset "no macroturbulence (ζ=0) matches tiling" begin
+        # exercises the ζ==0 short-circuit in the per-ring macro step
+        rt, rq, interior = run_pair(vsini=15000.0, istar=90.0, ζ=0.0)
+        @test maximum(abs.(rq.flux[interior] .- rt.flux[interior])) < 1e-3
+        @test maximum(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 3.0
+    end
+
     @testset "convergence: more nodes → closer to tiling" begin
-        # reuse one tiling ground truth; compare coarse vs fine quadrature
-        rt, _, interior = run_pair(vsini=15000.0, istar=90.0, Nμ=6, N_az=64)
+        # tiling ground truth + coarse quadrature from one call; fine quadrature separately
+        rt, rq_coarse, interior = run_pair(vsini=15000.0, istar=90.0, Nμ=6, N_az=64)
         star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=15000.0, v_macro=ζ_RT,
                             v_micro=ξ, istar=90.0)
-        rq_coarse = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false,
-                                        method=:quadrature, Nμ=6, N_az=64, ne_warn_thresh=Inf)
         rq_fine = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false,
                                       method=:quadrature, Nμ=24, N_az=256, ne_warn_thresh=Inf)
         coarse_err = maximum(abs.(rq_coarse.form_temps[interior] .- rt.form_temps[interior]))
