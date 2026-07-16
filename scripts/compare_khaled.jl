@@ -181,36 +181,11 @@ end
 flux_norm_int = flux_integration ./ flux_cont_integration
 
 # now get cumulative cfuncs 
-cum_cfunc_intensity = Array(FT.get_cum_cfunc(cfunc_int))
-cum_cfunc_flux = Array(FT.get_cum_cfunc(cfunc_flux))
-
-cum_cfunc_conv = cumsum(cfunc_flux_convolution, dims=1)
-cum_cfunc_conv ./= maximum(cum_cfunc_conv, dims=1)
-cum_cfunc_int = cumsum(cfunc_flux_integration, dims=1)
-cum_cfunc_int ./= maximum(cum_cfunc_int, dims=1)
-
-# loop over wavelength
-form_temp_intensity = zeros(length(λs_korg))
-form_temp_flux = zeros(length(λs_korg))
-form_temp_integration = zeros(length(λs_korg))
-form_temp_convolution = zeros(length(λs_korg))
-for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_intensity, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_intensity[i] = itp(0.5)
-
-    xs = view(cum_cfunc_flux, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_flux[i] = itp(0.5)
-
-    xs = view(cum_cfunc_conv, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_convolution[i] = itp(0.5)
-
-    xs = view(cum_cfunc_int, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_integration[i] = itp(0.5)
-end
+# formation temperatures at 50% cumulative flux contribution (node-anchored CDF)
+form_temp_intensity   = FT.form_temps_from_cfunc(Array(cfunc_int.cfunc_dt), Ts)
+form_temp_flux        = FT.form_temps_from_cfunc(Array(cfunc_flux.cfunc_dt), Ts)
+form_temp_convolution = FT.form_temps_from_cfunc(Array(cfunc_flux_convolution), Ts)
+form_temp_integration = FT.form_temps_from_cfunc(Array(cfunc_flux_integration), Ts)
 
 # compare 
 plt.plot(wave_k, temp_k, label="Khaled")

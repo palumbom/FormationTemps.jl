@@ -123,21 +123,9 @@ cfunc_flux_rotating = zeros(length(zs)-1, length(λs_korg))
 end
 
 # now get cumulative cfuncs 
-cum_cfunc_flux_rotating = cumsum(cfunc_flux_rotating, dims=1)
-cum_cfunc_flux_rotating ./= maximum(cum_cfunc_flux_rotating, dims=1)
-
-# loop over wavelength
-form_temp_stationary = zeros(length(λs_korg))
-form_temp_rotating = zeros(length(λs_korg))
-for i in eachindex(λs_korg)
-    xs = view(cfunc_flux_cum_stationary, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_stationary[i] = itp(0.5)
-
-    xs = view(cum_cfunc_flux_rotating, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_rotating[i] = itp(0.5)
-end
+# formation temperatures at 50% cumulative flux contribution (node-anchored CDF)
+form_temp_stationary = FT.form_temps_from_cfunc(Array(cfunc_flux_stationary.cfunc_dt), Ts)
+form_temp_rotating   = FT.form_temps_from_cfunc(cfunc_flux_rotating, Ts)
 
 # overplot the flux
 @show extrema((flux_rotating - flux_stationary) ./ flux_stationary)

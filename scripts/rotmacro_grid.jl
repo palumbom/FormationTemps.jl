@@ -103,12 +103,8 @@ cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cme
 cfunc_flux_cont_stationary = cfunc_flux_cont_struct.cfunc_dt
 flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_struct)')
 
-form_temp_stationary = zeros(length(λs_korg))
-for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_flux_stationary, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_stationary[i] = itp(0.5)
-end
+# formation temperature at 50% cumulative flux contribution (node-anchored CDF)
+form_temp_stationary = FT.form_temps_from_cfunc(Array(cfunc_flux_stationary), Ts)
 
 # set rotational and macroturbulence grids
 # vsinis = range(0.00, 10_000.0, step=2_000.0)
@@ -248,24 +244,9 @@ for k in eachindex(vsinis)
         cfunc_flux_cont_convolution = Array(FT.convolve_hirano_rotmacro_gpu(cmem_mac, λs_korg, cfunc_flux_cont_stationary, vsinis[k], vmacs[j], u1, u2))
         flux_cont_convolution = dropdims(sum(cfunc_flux_cont_convolution, dims=1), dims=1)
 
-        # now get cumulative cfuncs
-        cum_cfunc_flux_integration = Array(cumsum(cfunc_flux_integration, dims=1))
-        cum_cfunc_flux_integration ./= maximum(cum_cfunc_flux_integration, dims=1)
-        cum_cfunc_flux_convolution = Array(cumsum(cfunc_flux_convolution, dims=1))
-        cum_cfunc_flux_convolution ./= maximum(cum_cfunc_flux_convolution, dims=1)
-
-        # loop over wavelength
-        form_temp_integration = zeros(length(λs_korg))
-        form_temp_convolution = zeros(length(λs_korg))
-        for i in eachindex(λs_korg)
-            xs = view(cum_cfunc_flux_integration, :, i)
-            itp = FT.linear_interp(xs, elav(Ts))
-            form_temp_integration[i] = itp(0.5)
-
-            xs = view(cum_cfunc_flux_convolution, :, i)
-            itp = FT.linear_interp(xs, elav(Ts))
-            form_temp_convolution[i] = itp(0.5)
-        end
+        # formation temperatures at 50% cumulative flux contribution (node-anchored CDF)
+        form_temp_integration = FT.form_temps_from_cfunc(Array(cfunc_flux_integration), Ts)
+        form_temp_convolution = FT.form_temps_from_cfunc(Array(cfunc_flux_convolution), Ts)
 
         # get normalized flux
         flux_integration_norm = Array(flux_integration ./ flux_cont_integration)

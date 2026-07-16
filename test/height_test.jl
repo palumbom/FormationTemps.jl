@@ -35,16 +35,10 @@ cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 cfunc_int_cum  = Array(FT.get_cum_cfunc(cfunc_int))
 cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux))
 
-mid_zs = elav(zs)
-mid_Ts = elav(Ts)
-
-form_height = zeros(length(λs_korg))
-form_temp   = zeros(length(λs_korg))
-for i in eachindex(λs_korg)
-    xs = view(cfunc_flux_cum, :, i)
-    form_height[i] = FT.linear_interp(xs, mid_zs)(0.5)
-    form_temp[i]   = FT.linear_interp(xs, mid_Ts)(0.5)
-end
+# node-anchored CDF at 50% cumulative flux contribution; the helper generalizes:
+# pass zs (nodes) for formation height, Ts (nodes) for formation temperature
+form_height = FT.form_temps_from_cfunc(Array(cfunc_flux.cfunc_dt), zs)
+form_temp   = FT.form_temps_from_cfunc(Array(cfunc_flux.cfunc_dt), Ts)
 
 if make_plots
     import PythonPlot; plt = PythonPlot

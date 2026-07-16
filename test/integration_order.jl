@@ -98,12 +98,8 @@ cum_cfunc_flux_stationary = Array(FT.get_cum_cfunc(cfunc_flux_struct))
 cfunc_flux_cont_struct = FT.calc_flux_quantities(αs_cont, atm_gpu, gpu_mem, cmem, v_mic)
 flux_cont_stationary = Array(FT.get_flux(cfunc_flux_cont_struct)')
 
-form_temp_stationary = zeros(length(λs_korg))
-for i in eachindex(λs_korg)
-    xs = view(cum_cfunc_flux_stationary, :, i)
-    itp = FT.linear_interp(xs, elav(Ts))
-    form_temp_stationary[i] = itp(0.5)
-end
+# formation temperature at 50% cumulative flux contribution (node-anchored CDF)
+form_temp_stationary = FT.form_temps_from_cfunc(Array(cfunc_flux_struct.cfunc_dt), Ts)
 
 # set broadening
 vsini = 2100.0

@@ -1,5 +1,3 @@
-# calc_tau!(μ_i, zs, αs, τs) = calc_tau_gauss_legendre!(μ_i, zs, αs, τs)
-# calc_tau!(μ_i, zs, αs, τs) = calc_tau_bezier!(μ_i, zs, αs, τs)
 # calc_tau_cpu!(μ_i, zs, αs, τs) = Korg.RadiativeTransfer.compute_tau_bezier!(τs, zs ./ μ_i, αs)
 
 function calc_tau_bezier_cpu!(μ_i, zs, αs, τs)
@@ -192,95 +190,6 @@ function calc_tau_bezier_cached!(μ_i::T, zs::CA{T,1}, αs::CA{T,2}, τs::CA{T,2
     b_geom = cld(N, t_geom)
     @cuda threads=t_geom blocks=b_geom precompute_bezier_geometry!(μ_i, zs, ds, alphaC)
     @cuda threads=threads blocks=blocks calc_tau_bezier_cached_kernel!(αs, τs, ds, alphaC, Nλ)
-    return nothing
-end
-
-function calc_tau_bezier!(μ_i, zs, αs, τs)
-    # get indices
-    idx = threadIdx().x + blockDim().x * (blockIdx().x-1)
-    sdx = gridDim().x * blockDim().x
-
-    # length and precompute constants
-    N = length(zs)
-    T = eltype(τs)
-    inv_μ = one(T) / T(μ_i)
-    one_third = inv(T(3))
-    half = T(0.5)
-    zeroT = zero(T)
-    oneT = one(T)
-
-    # loop over wavelengths
-    @inbounds for j in idx:sdx:size(αs,2)
-        # bounds for clamping — opacity is non-negative
-        αmax = αs[1, j]
-        for p in 2:N
-            v = αs[p, j]
-            αmax = max(αmax, v)
-        end
-        lo = zeroT
-        hi = max(T(2) * αmax, zeroT)
-
-        # init
-        τs[1, j] = T(TAU_FLOOR)
-
-        # first iteration handle outside loop
-        s_prev = zs[1] * inv_μ
-        s_t = zs[2] * inv_μ
-        s_next = zs[3] * inv_μ
-        ds0 = s_t - s_prev
-        ds1 = s_next - s_t
-        αC = one_third * (oneT + ds1 / (ds0 + ds1))
-        prev_dC = (αs[2, j] - αs[1, j]) / ds0
-        dC = (αs[3, j] - αs[2, j]) / ds1
-
-        # monotone limiter: zero derivative at local extrema to prevent denominator
-        # blow-up (αC*dC + (1-αC)*prev_dC → 0) and Cf overshoot
-        ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
-                      (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-        α2 = αs[2, j]
-        C0 = α2 + half * ds0 * ybar
-        C1 = α2 - half * ds1 * ybar
-        Cf = min(max(C0, lo), hi)
-
-        # update tau
-        τs[2, j] = τs[1, j] + (s_prev - s_t) * one_third * (αs[1, j] + αs[2, j] + Cf)
-
-        # for next iteration
-        prev_dC = dC
-        prev_C1 = C1
-
-        # loop until final step
-        @inbounds for t in 2:N-2
-            s_prev = s_t
-            s_t = s_next
-            s_next = zs[t+2] * inv_μ
-            ds0 = s_t - s_prev
-            ds1 = s_next - s_t
-
-            αC = one_third * (oneT + ds1 / (ds0 + ds1))
-            α_t = αs[t+1, j]
-            dC = (αs[t+2, j] - α_t) / ds1
-
-            ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
-                          (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-            C0 = α_t + half * ds0 * ybar
-            C1 = α_t - half * ds1 * ybar
-            Cf = min(max(half * (C0 + prev_C1), lo), hi)
-
-            # update tau
-            τs[t+1, j] = τs[t, j] + (s_prev - s_t) * one_third * (αs[t, j] + α_t + Cf)
-
-            # for next iteration
-            prev_dC = dC
-            prev_C1 = C1
-        end
-
-        # handle last step outside loop
-        s_t = zs[N] * inv_μ
-        ds0 = s_prev - s_t
-        Cf = min(max(prev_C1, lo), hi)
-        @inbounds τs[N, j] = τs[N-1, j] + (one_third * ds0) * (αs[N-1, j] + αs[N, j] + Cf)
-    end
     return nothing
 end
 

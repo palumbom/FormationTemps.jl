@@ -232,18 +232,10 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
         FFTW.set_num_threads(prev_fftw_threads)
     end
 
-    cum_cfunc_flux = cumsum(cfunc_dt_flux, dims=1)
-    cum_cfunc_flux ./= maximum(cum_cfunc_flux, dims=1)
-
     flux_norm = vec(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1))
 
-    form_temps = zeros(T, Nλ)
-    mid_temps = elav(Ts)
-    for i in eachindex(λs_korg)
-        xs = view(cum_cfunc_flux, :, i)
-        itp = linear_interp(xs, mid_temps)
-        form_temps[i] = itp(0.5)
-    end
+    # formation temperature at 50% cumulative flux contribution (node-anchored CDF)
+    form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts)
 
     cont_func = cfunc_dt_flux
     return FormTempResult(collect(λs_korg), flux_norm, form_temps, cont_func, atm_cpu)
@@ -614,21 +606,12 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         end
     end
 
-    # get the normalized cumulative contribution function
-    cum_cfunc_flux = Array(cumsum(cfunc_dt_flux, dims=1))
-    cum_cfunc_flux ./= maximum(cum_cfunc_flux, dims=1)
-
     # get the normalized flux
     flux_norm = G.(vec(Array(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1))))
 
-    # loop over wavelength
-    form_temps = zeros(G, length(λs_korg))
-    mid_temps = elav(atm_gpu.Ts)
-    for i in eachindex(λs_korg)
-        xs = view(cum_cfunc_flux, :, i)
-        itp = linear_interp(xs, mid_temps)
-        form_temps[i] = G(itp(G(0.5)))
-    end
+    # formation temperature at 50% cumulative flux contribution (node-anchored CDF);
+    # extraction is host-side, so pass host copies
+    form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts))
 
     cont_func = Array(cfunc_dt_flux)
     return FormTempResult(G.(collect(λs_korg)), flux_norm, form_temps, cont_func, atm_gpu)
