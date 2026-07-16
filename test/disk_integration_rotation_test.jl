@@ -86,7 +86,6 @@ v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 
 # get the nominal answer
 cfunc_flux_stationary = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
-cfunc_flux_cum_stationary = Array(FT.get_cum_cfunc(cfunc_flux_stationary))
 flux_stationary = Array(FT.get_flux(cfunc_flux_stationary))
 
 # get disk stuff 

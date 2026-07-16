@@ -99,6 +99,8 @@ cfuncs = zeros(length(zs)-1, length(λs_korg), length(vmics))
 cfuncs_flux = zeros(length(zs)-1, length(λs_korg), length(vmics))
 intensities = zeros(length(λs_korg), length(vmics))
 fluxes = zeros(length(λs_korg), length(vmics))
+form_temps_int = zeros(length(λs_korg), length(vmics))
+form_temps_flux = zeros(length(λs_korg), length(vmics))
 
 for i in eachindex(vmics)
     v_mic .= vmics[i]
@@ -110,24 +112,14 @@ for i in eachindex(vmics)
     local cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
     cfuncs_flux[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_flux_struct))
     fluxes[:,i] = Array(FT.get_flux(cfunc_flux_struct))
+
+    # formation quantities at 50% cumulative contribution (node-anchored CDF)
+    form_temps_int[:, i]  = FT.form_temps_from_cfunc(Array(cfunc_intensity_struct.cfunc_dt), Array(Ts))
+    form_temps_flux[:, i] = FT.form_temps_from_cfunc(Array(cfunc_flux_struct.cfunc_dt), Array(Ts))
 end
 
 cum_cfuncs_norm = cfuncs
 cum_cfuncs_flux_norm = cfuncs_flux
-
-form_temps_int = zeros(length(λs_korg), length(vmics))
-form_temps_flux = zeros(length(λs_korg), length(vmics))
-
-for i in eachindex(λs_korg)
-    for j in eachindex(vmics)
-        local xs1 = view(cum_cfuncs_norm, :, i, j)
-        local xs2 = view(cum_cfuncs_flux_norm, :, i, j)
-        local itp1 = FT.linear_interp(xs1, elav(Ts))
-        local itp2 = FT.linear_interp(xs2, elav(Ts))
-        form_temps_int[i, j] = itp1(0.5)
-        form_temps_flux[i, j] = itp2(0.5)
-    end
-end
 
 # get colormaps
 cmap = plt.get_cmap(vmic_cmap)

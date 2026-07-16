@@ -120,22 +120,11 @@ cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_struct))
 cum_cfuncs_norm = cfuncs_cum
 cum_cfunc_flux_norm = cfunc_flux_cum
 
-# now compute the formation temperature
+# formation temperatures at 50% cumulative contribution (node-anchored CDF)
+form_temps_flux = FT.form_temps_from_cfunc(cfunc_flux, Array(Ts))
 form_temps_intensity = zeros(length(λs_korg), length(μs))
-form_temps_flux = zeros(length(λs_korg))
-
-for i in eachindex(λs_korg)
-    local xs = view(cum_cfunc_flux_norm, :, i)
-    local itp = FT.linear_interp(xs, elav(Ts))
-    form_temps_flux[i] = itp(0.5)
-end
-
-for i in eachindex(λs_korg)
-    for j in eachindex(μs)
-        local xs = view(cum_cfuncs_norm, :, i, j)
-        local itp = FT.linear_interp(xs, elav(Ts))
-        form_temps_intensity[i,j] = itp(0.5)
-    end
+for j in eachindex(μs)
+    form_temps_intensity[:, j] = FT.form_temps_from_cfunc(cfuncs[:, :, j], Array(Ts))
 end
 
 # get limits and such
@@ -448,11 +437,9 @@ sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 cbar = plt.colorbar(sm, ax=ax1)
 cbar.set_label(L"\mu")
 
-itp1 = FT.linear_interp(cum_cfunc_flux_norm[:,cont_idx], elav(Ts))
-itp2 = FT.linear_interp(cum_cfuncs_norm[:,cont_idx, length(μs)], elav(Ts))
-
-x_data1 = itp1(0.5)
-x_data2 = itp2(0.5)
+# node-anchored 50% median for the continuum-index annotation
+x_data1 = FT.form_temps_from_cfunc(reshape(cfunc_flux[:, cont_idx], :, 1), Array(Ts))[1]
+x_data2 = FT.form_temps_from_cfunc(reshape(cfuncs[:, cont_idx, length(μs)], :, 1), Array(Ts))[1]
 
 y0, y1 = ax1.get_ylim()
 y_data = 0.5

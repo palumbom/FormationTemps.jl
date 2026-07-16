@@ -78,7 +78,6 @@ cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
 v_los = CUDA.zeros(Float64, length(zs))
 v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 cfuncs = zeros(length(zs)-1, length(λs_korg), length(μs))
-cfuncs_cum = zeros(length(zs)-1, length(λs_korg), length(μs))
 intensities = zeros(length(λs_korg), length(μs))
 continuum = zeros(length(λs_korg), length(μs))
 
@@ -91,7 +90,6 @@ colors = cmap(norm(μs))
 for i in eachindex(μs)
     cfunc_intensity_struct = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, μs[i], v_los, v_mic)
     cfuncs[:,:,i] .= Array(cfunc_intensity_struct.cfunc_dt)
-    cfuncs_cum[:,:,i] .= Array(FT.get_cum_cfunc(cfunc_intensity_struct))
     intensities[:,i] .= Array(FT.get_intensity(cfunc_intensity_struct))
 
     cfunc_intensity_cont = FT.calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem, cmem, μs[i], v_los, v_mic)
@@ -102,28 +100,12 @@ end
 cfunc_flux_struct = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 flux_disk_integrated = Array(FT.get_flux(cfunc_flux_struct))
 cfunc_flux = Array(cfunc_flux_struct.cfunc_dt)
-cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux_struct))
 
-# now get cumulative contribution functions
-cum_cfuncs_norm = cfuncs_cum
-cum_cfunc_flux_norm = cfunc_flux_cum
-
-# now compute the formation temperature
+# formation temperatures at 50% cumulative flux contribution (node-anchored CDF)
+form_temps_flux = FT.form_temps_from_cfunc(cfunc_flux, Array(Ts))
 form_temps_intensity = zeros(length(λs_korg), length(μs))
-form_temps_flux = zeros(length(λs_korg))
-
-for i in eachindex(λs_korg)
-    local xs = view(cum_cfunc_flux_norm, :, i)
-    local itp = FT.linear_interp(xs, elav(Ts))
-    form_temps_flux[i] = itp(0.5)
-end
-
-for i in eachindex(λs_korg)
-    for j in eachindex(μs)
-        local xs = view(cum_cfuncs_norm, :, i, j)
-        local itp = FT.linear_interp(xs, elav(Ts))
-        form_temps_intensity[i,j] = itp(0.5)
-    end
+for j in eachindex(μs)
+    form_temps_intensity[:, j] = FT.form_temps_from_cfunc(cfuncs[:, :, j], Array(Ts))
 end
 
 # overplot the intensity and flux formation temperure spectra

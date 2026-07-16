@@ -32,9 +32,6 @@ v_mic = CUDA.zeros(Float64, length(zs)) .+ 1200.0
 cfunc_int  = FT.calc_intensity_quantities(αs, atm_gpu, gpu_mem, cmem, 1.0, v_los_rot, v_mic)
 cfunc_flux = FT.calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, v_mic)
 
-cfunc_int_cum  = Array(FT.get_cum_cfunc(cfunc_int))
-cfunc_flux_cum = Array(FT.get_cum_cfunc(cfunc_flux))
-
 # node-anchored CDF at 50% cumulative flux contribution; the helper generalizes:
 # pass zs (nodes) for formation height, Ts (nodes) for formation temperature
 form_height = FT.form_temps_from_cfunc(Array(cfunc_flux.cfunc_dt), zs)
