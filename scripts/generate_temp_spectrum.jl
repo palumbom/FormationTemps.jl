@@ -68,9 +68,17 @@ vsini = 2100.0
 ζ_RT = 3400.0
 ξ = 850.0
 
+# solar surface differential rotation (Snodgrass & Ulrich 1990):
+#   Ω(ϕ) = A + B·sin²ϕ + C·sin⁴ϕ,  A=14.713, B=-2.396, C=-1.787 deg/day
+#   normalized rate law  Ω(ϕ)/Ω_eq = 1 - α₂·sin²ϕ - α₄·sin⁴ϕ
+istar = 90.0            # inclination (deg); matters once α ≠ 0
+α₂ = 0.16285            # = -B/A
+α₄ = 0.12145            # = -C/A
+
 # consolidate
 star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
-                          vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
+                          vsini=vsini, v_macro=ζ_RT, v_micro=ξ,
+                          istar=istar, α₂=α₂, α₄=α₄)
 
 # [doc:params-end]
 
@@ -100,6 +108,14 @@ overlap = 5.0         # Å overlap between chunks for stitching
 Nϕ = 128
 buffer = 3.0
 
+# disk-integration method: true → :quadrature (fast ring-by-ring μ-quadrature),
+# false → :disk (explicit tiling reference). Nμ/N_az are the quadrature node counts.
+use_quadrature = true
+Nμ = 16
+N_az = 256
+integration_method = use_quadrature ? :quadrature : :disk
+quad_kwargs = use_quadrature ? (Nμ=Nμ, N_az=N_az) : NamedTuple()
+
 # [doc:chunked-end]
 
 # [doc:callback-start]
@@ -119,6 +135,9 @@ let chunk_idx = Ref(0)
         HDF5.attributes(h5)["xi"] = star_props.ξ
         HDF5.attributes(h5)["rho_star"] = star_props.ρstar
         HDF5.attributes(h5)["i_star"] = star_props.istar
+        HDF5.attributes(h5)["alpha2"] = star_props.α₂
+        HDF5.attributes(h5)["alpha4"] = star_props.α₄
+        HDF5.attributes(h5)["integration_method"] = String(integration_method)
         HDF5.attributes(h5)["wavelength_frame"] = wav_label
         HDF5.attributes(h5)["mask_tau_boundary"] = τ_boundary
         HDF5.attributes(h5)["mask_frac_thresh"] = frac_thresh
@@ -151,7 +170,7 @@ let chunk_idx = Ref(0)
                                         wing_padding=wing_padding,
                                         overlap=overlap,
                                         Δλ=Δλ, buffer=buffer,
-                                        convolve=false, Nϕ=Nϕ,
+                                        method=integration_method, Nϕ=Nϕ, quad_kwargs...,
                                         ne_warn_thresh=Inf,
                                         callback=write_chunk)
     end
@@ -254,6 +273,9 @@ h5open(outfile, "r") do h5in
         HDF5.attributes(h5out)["xi"] = star_props.ξ
         HDF5.attributes(h5out)["rho_star"] = star_props.ρstar
         HDF5.attributes(h5out)["i_star"] = star_props.istar
+        HDF5.attributes(h5out)["alpha2"] = star_props.α₂
+        HDF5.attributes(h5out)["alpha4"] = star_props.α₄
+        HDF5.attributes(h5out)["integration_method"] = String(integration_method)
         HDF5.attributes(h5out)["wavelength_frame"] = wav_label
         HDF5.attributes(h5out)["mask_tau_boundary"] = τ_boundary
         HDF5.attributes(h5out)["mask_frac_thresh"] = frac_thresh
