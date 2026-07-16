@@ -25,16 +25,16 @@ flux_base = result_base.flux
 
 # --- compare disk integration vs. convolution approximation ---
 
-# disk integration (default, convolve=false)
+# disk integration (default, method=:disk)
 star_props = FT.StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                              vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
-result_int = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, convolve=false)
+result_int = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, method=:disk)
 
-# convolution approximation (convolve=true uses Hirano et al. 2011 kernel;
+# convolution approximation (method=:hirano uses the Hirano et al. 2011 kernel;
 # u1 and u2 are linear and quadratic limb-darkening coefficients)
 u1 = 0.43
 u2 = 0.31
-result_conv = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, convolve=true, u1=u1, u2=u2)
+result_conv = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, method=:hirano, u1=u1, u2=u2)
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9.6, 7.2), sharex=true)
 ax1.plot(wavs, result_int.flux,  label="{\\rm integration}", lw=2.0, c="k")
