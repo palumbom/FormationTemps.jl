@@ -25,7 +25,7 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
 # vacuum or air wavelengths
-vacuum_wavs = true
+vacuum_wavs = false
 wav_label = vacuum_wavs ? "vacuum" : "air"
 
 # set directory
@@ -89,15 +89,13 @@ nd = atm_cpu.nd
 Ts = atm_cpu.Ts
 τs_ref = atm_cpu.τs
 
-# boundary-contamination mask: flag pixels whose flux forms too high in the atmosphere
-# to trust (saturated line cores at/above the top of the LTE photospheric model).
-# top_frac = fraction of the contribution function (cfunc = C·Δτ) forming above τ_boundary.
-# Pure reduction over cfunc — no recomputation. See scripts/apply_formation_mask.jl.
-τ_boundary  = 1e-4    # τ_ref above which the model is untrustworthy
-frac_thresh = 0.5     # flag pixel if > this fraction of its flux forms above τ_boundary
-τmid = 0.5 .* (τs_ref[1:end-1] .+ τs_ref[2:end])   # mid-layer τ_ref (length Natm-1)
-hi_layers = τmid .< τ_boundary
-_top_frac(cfunc) = vec(sum(view(cfunc, hi_layers, :), dims=1)) ./ max.(vec(sum(cfunc, dims=1)), eps())
+# boundary-contamination mask: flag pixels whose flux contribution has not decayed by
+# the top of the LTE model — its peak is pinned at/near the truncated ceiling, so
+# form_temp is boundary-biased. Ratio of top-slab contribution to the column peak:
+# ~0 for resolved lines, ~1 for truncated cores. The distribution is bimodal, so the
+# threshold is insensitive. Pure reduction over cont_func (= C·Δτ); no recomputation.
+r_thresh = 0.33   # flag if top-slab contribution exceeds this fraction of the column peak
+_ceiling_ratio(cfunc) = vec(cfunc[1, :]) ./ max.(vec(maximum(cfunc, dims=1)), eps())
 
 # [doc:chunked-start]
 # chunked computation parameters
@@ -139,8 +137,7 @@ let chunk_idx = Ref(0)
         HDF5.attributes(h5)["alpha4"] = star_props.α₄
         HDF5.attributes(h5)["integration_method"] = String(integration_method)
         HDF5.attributes(h5)["wavelength_frame"] = wav_label
-        HDF5.attributes(h5)["mask_tau_boundary"] = τ_boundary
-        HDF5.attributes(h5)["mask_frac_thresh"] = frac_thresh
+        HDF5.attributes(h5)["mask_r_thresh"] = r_thresh
 
         # include atmosphere data in the same output file
         g_atm = create_group(h5, "model_atmosphere")
@@ -160,9 +157,9 @@ let chunk_idx = Ref(0)
             g["flux"] = result.flux
             g["temp"] = result.form_temps
             g["cfunc"] = result.cont_func
-            tf = _top_frac(result.cont_func)
-            g["top_frac"] = tf
-            g["mask"] = UInt8.(tf .> frac_thresh)
+            r = _ceiling_ratio(result.cont_func)
+            g["ceiling_ratio"] = r
+            g["mask"] = UInt8.(r .> r_thresh)
         end
 
         FT.calc_formation_temp_chunked(star_props, linelist;
@@ -277,8 +274,7 @@ h5open(outfile, "r") do h5in
         HDF5.attributes(h5out)["alpha4"] = star_props.α₄
         HDF5.attributes(h5out)["integration_method"] = String(integration_method)
         HDF5.attributes(h5out)["wavelength_frame"] = wav_label
-        HDF5.attributes(h5out)["mask_tau_boundary"] = τ_boundary
-        HDF5.attributes(h5out)["mask_frac_thresh"] = frac_thresh
+        HDF5.attributes(h5out)["mask_r_thresh"] = r_thresh
 
         g_atm = create_group(h5out, "model_atmosphere")
         g_atm["zs"] = zs
@@ -292,9 +288,9 @@ h5open(outfile, "r") do h5in
         g_out["flux"] = all_flux
         g_out["temp"] = all_temps
         g_out["cfunc"] = all_cfunc
-        tf = _top_frac(all_cfunc)
-        g_out["top_frac"] = tf
-        g_out["mask"] = UInt8.(tf .> frac_thresh)
+        r = _ceiling_ratio(all_cfunc)
+        g_out["ceiling_ratio"] = r
+        g_out["mask"] = UInt8.(r .> r_thresh)
     end
 end
 # [doc:blend-end]

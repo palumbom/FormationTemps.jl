@@ -5,9 +5,11 @@ description = "Python dependencies for FormationTemps.jl"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "h5py>=3.11.0",
     "ipython>=9.9.0",
     "juliacall>=0.9.26",
     "juliapkg>=0.1.17",
     "matplotlib>=3.10.8",
     "numpy>=2.4.1",
+    "plotly>=5.24.0",
 ]
