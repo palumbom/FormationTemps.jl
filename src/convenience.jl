@@ -57,6 +57,11 @@ tiles using `Threads.@threads`. Launch Julia with multiple threads (e.g. `julia 
 to benefit. FFTW internal threading is disabled during the tile loop to avoid contention.
 See [Parallelization](parallelization.md) for details.
 
+Hydrogen (Balmer/Brackett) lines are included by default via Korg's dedicated Stark/MHD
+physics — they are not present in most VALD linelists. Pass `hydrogen_lines=false` to omit
+them, or `hydrogen_line_window_size_Å=…` to change the per-line window (default 150 Å).
+These are forwarded to [`compute_alpha!`](@ref).
+
 # Examples
 ```julia-repl
 star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=2100.0)
