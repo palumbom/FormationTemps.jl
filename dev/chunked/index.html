@@ -29,8 +29,7 @@ let chunk_idx = Ref(0)
         HDF5.attributes(h5)[&quot;alpha4&quot;] = star_props.α₄
         HDF5.attributes(h5)[&quot;integration_method&quot;] = String(integration_method)
         HDF5.attributes(h5)[&quot;wavelength_frame&quot;] = wav_label
-        HDF5.attributes(h5)[&quot;mask_tau_boundary&quot;] = τ_boundary
-        HDF5.attributes(h5)[&quot;mask_frac_thresh&quot;] = frac_thresh
+        HDF5.attributes(h5)[&quot;mask_r_thresh&quot;] = r_thresh
 
         # include atmosphere data in the same output file
         g_atm = create_group(h5, &quot;model_atmosphere&quot;)
@@ -50,9 +49,9 @@ let chunk_idx = Ref(0)
             g[&quot;flux&quot;] = result.flux
             g[&quot;temp&quot;] = result.form_temps
             g[&quot;cfunc&quot;] = result.cont_func
-            tf = _top_frac(result.cont_func)
-            g[&quot;top_frac&quot;] = tf
-            g[&quot;mask&quot;] = UInt8.(tf .&gt; frac_thresh)
+            r = _ceiling_ratio(result.cont_func)
+            g[&quot;ceiling_ratio&quot;] = r
+            g[&quot;mask&quot;] = UInt8.(r .&gt; r_thresh)
         end
 
         FT.calc_formation_temp_chunked(star_props, linelist;
@@ -166,8 +165,7 @@ h5open(outfile, &quot;r&quot;) do h5in
         HDF5.attributes(h5out)[&quot;alpha4&quot;] = star_props.α₄
         HDF5.attributes(h5out)[&quot;integration_method&quot;] = String(integration_method)
         HDF5.attributes(h5out)[&quot;wavelength_frame&quot;] = wav_label
-        HDF5.attributes(h5out)[&quot;mask_tau_boundary&quot;] = τ_boundary
-        HDF5.attributes(h5out)[&quot;mask_frac_thresh&quot;] = frac_thresh
+        HDF5.attributes(h5out)[&quot;mask_r_thresh&quot;] = r_thresh
 
         g_atm = create_group(h5out, &quot;model_atmosphere&quot;)
         g_atm[&quot;zs&quot;] = zs
@@ -181,8 +179,8 @@ h5open(outfile, &quot;r&quot;) do h5in
         g_out[&quot;flux&quot;] = all_flux
         g_out[&quot;temp&quot;] = all_temps
         g_out[&quot;cfunc&quot;] = all_cfunc
-        tf = _top_frac(all_cfunc)
-        g_out[&quot;top_frac&quot;] = tf
-        g_out[&quot;mask&quot;] = UInt8.(tf .&gt; frac_thresh)
+        r = _ceiling_ratio(all_cfunc)
+        g_out[&quot;ceiling_ratio&quot;] = r
+        g_out[&quot;mask&quot;] = UInt8.(r .&gt; r_thresh)
     end
-end</code></pre><h2 id="Complete-example"><a class="docs-heading-anchor" href="#Complete-example">Complete example</a><a id="Complete-example-1"></a><a class="docs-heading-anchor-permalink" href="#Complete-example" title="Permalink"></a></h2><p>The full production script combining all of the above is at <code>scripts/generate_temp_spectrum.jl</code>. It:</p><ol><li>Loads a large VALD linelist and converts to air wavelengths.</li><li>Streams chunked results to HDF5.</li><li>Reads the raw chunks back and stitches them.</li><li>Trims the result to the linelist extent and writes the final spliced output.</li></ol></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../convolutions/">« Broadening &amp; Convolutions</a><a class="docs-footer-nextpage" href="../parallelization/">Parallelization »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Thursday 16 July 2026 22:22">Thursday 16 July 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre><h2 id="Complete-example"><a class="docs-heading-anchor" href="#Complete-example">Complete example</a><a id="Complete-example-1"></a><a class="docs-heading-anchor-permalink" href="#Complete-example" title="Permalink"></a></h2><p>The full production script combining all of the above is at <code>scripts/generate_temp_spectrum.jl</code>. It:</p><ol><li>Loads a large VALD linelist and converts to air wavelengths.</li><li>Streams chunked results to HDF5.</li><li>Reads the raw chunks back and stitches them.</li><li>Trims the result to the linelist extent and writes the final spliced output.</li></ol></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../convolutions/">« Broadening &amp; Convolutions</a><a class="docs-footer-nextpage" href="../parallelization/">Parallelization »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Thursday 23 July 2026 20:00">Thursday 23 July 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
