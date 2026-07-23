@@ -23,7 +23,7 @@ def orient_cfunc(cfunc, n_wav, n_rows):
                      f"({n_rows}, {n_wav}) nor ({n_wav}, {n_rows})")
 
 
-def read_group(g, Ts):
+def read_group(g, Ts, tau_ref):
     # Read one chunk group into the dict shape build_1d_figure expects.
     wavs = g["wavs"][:].ravel()
     flux = g["flux"][:].ravel()
@@ -35,8 +35,23 @@ def read_group(g, Ts):
     cfunc = orient_cfunc(g["cfunc"][:], n_wav, n_rows)
     # mid-layer temperatures, matching plot_chunk_flux.jl
     t_mids = 0.5 * (Ts[:n_rows] + Ts[1:n_rows + 1])
+    # Reference optical-depth interval per layer. The stored cfunc is a per-interval
+    # INTEGRAL (cfunc_flux * Δτ); on the native, non-uniform MARCS grid Δτ varies from
+    # layer to layer, so plotting the integral directly imprints a horizontal, grid-driven
+    # "wrinkle". Dividing by Δτ_ref recovers the smooth contribution DENSITY (dF/dτ_ref)
+    # and removes the artifact — the physics (flux, formation temp) is unaffected.
+    dtau_ref = np.diff(tau_ref)                # length n_rows
     return dict(wavs=wavs, flux=flux, temp=temp, mask=mask,
-                line_centers=line_centers, cfunc=cfunc, t_mids=t_mids)
+                line_centers=line_centers, cfunc=cfunc, t_mids=t_mids, dtau_ref=dtau_ref)
+
+
+def read_tau_ref(f):
+    # Fetch the per-layer reference optical depth (τ_ref) from model_atmosphere. The
+    # dataset name carries a Unicode τ, so match defensively.
+    ma = f["model_atmosphere"]
+    key = next((k for k in ma.keys() if k.startswith("τ") or "tau" in k.lower()), None)
+    assert key is not None, "no τ_ref dataset in model_atmosphere"
+    return ma[key][:].ravel()
 
 
 def load_1d(path):
@@ -44,7 +59,7 @@ def load_1d(path):
     with h5py.File(path, "r") as f:
         assert "chunk_0001" in f, f"no 'chunk_0001' group in {path} (use --chunks?)"
         Ts = f["model_atmosphere"]["Ts"][:].ravel()
-        return read_group(f["chunk_0001"], Ts)
+        return read_group(f["chunk_0001"], Ts, read_tau_ref(f))
 
 
 def load_chunks(path):
@@ -60,6 +75,17 @@ def load_chunks(path):
                                flux=g["flux"][:].ravel(),
                                temp=g["temp"][:].ravel()))
     return chunks
+
+
+def load_stitched(path):
+    # Read the spliced/1D spectrum (wavs, flux, temp) to overlay on chunk pages. The 1D
+    # file stores the spliced spectrum in a single group ("chunk_0001"); fall back to
+    # top-level datasets if that group is absent.
+    with h5py.File(path, "r") as f:
+        g = f["chunk_0001"] if "chunk_0001" in f else f
+        return dict(wavs=g["wavs"][:].ravel(),
+                    flux=g["flux"][:].ravel(),
+                    temp=g["temp"][:].ravel())
 
 
 # --- transforms ----------------------------------------------------------
@@ -134,7 +160,7 @@ def line_marker_trace(line_centers, y_lo, y_hi):
                         visible="legendonly")
 
 
-def build_1d_figure(d, max_cols):
+def build_1d_figure(d, max_cols, stitched=None):
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
                         vertical_spacing=0.03, row_heights=[0.25, 0.25, 0.5],
                         subplot_titles=("", "", ""))
@@ -160,8 +186,28 @@ def build_1d_figure(d, max_cols):
                                name="Flagged (boundary)", legendgroup="flagged",
                                showlegend=False), row=2, col=1)
 
-    # panel 3: contribution-function heatmap, log-scaled like plot_chunk_flux.jl
+    # optional overlay: the stitched/spliced model, windowed to this chunk. One legend
+    # entry ("Stitched model") toggles both panels via the shared legendgroup; hidden by
+    # default (visible="legendonly") so it acts as a check box you enable when wanted.
+    if stitched is not None:
+        lo_w, hi_w = float(d["wavs"].min()), float(d["wavs"].max())
+        m = (stitched["wavs"] >= lo_w) & (stitched["wavs"] <= hi_w)
+        if m.any():
+            sw = stitched["wavs"][m]
+            fig.add_trace(go.Scattergl(x=sw, y=stitched["flux"][m], mode="lines",
+                                       line=dict(color="#2ca02c", width=1.0, dash="dot"),
+                                       name="Stitched model", legendgroup="stitched",
+                                       visible="legendonly"), row=1, col=1)
+            fig.add_trace(go.Scattergl(x=sw, y=stitched["temp"][m], mode="lines",
+                                       line=dict(color="#2ca02c", width=1.0, dash="dot"),
+                                       name="Stitched model", legendgroup="stitched",
+                                       showlegend=False, visible="legendonly"), row=2, col=1)
+
+    # panel 3: contribution-function heatmap, log-scaled like plot_chunk_flux.jl.
+    # Divide the per-interval integral by Δτ_ref → contribution density dF/dτ_ref, which is
+    # smooth in depth (removes the grid-driven horizontal wrinkle on the non-uniform grid).
     wavs_h, cfunc_h = block_max_decimate(d["wavs"], d["cfunc"], max_cols)
+    cfunc_h = cfunc_h / d["dtau_ref"][:, None]
     zmax = float(cfunc_h.max())
     floor = zmax * 1e-4                       # clip 4 decades below peak
     z = np.log10(np.clip(cfunc_h, floor, None))
@@ -170,7 +216,7 @@ def build_1d_figure(d, max_cols):
     tickvals = list(range(lo_exp, hi_exp + 1))
     fig.add_trace(go.Heatmap(x=wavs_h, y=d["t_mids"], z=z,
                              colorscale="Inferno",
-                             colorbar=dict(title=dict(text="Cont. Fn.<br>(log scale)"),
+                             colorbar=dict(title=dict(text="dF/dτ_ref<br>(log scale)"),
                                            len=0.5, y=0.0, yanchor="bottom",
                                            tickvals=tickvals,
                                            ticktext=[f"1e{t}" for t in tickvals]),
@@ -260,20 +306,21 @@ def write_index(outdir, entries):
         fh.write(html)
 
 
-def write_paged(path, outdir, lo, hi, max_cols):
+def write_paged(path, outdir, lo, hi, max_cols, stitched=None):
     # One HTML per chunk sharing a single plotly.min.js, plus an index pager.
     os.makedirs(outdir, exist_ok=True)
     entries = []
     with h5py.File(path, "r") as f:
         Ts = f["model_atmosphere"]["Ts"][:].ravel()
+        tau_ref = read_tau_ref(f)
         names = sorted(n for n in f.keys() if n.startswith("chunk_"))
         assert names, f"no 'chunk_*' groups in {path}"
         for name in names:
-            d = window_1d(read_group(f[name], Ts), lo, hi)
+            d = window_1d(read_group(f[name], Ts, tau_ref), lo, hi)
             if d is None:                      # chunk lies fully outside the range
                 continue
             fname = name + ".html"
-            fig = build_1d_figure(d, max_cols)
+            fig = build_1d_figure(d, max_cols, stitched)
             # "directory" makes every page reference one shared plotly.min.js
             fig.write_html(os.path.join(outdir, fname),
                            include_plotlyjs="directory", full_html=True)
@@ -300,6 +347,9 @@ def main():
     p.add_argument("--wav-hi", type=float, default=None, help="max wavelength [Angstrom]")
     p.add_argument("--max-cols", type=int, default=3000,
                    help="heatmap column cap after block-max decimation")
+    p.add_argument("--stitched", default=None,
+                   help="path to the spliced/1D HDF5; overlays the stitched model on each "
+                        "--paged chunk page as a legend-toggleable trace (off by default)")
     p.add_argument("--open", action="store_true", help="open the result in a browser")
     args = p.parse_args()
 
@@ -307,7 +357,8 @@ def main():
 
     if args.paged:
         outdir = args.out or os.path.splitext(args.input)[0] + "_pages"
-        index = write_paged(args.input, outdir, args.wav_lo, args.wav_hi, args.max_cols)
+        stitched = load_stitched(args.stitched) if args.stitched else None
+        index = write_paged(args.input, outdir, args.wav_lo, args.wav_hi, args.max_cols, stitched)
         print(f"wrote {index}", flush=True)
         if args.open:
             webbrowser.open("file://" + os.path.abspath(index))

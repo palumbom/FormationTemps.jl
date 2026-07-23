@@ -49,12 +49,15 @@ get_nd(atm::Atmosphere) = Array(atm.nd)
 """
     _extract_korg_fields(atm_korg)
 
-Resample a Korg model atmosphere onto a uniform log-τ grid, then extract thermodynamic
-fields into a `NamedTuple`. Shared by both `AtmosphereCPU` and `AtmosphereGPU` constructors.
+Extract thermodynamic fields from a Korg model atmosphere into a `NamedTuple`, on the
+atmosphere's native layer grid. Shared by both `AtmosphereCPU` and `AtmosphereGPU` constructors.
+
+The native (non-uniform log-τ) MARCS grid is used as-is: FormationTemps' τ integrators
+consume the actual per-interval spacing (matching Korg, which likewise integrates on the
+native grid). To optionally resample/upsample onto a uniform log-τ grid, call
+[`_resample_log_tau`](@ref) on `atm_korg` before constructing the atmosphere.
 """
 function _extract_korg_fields(atm_korg)
-    atm_korg = _resample_log_tau(atm_korg)
-
     τs = try
         Korg.get_tau_refs(atm_korg)
     catch
@@ -119,11 +122,10 @@ fields allocated on the GPU. Pass `T=Float32` for single-precision GPU arrays.
 Korg always returns Float64 data; the constructor converts all fields (CPU and GPU)
 to type `T`.
 
-The input atmosphere is first resampled onto a uniform log-τ grid to remove
-non-uniform layer spacing introduced by `Korg.interpolate_marcs`. If the model
-does not supply `tau_ref` (e.g., some non-MARCS grids), resampling is skipped and
-`atm.τs` is set to an empty vector — the Bézier τ integrator is used automatically
-downstream in that case.
+The atmosphere's native (non-uniform log-τ) layer grid is used as-is; the τ integrators
+consume the actual per-interval spacing (matching Korg). If the model does not supply
+`tau_ref` (e.g., some non-MARCS grids), `atm.τs` is set to an empty vector and the Bézier
+τ integrator is used automatically downstream in that case.
 """
 function AtmosphereGPU(atm_korg; T::Type{<:AF}=Float64)
     f = _extract_korg_fields(atm_korg)
@@ -178,11 +180,10 @@ end
 
 Construct an `AtmosphereCPU` with thermodynamic and velocity fields on the CPU.
 
-The input atmosphere is first resampled onto a uniform log-τ grid to remove
-non-uniform layer spacing introduced by `Korg.interpolate_marcs`. If the model
-does not supply `tau_ref` (e.g., some non-MARCS grids), resampling is skipped and
-`atm.τs` is set to an empty vector — the Bézier τ integrator is used automatically
-downstream in that case.
+The atmosphere's native (non-uniform log-τ) layer grid is used as-is; the τ integrators
+consume the actual per-interval spacing (matching Korg). If the model does not supply
+`tau_ref` (e.g., some non-MARCS grids), `atm.τs` is set to an empty vector and the Bézier
+τ integrator is used automatically downstream in that case.
 """
 function AtmosphereCPU(atm_korg)
     f = _extract_korg_fields(atm_korg)
