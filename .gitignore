@@ -6,6 +6,7 @@ docs/src/index.md
 .julia_env/
 .claude/*
 .CondaPkg
+*__pycache__*
 
 *.pdf
 *.csv
