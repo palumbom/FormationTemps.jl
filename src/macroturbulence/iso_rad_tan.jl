@@ -18,9 +18,8 @@ function gray_iso_rt_macro_kernel(vs::AA{T,1}, ζ_rt::T) where T<:AF
     t1 = 2.0 .* exp.(-1.0 .* (vs ./ ζ_rt).^2.0) ./ (sqrt(π) .* ζ_rt)
     t2 = -2.0 .* abs.(vs) .* erfc.(abs.(vs) ./ ζ_rt) ./ ζ_rt.^2.0
     kernel = t1 .+ t2
-    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
-    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
-    # normalization underflow guard".
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if the kernel
+    # underflows. Apply the ifelse(iszero(s), one(T), s) guard used in microturbulence.jl.
     return kernel ./ sum(kernel)
 end
 
@@ -139,9 +138,8 @@ function convolve_iso_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                                                   cmem.pad_left)
 
     # normalize the kernel
-    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
-    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
-    # normalization underflow guard".
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if the kernel
+    # underflows. Apply the ifelse(iszero(s), one(T), s) guard used in microturbulence.jl.
     normval = CUDA.sum(kernel_row)
     kernel_row ./= normval
 

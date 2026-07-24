@@ -304,14 +304,13 @@ rather than from the linelist, so `Korg.line_absorption!` never emits them.
 Notes:
 - `ξ = 0`: microturbulence is applied downstream via FFT convolution on `αs` (as for the metal
   lines, which are passed `vmic=0`); passing a nonzero ξ here would double-count it.
-- Not added to the 5000 Å reference opacity `α_ref`. This matches Korg, which builds `α5`
-  from the continuum plus a 5000 Å linelist and adds hydrogen lines only to `α`.
-- `use_MHD=nothing` (the default) selects the MHD occupation-probability formalism only for
-  `wls[end] < 13000 Å`. **This deliberately differs from Korg**, whose
-  `use_MHD_for_hydrogen_lines` defaults to `true` at all wavelengths and merely warns above
-  13000 Å that `false` is recommended. We follow that recommendation automatically, so an
-  FormationTemps-vs-Korg comparison in the near-IR (e.g. the APOGEE H band) will disagree
-  unless you pass `use_MHD=true` explicitly to reproduce Korg's default.
+- Not added to the 5000 Å reference opacity `α_ref`, matching Korg, which builds `α5` from
+  the continuum plus a 5000 Å linelist and adds hydrogen lines only to `α`.
+- `use_MHD=nothing` (the default) enables the MHD occupation-probability formalism only for
+  `wls[end] < 13000 Å`. This differs from Korg, whose `use_MHD_for_hydrogen_lines` defaults
+  to `true` at all wavelengths and only warns above 13000 Å that `false` is recommended; we
+  apply that recommendation automatically. Pass `use_MHD=true` to reproduce Korg's default
+  when comparing in the near-IR.
 """
 function _add_hydrogen_line_absorption!(αs, wls::Korg.Wavelengths, Ts, nₑs, nH_I, nHe_I,
                                         partition_funcs, window_size_Å::Float64;

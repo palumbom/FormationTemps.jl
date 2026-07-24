@@ -29,47 +29,38 @@ Returns a `FormTempResult` with fields:
 !!! warning "Formation temperatures can be pinned to the top of the atmosphere"
     Where over half the flux contribution comes from the topmost layer interval, the 50%
     crossing is set by where the MARCS grid was truncated rather than by where the line
-    forms, and the reported value is a lower limit. This happens in deep line cores — most
-    notably the Balmer lines, which are now included by default and form well above the
-    photosphere. [`form_temps_from_cfunc`](@ref) counts and warns about such wavelengths.
+    forms, so the value is a lower limit. This happens in deep line cores, notably the
+    Balmer lines, which are included by default and form well above the photosphere.
+    [`form_temps_from_cfunc`](@ref) counts and warns about such wavelengths.
 
 # Disk-integration method
 
-`method` selects how the stellar disk is integrated (see the "Integration Methods" guide):
-- `:disk` (default) — explicit numerical disk integration over `Nϕ` latitude bins. The
-  reference; self-consistent limb darkening; supports inclination `istar` and
-  differential rotation (`α₂`, `α₄`) via `StellarProps`.
-- `:quadrature` — ring-by-ring Gauss–Legendre μ-quadrature (`Nμ` μ nodes, `N_az`
-  azimuth samples for the per-ring Doppler kernel). Reproduces the `:disk` physics
-  (inclination + differential rotation) at a fraction of the cost; CPU and GPU.
-- `:hirano` — analytic Hirano et al. (2011) rotation + macroturbulence convolution
-  using the quadratic limb-darkening coefficients `u1`, `u2`. Fastest, but approximate
-  (parametric limb darkening; no center-to-limb line-profile variation).
+`method` selects how the stellar disk is integrated; see the "Integration Methods" guide for
+accuracy and speed trade-offs.
+- `:disk` (default) — explicit integration over `Nϕ` latitude bins. The reference:
+  self-consistent limb darkening, inclination `istar`, differential rotation (`α₂`, `α₄`).
+- `:quadrature` — ring-by-ring Gauss–Legendre μ-quadrature (`Nμ` nodes, `N_az` azimuth
+  samples for the per-ring Doppler kernel). Same physics, much faster.
+- `:hirano` — analytic Hirano et al. (2011) rotation + macroturbulence convolution using
+  quadratic limb-darkening coefficients `u1`, `u2`. Fastest, but assumes a parametric limb
+  darkening law and no center-to-limb line-profile variation.
 
-The boolean `convolve` keyword is a **deprecated alias**: `convolve=false` ⇒ `:disk`,
-`convolve=true` ⇒ `:hirano`. Prefer `method`.
+`convolve` is a deprecated alias: `false` ⇒ `:disk`, `true` ⇒ `:hirano`.
 
-Set `use_gpu=true` to use the GPU implementation when available (`:quadrature` and
-`:disk` and `:hirano` all support GPU). Set `showprogress=false` to suppress the
-progress bar during disk integration.
+All three methods support `use_gpu=true`. `showprogress=false` suppresses the disk
+integration progress bar.
 
-Pass `gpu_precision=Float32` to run GPU computations at single precision. Absorption
-coefficients are always computed at Float64 (a Korg requirement) and converted to the target
-precision before GPU upload. This roughly halves GPU memory usage and can improve throughput
-on consumer GPUs. The default is `Float64`. (Note: `:quadrature` at Float32 is
-noticeably less accurate than at Float64 — prefer Float64 there.)
+`gpu_precision=Float32` runs GPU computations at single precision, roughly halving GPU
+memory use. Absorption coefficients are always Float64 (a Korg requirement) and converted
+before upload. Prefer the `Float64` default with `:quadrature`, which is noticeably less
+accurate at Float32.
 
-The CPU disk-integration path (`method=:disk, use_gpu=false`) is parallelized across
-tiles using `Threads.@threads`. Launch Julia with multiple threads (e.g. `julia -t auto`)
-to benefit. FFTW internal threading is disabled during the tile loop to avoid contention.
-See [Parallelization](parallelization.md) for details.
+The CPU `:disk` path is parallelized across tiles with `Threads.@threads`; launch Julia with
+multiple threads (`julia -t auto`) to benefit. See [Parallelization](parallelization.md).
 
-Hydrogen (Balmer/Brackett) lines are included by default via Korg's dedicated Stark/MHD
-physics — they are not present in most VALD linelists. Pass `hydrogen_lines=false` to omit
-them, `hydrogen_line_window_size_Å=…` to change the per-line window (default 150 Å), or
-`use_MHD=true` to force the MHD occupation-probability formalism above 13000 Å (which is
-what Korg does by default; we disable it there on Korg's own recommendation). These are
-forwarded to [`compute_alpha!`](@ref).
+Hydrogen (Balmer/Brackett) lines are included by default, since Korg computes them from
+dedicated Stark/MHD physics rather than from the linelist. `hydrogen_lines=false`,
+`hydrogen_line_window_size_Å` and `use_MHD` are forwarded to [`compute_alpha!`](@ref).
 
 # Examples
 ```julia-repl
@@ -495,9 +486,8 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             @cuda threads=ts_kc blocks=bs_kc compute_rt_macro_dft_layout_2d!(
                 kbuf_mac, gpu_mem.λs, v_losals_gpu, Int32(i0_mac), G(star.ζ),
                 Int32(Nλ), Int32(L_mac))
-            # TODO(zero-sum-guard): unguarded normalization; can produce NaN if
-            # kernel underflows. See microturbulence.jl pattern +
-            # .claude/CLAUDE.md "Kernel normalization underflow guard".
+            # TODO(zero-sum-guard): unguarded normalization; can produce NaN if the kernel
+            # underflows. Apply the ifelse(iszero(s), one(T), s) guard used in microturbulence.jl.
             kbuf_mac ./= sum(kbuf_mac, dims=2)
             CUDA.unsafe_free!(v_losals_gpu)
 

@@ -147,10 +147,9 @@ wavelength axis: rotation displaces the microturbulent kernel by up to `vsini`, 
 radial-tangential macro kernel reaches ~3ζ, and the microturbulent Gaussian reaches ~3ξ.
 `ξ` may be a scalar or a per-layer vector.
 
-Deliberately the sum, not the max: the tiling path folds rotation into the micro kernel
-and applies macro separately, while the quadrature path pushes micro, macro and the ring
-Doppler kernel through a single padding geometry. The sum bounds all of them, and
-over-padding by a few hundred samples is cheap next to `Nλ`.
+The sum rather than the max, so that a single padding geometry bounds all three kernels
+whether they are applied together or separately. Over-padding by a few hundred samples is
+cheap next to `Nλ`.
 """
 conv_kernel_vmax(vsini::Real, ζ::Real, ξ::Real) =
     abs(float(vsini)) + 3 * abs(float(ζ)) + 3 * abs(float(ξ))
@@ -164,17 +163,16 @@ conv_kernel_vmax(vsini::Real, ζ::Real, ξ::AbstractVector) =
 Minimum `Npad` for which a padded linear convolution with kernel half-support `vmax`
 (m/s) does not wrap. `λ0` and `Δλ` are the grid center and spacing (Å).
 
-`_conv_mem_geometry` splits `Npad` evenly between the two edges, so a kernel
-reaching `h` pixels requires `Npad ≥ 2h`. When `pad_left < h` the valid-region extraction
-pulls samples that have wrapped from the opposite edge: a silent, edge-localized error
-that yields no NaN and no warning. The failure is easy to reach at fine sampling — a
-kernel half-width of `vmax/Δv` pixels grows as `Δλ` shrinks, so a `vsini` that is safe at
-`Δλ = 0.01 Å` can wrap at `Δλ = 0.002 Å`.
+`_conv_mem_geometry` splits `Npad` evenly between the two edges, so a kernel reaching `h`
+pixels requires `Npad ≥ 2h`. With `pad_left < h` the valid-region extraction instead pulls
+samples that have wrapped from the opposite edge, producing no NaN and no warning. The
+half-width `vmax/Δv` grows as `Δλ` shrinks, so a `vsini` that is safe at `Δλ = 0.01 Å` can
+wrap at `Δλ = 0.002 Å`. Severity depends on how different the window's two ends are, since
+the padding is edge-replicated: negligible when both sit on the same continuum, tens of
+percent when one carries a line.
 
-`minpad` floors the result at the historical fixed padding so this only ever *adds*
-padding relative to previous releases; results are unchanged (to roundoff) wherever the
-old padding was already sufficient, since padding beyond the kernel support only appends
-zeros to the kernel.
+`minpad` sets a floor, so padding is only ever added; results are unchanged wherever the
+floor already sufficed, since extra padding only appends zeros to the kernel.
 """
 function conv_npad_for_velocity(λ0::Real, Δλ::Real, vmax::Real;
                                 margin::Int=64, minpad::Int=512)

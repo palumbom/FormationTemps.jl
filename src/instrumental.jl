@@ -165,9 +165,8 @@ function convolve_instrument_gauss(xs::AA{T,1}, ys::AA{T,1}; new_res::T=1.17e5,
 
     # sample and normalize the kernel
     kernel = g.(xs, λc)
-    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if kernel
-    # underflows. See microturbulence.jl pattern + .claude/CLAUDE.md "Kernel
-    # normalization underflow guard".
+    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if the kernel
+    # underflows. Apply the ifelse(iszero(s), one(T), s) guard used in microturbulence.jl.
     kernel ./= sum(kernel)
 
     # convolve it

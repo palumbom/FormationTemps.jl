@@ -1,19 +1,13 @@
 let
-# Regression tests for the ring Doppler kernel used by method=:quadrature.
+# Regression tests for the ring Doppler kernel used by method=:quadrature: the
+# bin-integrated line-of-sight velocity distribution of a constant-μ ring.
 #
-# The kernel is the bin-integrated line-of-sight velocity distribution of a constant-μ
-# ring. Two properties are load-bearing and are asserted here:
-#
-#   1. It is exactly symmetric in velocity. The exact distribution is symmetric because
-#      az → π-az flips x_sky while leaving the latitude (hence f(ϕ)) fixed. A kernel that
-#      is only approximately symmetric imprints a spurious radial-velocity shift on every
-#      synthesized spectrum. A prior implementation deposited samples into their nearest
-#      bin over an arc count that could be odd, breaking the discrete pairing and leaving
-#      up to ~1.4 m/s — switching on and off discontinuously with vsini as the parity
-#      flipped.
-#   2. Its bin weights are area-exact, not sampled estimates. Solid-body rotation is done
-#      analytically (arcsine CDF); differential rotation by arc-overlap deposition. The
-#      earlier nearest-bin deposit carried a ~1-3% worst-bin shape error.
+# Two properties are asserted:
+#   1. Exact symmetry in velocity. The true distribution is symmetric because az → π-az
+#      flips x_sky while leaving the latitude (hence f(ϕ)) fixed. An only-approximately
+#      symmetric kernel imprints a spurious radial-velocity shift on every spectrum.
+#   2. Area-exact bin weights rather than sampled estimates — analytic (arcsine CDF) for
+#      solid-body rotation, arc-overlap deposition for differential rotation.
 using FormationTemps; FT = FormationTemps
 using Statistics
 using Test

@@ -10,8 +10,7 @@ values. The GPU implementation (`convolve_wavelength_axis_gpu`) builds the same
 kernel on device, so CPU and GPU agree to floating-point precision.
 
 The convolution padding is derived from the `v_los`/`v_mic` actually passed, so a large
-Doppler shift cannot wrap the padded linear convolution. It never falls below the
-historical fixed padding, so results are unchanged wherever that was already sufficient.
+Doppler shift cannot wrap the padded linear convolution.
 """
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::T, v_mic::T) where {T<:AF}
     Δλ = median(diff(xs))

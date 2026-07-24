@@ -46,20 +46,15 @@ quantity) with interval-center temperatures.
 `cfunc_dt` is `(Natm-1, Nλ)` (per-interval flux contribution); `Ts` is `(Natm,)`
 node temperatures. CPU; GPU callers pass host copies.
 
-Two degenerate outcomes are reported rather than returned silently:
+Two degenerate outcomes are warned about rather than returned silently:
 
-- **Non-positive total contribution.** A column whose contribution does not sum to a
-  positive number has no median to find; its formation temperature is `NaN`. This is
-  reachable — the microturbulence underflow guard deliberately zeros a row when the Doppler
-  shift moves the kernel out of the window (see the "Kernel normalization underflow guard"
-  note), which can zero a whole column downstream.
-- **Boundary-pinned columns.** If the crossing falls in the first interval, over half the
-  flux contribution comes from the topmost layer pair and the returned value is set by
-  where the model atmosphere was truncated, not by where the line actually forms. This is
-  expected in deep line cores (the contribution function rises toward the top boundary as
-  `E₂(τ)` truncates) and is now common by default, since hydrogen lines are included and
-  Balmer cores form far above the MARCS photosphere. Treat those wavelengths as lower
-  limits. `warn_boundary=false` silences the warning.
+- **Non-positive column total.** No median exists, so the formation temperature is `NaN`.
+  Reachable when an upstream microturbulence kernel underflows and zeros a column.
+- **Boundary-pinned columns.** A crossing inside the first interval means over half the
+  flux contribution comes from the topmost layer pair, so the value is set by where the
+  model atmosphere was truncated rather than by where the line forms; read those
+  wavelengths as lower limits. Expected in deep line cores, Balmer especially.
+  `warn_boundary=false` silences the warning.
 """
 function form_temps_from_cfunc(cfunc_dt::AA{T,2}, Ts::AA{T,1};
                                warn_boundary::Bool=true) where T<:AF

@@ -1,18 +1,15 @@
 let
 # Tests for kernel-support-derived convolution padding.
 #
-# All broadening in FormationTemps is applied as a *padded linear* convolution with edge
-# replication: the signal is padded to an FFT-friendly length L, convolved, and the "valid"
-# region extracted from `pad_left+1 : pad_left+Nλ`. That is only equivalent to a true linear
-# convolution while the kernel's half-support fits inside `pad_left`. Beyond that, the
-# extraction window pulls samples that have wrapped around from the opposite edge — a
-# silent, edge-localized error with no NaN and no warning to catch it.
+# All broadening is applied as a padded linear convolution with edge replication: the signal
+# is padded to an FFT-friendly length L, convolved, and the valid region extracted from
+# pad_left+1 : pad_left+Nλ. That equals a true linear convolution only while the kernel's
+# half-support fits inside pad_left; beyond it the extraction pulls samples wrapped from the
+# opposite edge, with no NaN and no warning.
 #
-# The padding used to be a hardcoded 512 samples (pad_left ≈ 256). The half-support of the
-# rotational kernel is `vsini/Δv` pixels, which grows as Δλ shrinks, so a vsini that is safe
-# at Δλ=0.01 Å wraps at Δλ=0.002 Å. `conv_npad_for_velocity` now derives the padding from
-# the actual kernel support instead, floored at the historical 512 so results are unchanged
-# wherever that was already sufficient.
+# The rotational kernel's half-support is vsini/Δv pixels, which grows as Δλ shrinks, so a
+# vsini that is safe at Δλ=0.01 Å can wrap at Δλ=0.002 Å. conv_npad_for_velocity derives the
+# padding from the kernel support, with a floor so padding is only ever added.
 using FormationTemps; FT = FormationTemps
 using Korg
 using Statistics

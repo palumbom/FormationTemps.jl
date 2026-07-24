@@ -36,13 +36,12 @@ All three run on the GPU with `use_gpu=true`.
 - **`:quadrature`** is the one to reach for when `:disk` is too slow: it reproduces the
   `:disk` result — including inclination and differential rotation (set via
   [`StellarProps`](@ref)) — to within ~1 K, while running roughly 5–10× faster on CPU and
-  up to ~100× on GPU. Use Float64 (`:quadrature` at `gpu_precision=Float32` is noticeably
-  less accurate). It is exact in structure, not an approximation: because radiative
-  transfer here is wavelength-local, a Doppler shift of the input opacity shifts the
-  emergent intensity identically, so rotation can be applied as a per-ring convolution
-  *after* the transfer solve — which is what lets RT be solved once per μ node instead of
-  once per surface tile. The residual difference from `:disk` is the pixel-grid
-  discretization of the ring kernel, nothing more.
+  up to ~100× on GPU. Use Float64; at `gpu_precision=Float32` it is noticeably less
+  accurate. The reformulation itself is exact rather than approximate: radiative transfer
+  is wavelength-local, so a Doppler shift of the input opacity shifts the emergent
+  intensity identically, and rotation can therefore be applied as a per-ring convolution
+  after the transfer solve. That is what lets RT be solved once per μ node instead of once
+  per surface tile. What remains is the pixel-grid discretization of the ring kernel.
 
 - **`:hirano`** is fastest but assumes a parametric limb-darkening law, so its error
   grows with `vsini` — a physical model difference, not a numerical one:
@@ -64,13 +63,16 @@ then selects which latitude bands — rotating at different rates — are visibl
 
 ## Accuracy notes
 
-- **`Nμ` defaults to 32, and that matters.** On the solar test case with `vsini=0` (where
-  the rotational kernel is bypassed, so this isolates the μ-quadrature), worst-pixel
-  `form_temps` differences from `method=:disk` are 0.96 K at `Nμ=8`, 0.67 K at `Nμ=16`,
-  **0.04 K at `Nμ=32`** and 0.015 K at `Nμ=64` — against a reference whose own
-  `Nϕ=64→128` error is 0.017 K. `Nμ=32` is 16× more accurate than `Nμ=16` for 2× the cost,
-  which is why it is the default; drop to `Nμ=16` only if you need the speed and can accept
-  ~0.7 K. This is the most effective accuracy knob for slow rotators.
+- **`Nμ` is the most effective accuracy knob**, and defaults to 32. Worst-pixel `form_temps`
+  differences from `method=:disk` on a non-rotating solar case, which isolates the
+  μ-quadrature:
+
+  | `Nμ` | 8 | 16 | 32 (default) | 64 |
+  |---|---|---|---|---|
+  | worst pixel | 0.96 K | 0.67 K | 0.04 K | 0.015 K |
+
+  Cost scales linearly with `Nμ`. Drop to 16 only if you need the speed and can accept
+  ~0.7 K.
 
 - **Formation temperatures in deep line cores are lower limits.** Where more than half the
   flux contribution comes from the topmost layer interval, the 50% crossing is set by the
@@ -84,4 +86,3 @@ then selects which latitude bands — rotating at different rates — are visibl
   sampled grid does not silently wrap. If the ring Doppler kernel is wider than the
   synthesis window itself, `:quadrature` warns that the broadening is truncated — widen the
   window with `minλ`/`maxλ`.
-```

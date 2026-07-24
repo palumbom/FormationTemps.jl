@@ -1,47 +1,33 @@
-# Ring-by-ring μ-quadrature disk integration.
+# Ring-by-ring μ-quadrature disk integration: a CPU/GPU alternative to the explicit
+# tile-based disk integration (method=:disk, which remains the reference). The disk integral
+# is evaluated as a Gauss-Legendre quadrature in μ, so the radiative transfer — which depends
+# on a surface element only through μ — is solved once per μ node rather than once per tile,
+# and rotation enters as a per-ring azimuthal Doppler convolution.
 #
-# A CPU supplement to the explicit tile-based disk integration
-# (`_calc_formation_temp_cpu`, method=:disk). Instead of looping ~10^4 surface
-# tiles, it evaluates the disk integral as a Gauss–Legendre quadrature in μ: the
-# expensive radiative transfer (which depends on the tile only through μ) is solved
-# once per μ node, and rotation enters as a per-ring azimuthal Doppler convolution.
-# Supports inclination and differential rotation. The explicit tiling remains the reference.
-#
-# Why applying rotation *after* the RT solve is exact, not an approximation: radiative
-# transfer here is wavelength-local (no scattering couples wavelengths), so a rigid
-# Doppler shift of the input opacity, α(λ) → α(λ(1-v/c)), shifts the emergent intensity
-# I(λ) identically. The azimuthal average over a ring is therefore a convolution of the
-# ring's zero-Doppler spectrum with the ring's LOS-velocity distribution, and RT need only
-# be solved once per μ node instead of once per surface tile. (Unlike the tiling path,
-# which shifts α but evaluates the Planck function at the unshifted λ, this also shifts
-# B(T,λ) — marginally more correct, and a ~1e-4 effect that cancels in flux/continuum.)
-#
-# Convolution order is irrelevant: the macro and ring-Doppler kernels are both linear, so
-# macro-then-Doppler is identical to Doppler-then-macro.
+# Applying rotation after the RT solve is exact rather than an approximation: the transfer is
+# wavelength-local (nothing couples wavelengths), so Doppler-shifting the input opacity
+# α(λ) → α(λ(1-v/c)) shifts the emergent intensity identically. The azimuthal average over a
+# ring is then a convolution of the ring's zero-Doppler spectrum with the ring's LOS velocity
+# distribution. The macro and ring-Doppler kernels are both linear, so their order is free.
 
-# Weight below which grid truncation is not worth reporting (pure roundoff on the
-# closed-form path, where the kernel sums to 1 analytically).
+# Truncated weight below this fraction is roundoff, not a real window problem.
 const _RING_TRUNC_WARN = 1e-6
 
 """
     _ring_kernel_rigid!(K, v_max, Δv, i0, Nλ) -> dropped
 
-Exact bin-integrated ring Doppler kernel for **solid-body** rotation, written into `K`.
-Returns the weight that fell outside the grid.
+Exact bin-integrated ring Doppler kernel for solid-body rotation, written into `K`.
+Returns the weight falling outside the grid.
 
-For `α₂ = α₄ = 0` the LOS velocity is `v(az) = -v_max·cos(az)` with `v_max = vsini·r_k`,
-independent of inclination. With azimuth uniform on `[0, 2π)`, `u = v/v_max` therefore
-follows the **arcsine distribution** on `[-1, 1]`, whose CDF is `G(u) = asin(u)/π + 1/2`.
-Bin `n` spans `(n - i0 ± 1/2)·Δv`, so its exact weight is the CDF difference across its
-edges — the area-exact bin-integrated kernel evaluated analytically instead of estimated
-by sampling.
+For `α₂ = α₄ = 0` the LOS velocity is `v(az) = -v_max·cos(az)`, `v_max = vsini·r_k`,
+independent of inclination. With azimuth uniform on `[0, 2π)`, `u = v/v_max` follows the
+arcsine distribution on `[-1, 1]`, with CDF `G(u) = asin(u)/π + 1/2`. Bin `n` spans
+`(n - i0 ± 1/2)·Δv`, so its weight is the CDF difference across its edges.
 
-This is strictly better than any sampled deposit: no shape error (vs ~1-3% worst-bin for
-nearest-bin sampling), exactly symmetric because `asin` is odd (so no spurious
-radial-velocity shift is representable), and ~40× cheaper because the cost is `O(support)`
-arcsin evaluations rather than `O(32·span_px)` trig evaluations. The integrable
-`1/√(1-u²)` singularity at `±v_max` is handled correctly by construction, since the CDF is
-finite there.
+Evaluating the CDF analytically rather than sampling makes the bin weights exact, keeps the
+kernel exactly symmetric (`asin` is odd, so no radial-velocity shift is representable), and
+costs `O(support)` arcsin evaluations. The integrable `1/√(1-u²)` singularity at `±v_max`
+needs no special handling, since the CDF is finite there.
 """
 function _ring_kernel_rigid!(K::AA{T,1}, v_max::T, Δv::T, i0::Int, Nλ::Int) where T<:AF
     G(u) = asin(clamp(u, -one(T), one(T))) / T(π) + T(0.5)
@@ -64,24 +50,20 @@ Bin-integrated ring Doppler kernel for **differential** rotation, written into `
 Returns the weight that fell outside the grid.
 
 With `f(ϕ) ≠ 1` the LOS velocity `v(az) = -vsini·f(sinϕ(az))·r_k·cos(az)` (latitude
-`sinϕ = r_k·sin(az)·cos iₛ + μ_k·sin iₛ`) is no longer a pure cosine and its pushforward
-has no closed form, so azimuth is sampled. Each arc `[az_k, az_{k+1}]` carries weight
-`1/N_fine` and maps to the velocity interval spanned by its endpoints; that weight is
-distributed across the bins the interval **overlaps**.
+`sinϕ = r_k·sin(az)·cos iₛ + μ_k·sin iₛ`) is not a pure cosine and its pushforward has no
+closed form, so azimuth is sampled. Each arc `[az_k, az_{k+1}]` carries weight `1/N_fine`
+and maps to the velocity interval spanned by its endpoints; that weight is distributed
+across the bins that interval overlaps.
 
-This is *not* the linear/CIC deposit — that treats each sample as a point and splits it
-between neighbouring bins by linear weights, which converges to the true kernel convolved
-with a spurious ~`Δv` triangle and over-broadens narrow kernels. Integrating each arc's
-actual velocity extent is exact bin integration instead, second-order in the arc width
-rather than first-order: measured worst-bin error ~0.00% against a converged reference,
-versus ~0.5-2.2% for a nearest-bin deposit at the same `N_fine`.
+This is not a linear/CIC deposit, which treats each sample as a point and splits it between
+neighbouring bins by linear weights — that converges to the true kernel convolved with a
+spurious ~`Δv` triangle and over-broadens narrow kernels. Integrating each arc's actual
+velocity extent is exact bin integration, second-order in the arc width rather than first.
 
-`N_fine` is forced **even**. The `v ↔ -v` symmetry of the exact distribution comes from
+`N_fine` is forced even. The `v ↔ -v` symmetry of the exact distribution comes from
 `az → π - az`, which flips `x_sky` while leaving the latitude (hence `f`) fixed; on the
 discrete arc partition that map closes only for even `N_fine`. An odd count leaves `K`
-slightly asymmetric — a spurious radial-velocity shift of order `Δv/N_fine`, measured at
-up to ~1.4 m/s at default settings, switching on and off discontinuously with `vsini` as
-the parity flips.
+slightly asymmetric, i.e. a spurious radial-velocity shift of order `Δv/N_fine`.
 """
 function _ring_kernel_diffrot!(K::AA{T,1}, μ_k::T, r_k::T, vsini::T, iₛ::T,
                                α₂::T, α₄::T, Δv::T, i0::Int, Nλ::Int,
@@ -137,59 +119,23 @@ radius `r_k = √(1-μ_k²)`, as a length-`Nλ` kernel centered at zero velocity
 (index `i0 = Nλ÷2+1`) on the wavelength grid `λs`. Convolving a ring's spectrum with this
 kernel performs the azimuthal average of Doppler-shifted spectra.
 
-The kernel is the area-exact **bin-integrated** LOS velocity distribution, computed two
-ways depending on the rotation law:
+The kernel is the area-exact bin-integrated LOS velocity distribution, computed two ways
+depending on the rotation law:
 
-- `α₂ = α₄ = 0` (solid body, the default): analytically, via the arcsine CDF —
-  [`_ring_kernel_rigid!`](@ref). Exact, exactly symmetric, and inclination-independent.
-- otherwise: by arc-overlap deposition over an even number of azimuthal arcs —
+- `α₂ = α₄ = 0` (solid body, the default): analytically via the arcsine CDF,
+  [`_ring_kernel_rigid!`](@ref). Exact, symmetric, and inclination-independent.
+- otherwise: by arc-overlap deposition over an even number of azimuthal arcs,
   [`_ring_kernel_diffrot!`](@ref). `N_az` floors the arc count and only matters here.
 
-Both are exactly symmetric in velocity, so the kernel carries no spurious radial-velocity
-shift. Weight Doppler-shifted outside the wavelength window is discarded and the kernel
-renormalized, which narrows the broadening; that is reported (see `_RING_TRUNC_WARN`)
-rather than left silent, since it means the synthesis window is too narrow for `vsini`.
+Both are symmetric in velocity, so the kernel carries no spurious radial-velocity shift.
+Weight Doppler-shifted outside the wavelength window is discarded and the kernel
+renormalized, which narrows the broadening; that is warned about rather than left silent,
+since it means the synthesis window is too narrow for `vsini`.
 
-NOTE (residual accuracy floor — measured, and *not* caused by the bin weights): making
-the weights area-exact bought little end to end. Against `method=:disk` on the solar test
-case, worst-pixel `form_temps` differences went 2.24→2.10 K at vsini=2 km/s, 1.34→1.03 K
-at 5 km/s and 1.19→1.14 K at 15 km/s. The reason is that a nearest-bin deposit moves
-weight between *adjacent* bins, conserving the total and roughly the local mean, so
-convolving a smooth spectrum against it cancels most of the per-bin error — per-bin kernel
-accuracy is the wrong figure of merit for this pipeline.
-
-What remains splits in two:
-
-- **μ-quadrature.** At vsini=0 the ring kernel is bypassed entirely, isolating this term:
-  worst-pixel differences are 0.96 K at `Nμ=8`, 0.67 K at `Nμ=16`, 0.04 K at `Nμ=32` and
-  0.015 K at `Nμ=64` (the tiling reference's own Nϕ=64→128 error is 0.017 K). This is why
-  the default is `Nμ=32` — 16× better than `Nμ=16` for 2× the cost.
-- **Pixel-grid representation, at low vsini.** The kernel's *positions* are quantized to
-  `Δv`, and at vsini~2 km/s the whole kernel is only ~7 px wide. This floor is ~2 K, does
-  not improve with `Nμ` (non-monotonic: 3.33/2.10/2.25/1.89 K for Nμ=8/16/32/64), and is
-  the difference the original implementation notes described. The tiling path avoids it
-  because it folds each tile's Doppler shift into the microturbulent Gaussian, whose centre
-  is evaluated analytically and so is sub-pixel.
-
-TODO(bessel-transfer-function): the pixel-grid floor above is removable at neutral cost,
-and far more cheaply than by the per-azimuth FFT-phase-shift scheme once assumed necessary.
-For solid-body rotation the characteristic function of the arcsine distribution is a single
-Bessel function, so the exact transfer function on the padded FFT's frequency grid is
-
-    H(f) = J₀(2π · f · v_max / Δv)          # f in cycles per sample, from rfftfreq(L)
-
-Multiplying the signal's FFT by that skips the real-space kernel altogether: no pixel
-representation, so sub-pixel Doppler structure is exact, and `H` is real-valued so it
-cannot carry an RV shift by construction. Measured against a sub-pixel-exact reference
-(Gauss–Legendre azimuthal average of an analytic line profile, 2e5 nodes): max error
-2.8e-7 vs 4.1e-3 at vsini=1 km/s (14600×), 1.0e-6 vs 5.9e-3 at 2 km/s (5800×), 2.1e-5 vs
-5.8e-4 at 15 km/s (27×); wall-clock 351 µs vs 335 µs per ring, i.e. neutral.
-
-Deferred deliberately: it replaces "build kernel → `_padded_convolve`" with a
-transfer-function multiply, so it needs a `_padded_convolve` variant on the CPU side and,
-on the GPU side, `_ring_kernel_ft_gpu` would fill `kernel_row_ft_1d` directly and skip the
-roll/ifftshift entirely (simpler than today, but it is the DFT-layout bookkeeping that has
-caused aliasing bugs before). Differential rotation would still need the sampled path.
+Accuracy is limited by the kernel living on the wavelength pixel grid: the bin weights are
+exact, but their positions are quantized to `Δv`, which matters most at low `vsini` where
+the kernel spans only a few pixels. See the "Integration Methods" guide for the resulting
+tolerances against `method=:disk`.
 """
 function _ring_doppler_kernel(μ_k::T, vsini::T, iₛ::T, α₂::T, α₄::T,
                               λs::AA{T,1}, N_az::Int) where T<:AF
@@ -210,6 +156,12 @@ function _ring_doppler_kernel(μ_k::T, vsini::T, iₛ::T, α₂::T, α₄::T,
         return K
     end
 
+    # TODO(bessel-transfer-function): the solid-body branch can skip the real-space kernel
+    # entirely. The characteristic function of the arcsine distribution is a single Bessel
+    # function, so H(f) = J₀(2π·f·v_max/Δv) on the padded FFT frequency grid is the exact
+    # transfer function — no pixel quantization, and real-valued so it cannot carry an RV
+    # shift. Needs a transfer-function variant of _padded_convolve plus a GPU path that
+    # fills kernel_row_ft_1d directly; differential rotation still needs the sampled path.
     dropped = if iszero(α₂) & iszero(α₄)
         _ring_kernel_rigid!(K, v_max, Δv, i0, Nλ)
     else
@@ -281,10 +233,8 @@ function _calc_formation_temp_quadrature_cpu(star::StellarProps, linelist; Δλ:
     μ_grid, μ_weights = Korg.RadiativeTransfer.generate_mu_grid(Nμ)
 
     # --- ring-by-ring accumulation ---
-    # Size the convolution padding from the actual kernel support. The ring Doppler kernel
-    # reaches vsini and the macro kernel ~3ζ, both in velocity; on a fine wavelength grid
-    # those are far more than the historical fixed 512-sample padding, and an under-padded
-    # linear convolution wraps silently.
+    # Size the convolution padding from the kernel support: the ring Doppler kernel reaches
+    # vsini and the macro kernel ~3ζ, and an under-padded linear convolution wraps silently.
     λ0_pad = λs_korg[Nλ ÷ 2 + 1]
     Npad = conv_npad_for_velocity(λ0_pad, Δλ,
                                   conv_kernel_vmax(star.vsini, star.ζ, star.ξ))
@@ -293,17 +243,11 @@ function _calc_formation_temp_quadrature_cpu(star::StellarProps, linelist; Δλ:
     v0 = copy(atm_cpu.v_los)                 # zero-rotation base velocity (length Natm)
     iₛ = deg2rad(T(90) - star.istar)
 
-    # TODO(hoist-micro): the microturbulent convolution below is μ-independent — v0 is the
-    # zero-rotation base velocity and v_mic is fixed — so it recomputes the same
-    # (Natm × Nλ) result on every one of the Nμ nodes: 2·Nμ = 32 full FFT convolutions
-    # where 2 suffice. Sketch: allocate αs_broad / αs_cont_broad once, run the two
-    # _convolve_micro_inplace! calls immediately before the loop, and inside the loop feed
-    # those buffers straight to _calc_tau_cpu!. ws.αs_broad / ws.αs_cont_broad are already
-    # the right shape, so the only real change is moving two lines out of the loop and
-    # confirming nothing else in the loop writes them. The GPU path has the same redundancy;
-    # there it is what cmem.signal_cached exists for (currently unused on this path).
-    # Not done here because it is a pure-performance change and belongs in its own commit
-    # with a before/after benchmark rather than riding along with correctness fixes.
+    # TODO(hoist-micro): the microturbulent convolution in the loop below is μ-independent
+    # (v0 and v_mic are both fixed), so it recomputes the same (Natm × Nλ) result on every
+    # μ node — 2·Nμ FFT convolutions where 2 would do. Hoisting the two
+    # _convolve_micro_inplace! calls above the loop and feeding ws.αs_broad /
+    # ws.αs_cont_broad straight to _calc_tau_cpu! would fix it.
 
     cfunc_dt_flux = zeros(T, Natm - 1, Nλ)
     cfunc_dt_flux_cont = zeros(T, Natm - 1, Nλ)
@@ -445,10 +389,8 @@ function _calc_formation_temp_quadrature_gpu(star::StellarProps, linelist; Δλ:
 
         # per-μ depth-resolved intensity cfunc_dt at zero Doppler (micro→τ→intensity);
         # calc_intensity_quantities returns independent copies.
-        # TODO(hoist-micro): the micro convolution inside these calls is μ-independent and
-        # is redone every node — see the sketch in _calc_formation_temp_quadrature_cpu.
-        # On this path the fix is cmem.signal_cached (set it after the first node), which
-        # already exists and is currently unused here.
+        # TODO(hoist-micro): the micro convolution inside these calls is μ-independent and is
+        # redone every node; cmem.signal_cached exists to skip it but is unused here.
         G_k  = calc_intensity_quantities(αs,      atm_gpu, gpu_mem,      cmem,      μ_k, gpu_mem.v_los_zeros,      atm_gpu.v_mic).cfunc_dt
         G_kc = calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem_cont, cmem_cont, μ_k, gpu_mem_cont.v_los_zeros, atm_gpu.v_mic).cfunc_dt
 

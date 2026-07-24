@@ -20,12 +20,10 @@ linelist    = [Korg.Line(wl, log_gf, species, E_lower, gamma_rad, gamma_stark, g
 
 A_X = Korg.asplund_2009_solar_abundances
 
-# Resample the atmosphere to a uniform log-τ grid and give BOTH sides the same grid.
-# Before 2.1 the Atmosphere constructors resampled internally, so `AtmosphereGPU(atm_korg)`
-# happened to land on the same grid Korg was handed here. They no longer do (the τ
-# integrators consume the native per-interval spacing directly), so the resampled model has
-# to be passed in explicitly — otherwise this comparison silently pits FT on the native
-# non-uniform grid against Korg on a uniform one.
+# Resample to a uniform log-τ grid and give BOTH sides the same grid. The Atmosphere
+# constructors do not resample (the τ integrators consume the native per-interval spacing
+# directly), so the resampled model must be passed in explicitly — otherwise this compares FT
+# on the native non-uniform grid against Korg on a uniform one.
 atm_korg      = Korg.interpolate_marcs(5777, 4.44, A_X)
 atm_resampled = FT._resample_log_tau(atm_korg)
 atm_gpu       = FT.AtmosphereGPU(atm_resampled)
