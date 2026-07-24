@@ -11,7 +11,7 @@ end
     calc_formation_temp(star, linelist; use_gpu=GPU_DEFAULT, Δλ=0.01,
                         gpu_precision=Float64, method=:disk,
                         minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN,
-                        Nϕ=128, Nμ=16, N_az=256,
+                        Nϕ=128, Nμ=32, N_az=256,
                         showprogress=true, kwargs...)
 
 Compute flux formation temperatures, normalized flux, and flux contribution function for a given `star` and `linelist`.
@@ -25,6 +25,13 @@ Returns a `FormTempResult` with fields:
 - `form_temps`: formation temperature defined at 50% of the cumulative flux contribution.
 - `cont_func`: contribution function, shape `(Natm - 1, Nλ)`.
 - `atmosphere`: atmosphere structure used for the calculation.
+
+!!! warning "Formation temperatures can be pinned to the top of the atmosphere"
+    Where over half the flux contribution comes from the topmost layer interval, the 50%
+    crossing is set by where the MARCS grid was truncated rather than by where the line
+    forms, and the reported value is a lower limit. This happens in deep line cores — most
+    notably the Balmer lines, which are now included by default and form well above the
+    photosphere. [`form_temps_from_cfunc`](@ref) counts and warns about such wavelengths.
 
 # Disk-integration method
 
@@ -59,8 +66,10 @@ See [Parallelization](parallelization.md) for details.
 
 Hydrogen (Balmer/Brackett) lines are included by default via Korg's dedicated Stark/MHD
 physics — they are not present in most VALD linelists. Pass `hydrogen_lines=false` to omit
-them, or `hydrogen_line_window_size_Å=…` to change the per-line window (default 150 Å).
-These are forwarded to [`compute_alpha!`](@ref).
+them, `hydrogen_line_window_size_Å=…` to change the per-line window (default 150 Å), or
+`use_MHD=true` to force the MHD occupation-probability formalism above 13000 Å (which is
+what Korg does by default; we disable it there on Korg's own recommendation). These are
+forwarded to [`compute_alpha!`](@ref).
 
 # Examples
 ```julia-repl
@@ -85,13 +94,22 @@ function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEF
                              method::Union{Nothing,Symbol}=nothing, convolve::Bool=false,
                              minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                              u1::T=NaN, u2::T=NaN, Nϕ::Int=128,
+                             Nμ::Int=32, N_az::Int=256,
                              kwargs...) where T<:AF
     # resolve the disk-integration method. `method` (preferred) selects among
     # :disk (explicit tiling), :hirano (analytic convolution), :quadrature
     # (ring-by-ring μ-quadrature). `convolve` is the deprecated boolean alias.
     resolved = if method === nothing
+        # only warn for convolve=true: convolve=false is indistinguishable from the default
+        convolve && @warn "`convolve` is deprecated; pass `method=:hirano` instead of " *
+                          "`convolve=true` (or `method=:disk` instead of " *
+                          "`convolve=false`)." maxlog=1
         convolve ? :hirano : :disk
     else
+        # both given: `method` wins, but say so rather than dropping `convolve` silently
+        convolve && @warn "`convolve=true` ignored because `method=:$method` was also " *
+                          "given; `method` takes precedence. Drop `convolve` " *
+                          "(deprecated)." maxlog=1
         method
     end
     @assert resolved in (:disk, :hirano, :quadrature) "method must be :disk, :hirano, or :quadrature (got :$resolved)"
@@ -100,10 +118,12 @@ function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEF
         if use_gpu
             return _calc_formation_temp_quadrature_gpu(star, linelist; Δλ=Δλ,
                                                        gpu_precision=gpu_precision,
-                                                       minλ, maxλ, buffer, kwargs...)
+                                                       minλ, maxλ, buffer,
+                                                       Nμ=Nμ, N_az=N_az, kwargs...)
         else
             return _calc_formation_temp_quadrature_cpu(star, linelist; Δλ=Δλ,
-                                                       minλ, maxλ, buffer, kwargs...)
+                                                       minλ, maxλ, buffer,
+                                                       Nμ=Nμ, N_az=N_az, kwargs...)
         end
     end
 
@@ -180,8 +200,12 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
 
         @assert !isnan(u1)
         @assert !isnan(u2)
-        cfunc_dt_flux = convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2)
-        cfunc_dt_flux_cont = convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2)
+        # pad for the Hirano kernel's own support (~vsini + 3ζ) rather than the fixed
+        # standalone default, which a fast rotator on a fine grid would overflow
+        Npad_h = conv_npad_for_velocity(λs_korg[Nλ ÷ 2 + 1], Δλ,
+                                        conv_kernel_vmax(star.vsini, star.ζ, star.ξ))
+        cfunc_dt_flux = convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux, star.vsini, star.ζ, u1, u2; Npad=Npad_h)
+        cfunc_dt_flux_cont = convolve_hirano_rotmacro(λs_korg, cfunc_dt_flux_cont, star.vsini, star.ζ, u1, u2; Npad=Npad_h)
     else # numerical disk integration
         if any(map(!isnan, (u1, u2)))
             @warn "Prescribed limb darkening coefficients are not used in integration method!"
@@ -201,8 +225,12 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
         prev_fftw_threads = FFTW.get_num_threads()
         FFTW.set_num_threads(1)
 
-        # allocate per-thread workspaces with pre-computed FFT plans
-        workspaces = [CPUTileWorkspace(T, Natm, Nλ) for _ in 1:Threads.maxthreadid()]
+        # allocate per-thread workspaces with pre-computed FFT plans. Size the padding
+        # from the actual kernel support so the Doppler-shifted micro kernel and the
+        # macro kernel can never wrap the padded linear convolution.
+        Npad = conv_npad_for_velocity(λs_korg[Nλ ÷ 2 + 1], Δλ,
+                                      conv_kernel_vmax(star.vsini, star.ζ, star.ξ))
+        workspaces = [CPUTileWorkspace(T, Natm, Nλ; Npad=Npad) for _ in 1:Threads.maxthreadid()]
 
         # threaded tile loop (in-place convolutions eliminate per-tile allocations)
         Threads.@threads :static for i in eachindex(μs_cpu)
@@ -296,7 +324,11 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     gpu_mem = _make_gpu_mem()
 
     Natm = size(αs, 1)
-    Npad = 512
+
+    # size the convolution padding from the actual kernel support (Doppler-shifted micro
+    # kernel + macro kernel) so the padded linear convolutions can never wrap
+    Npad = conv_npad_for_velocity(λs_korg[Nλ ÷ 2 + 1], Δλ,
+                                  conv_kernel_vmax(star.vsini, star.ζ, star.ξ))
 
     # populate atmosphere v_mic from stellar params
     star.ξ isa AbstractVector && @assert length(star.ξ) == Natm "v_micro vector length ($(length(star.ξ))) must match Natm ($Natm)"

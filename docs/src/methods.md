@@ -27,14 +27,22 @@ All three run on the GPU with `use_gpu=true`.
 
 ## Choosing a method
 
-- **`:quadrature`** is the recommended default: it reproduces the `:disk` result —
-  including inclination and differential rotation (set via [`StellarProps`](@ref)) — to
-  within ~1 K, while running roughly 5–10× faster on CPU and up to ~100× on GPU.
-  Use Float64 (`:quadrature` at `gpu_precision=Float32` is noticeably less accurate).
+- **`:disk`** is the default and the reference. Use it for the definitive answer, or at
+  very low `vsini`, where `:quadrature`'s pixel-grid Doppler kernel is least accurate
+  (worst-pixel ~2 K near `vsini ≈ 2 km/s`; mean ≪ 0.1 K). That low-`vsini` floor comes from
+  representing a only-a-few-pixels-wide Doppler kernel on the wavelength grid; it does not
+  improve with `Nμ`.
 
-- **`:disk`** is the reference. Use it for the definitive answer, or at very low
-  `vsini`, where `:quadrature`'s pixel-grid Doppler kernel is least accurate
-  (worst-pixel ~1–2 K near `vsini ≈ 2 km/s`; mean ≪ 0.1 K).
+- **`:quadrature`** is the one to reach for when `:disk` is too slow: it reproduces the
+  `:disk` result — including inclination and differential rotation (set via
+  [`StellarProps`](@ref)) — to within ~1 K, while running roughly 5–10× faster on CPU and
+  up to ~100× on GPU. Use Float64 (`:quadrature` at `gpu_precision=Float32` is noticeably
+  less accurate). It is exact in structure, not an approximation: because radiative
+  transfer here is wavelength-local, a Doppler shift of the input opacity shifts the
+  emergent intensity identically, so rotation can be applied as a per-ring convolution
+  *after* the transfer solve — which is what lets RT be solved once per μ node instead of
+  once per surface tile. The residual difference from `:disk` is the pixel-grid
+  discretization of the ring kernel, nothing more.
 
 - **`:hirano`** is fastest but assumes a parametric limb-darkening law, so its error
   grows with `vsini` — a physical model difference, not a numerical one:
@@ -48,4 +56,32 @@ Wall-clock time for each method (CPU and GPU) as a function of the wavelength-gr
 Rotation is set by `vsini` (the projected equatorial velocity), `istar`, and the
 differential-rotation coefficients `α₂`, `α₄` — see [`StellarProps`](@ref). `:hirano`
 supports rigid rotation only.
+
+For rigid rotation `istar` has no physical effect (the projected velocity field carries no
+inclination dependence); it matters only once `α₂`/`α₄` are nonzero, because inclination
+then selects which latitude bands — rotating at different rates — are visible. See
+[`StellarProps`](@ref) for the one numerical caveat at finite `Nϕ`.
+
+## Accuracy notes
+
+- **`Nμ` defaults to 32, and that matters.** On the solar test case with `vsini=0` (where
+  the rotational kernel is bypassed, so this isolates the μ-quadrature), worst-pixel
+  `form_temps` differences from `method=:disk` are 0.96 K at `Nμ=8`, 0.67 K at `Nμ=16`,
+  **0.04 K at `Nμ=32`** and 0.015 K at `Nμ=64` — against a reference whose own
+  `Nϕ=64→128` error is 0.017 K. `Nμ=32` is 16× more accurate than `Nμ=16` for 2× the cost,
+  which is why it is the default; drop to `Nμ=16` only if you need the speed and can accept
+  ~0.7 K. This is the most effective accuracy knob for slow rotators.
+
+- **Formation temperatures in deep line cores are lower limits.** Where more than half the
+  flux contribution comes from the topmost layer interval, the 50% crossing is set by the
+  top of the MARCS grid rather than by the line's actual formation depth.
+  `form_temps_from_cfunc` counts and warns about affected wavelengths. Balmer cores are the
+  common case, and hydrogen lines are on by default.
+
+- **Convolution padding is sized from the kernel support.** The rotational, macroturbulent
+  and microturbulent kernels are applied as padded linear convolutions; the padding is
+  derived from `vsini`, `ζ` and `ξ` together with `Δλ`, so a fast rotator on a finely
+  sampled grid does not silently wrap. If the ring Doppler kernel is wider than the
+  synthesis window itself, `:quadrature` warns that the broadening is truncated — widen the
+  window with `minλ`/`maxλ`.
 ```

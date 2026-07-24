@@ -12,6 +12,12 @@ Arguments:
 - `A_X::AbstractVector{<:Real}`: Elemental abundances on the usual astronomical scale.
 - `partition_funcs=Korg.default_partition_funcs`: Partition function table for chemical equilibrium.
 - `ne_warn_thresh=0.1`: Relative warning threshold for electron density updates.
+- `hydrogen_lines=true`: Include hydrogen (Balmer/Brackett) lines, which Korg computes from
+  dedicated Stark/MHD physics rather than from the linelist.
+- `hydrogen_line_window_size_Å=150.0`: Per-line hydrogen window (matches Korg's default).
+- `use_MHD=nothing`: MHD occupation-probability formalism for the hydrogen lines. `nothing`
+  enables it only below 13000 Å; pass `true` to reproduce Korg's default at all wavelengths.
+  See [`_add_hydrogen_line_absorption!`](@ref).
 
 Returns:
 - `nothing`: `αs` is filled in-place.
@@ -26,14 +32,16 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist,
                         ne_warn_thresh=0.1, ne_warn_min=1e-4,
                         line_buffer_Å::Float64=10.0,
                         hydrogen_lines::Bool=true,
-                        hydrogen_line_window_size_Å::Float64=150.0) where T<:AF
+                        hydrogen_line_window_size_Å::Float64=150.0,
+                        use_MHD::Union{Nothing,Bool}=nothing) where T<:AF
     compute_alpha!(αs, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ,
                    A_X; α_ref_out=α_ref_out, ref_wl_cm=atm.reference_wavelength,
                    vmic_ref_cms=vmic_ref_cms,
                    partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh,
                    ne_warn_min=ne_warn_min, line_buffer_Å=line_buffer_Å,
                    hydrogen_lines=hydrogen_lines,
-                   hydrogen_line_window_size_Å=hydrogen_line_window_size_Å)
+                   hydrogen_line_window_size_Å=hydrogen_line_window_size_Å,
+                   use_MHD=use_MHD)
     return nothing
 end
 
@@ -52,6 +60,9 @@ Arguments:
 - `A_X::AbstractVector{<:Real}`: Elemental abundances on the usual astronomical scale.
 - `partition_funcs=Korg.default_partition_funcs`: Partition function table for chemical equilibrium.
 - `ne_warn_thresh=0.1`: Relative warning threshold for electron density updates.
+- `hydrogen_lines=true`, `hydrogen_line_window_size_Å=150.0`, `use_MHD=nothing`: hydrogen
+  line treatment; see the single-output method above. Hydrogen opacity is added to `αs`
+  only, never to `αs_cont`, so Balmer lines appear as features against the true continuum.
 
 Returns:
 - `nothing`: `αs` and `αs_cont` are filled in-place.
@@ -64,7 +75,8 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
                         ne_warn_min=1e-4,
                         line_buffer_Å::Float64=10.0,
                         hydrogen_lines::Bool=true,
-                        hydrogen_line_window_size_Å::Float64=150.0)
+                        hydrogen_line_window_size_Å::Float64=150.0,
+                        use_MHD::Union{Nothing,Bool}=nothing)
     # deal with abundances
     abs_abundances = @. 10^(A_X - 12) # n(X) / n_tot
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
@@ -137,7 +149,7 @@ function compute_alpha!(αs, wls::Korg.Wavelengths, linelist, zs, Ts, nds, nes, 
         _add_hydrogen_line_absorption!(αs, wls, Ts, nₑs,
                                        [nd[_HI_SPECIES] for nd in n_dicts],
                                        [nd[_HeI_SPECIES] for nd in n_dicts],
-                                       partition_funcs, hydrogen_line_window_size_Å)
+                                       partition_funcs, hydrogen_line_window_size_Å; use_MHD=use_MHD)
     end
 
     # mirror Korg synthesize.jl lines 253-265: add line opacity at the reference wavelength.
@@ -162,14 +174,16 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, atm, A_X
                         partition_funcs=Korg.default_partition_funcs, ne_warn_thresh=0.1,
                         ne_warn_min=1e-4, line_buffer_Å::Float64=10.0,
                         hydrogen_lines::Bool=true,
-                        hydrogen_line_window_size_Å::Float64=150.0)
+                        hydrogen_line_window_size_Å::Float64=150.0,
+                        use_MHD::Union{Nothing,Bool}=nothing)
     compute_alpha!(αs, αs_cont, wls, linelist, atm.zs, atm.Ts, atm.nd, atm.nₑ,
                    A_X; α_ref_out=α_ref_out, ref_wl_cm=atm.reference_wavelength,
                    vmic_ref_cms=vmic_ref_cms,
                    partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh,
                    ne_warn_min=ne_warn_min, line_buffer_Å=line_buffer_Å,
                    hydrogen_lines=hydrogen_lines,
-                   hydrogen_line_window_size_Å=hydrogen_line_window_size_Å)
+                   hydrogen_line_window_size_Å=hydrogen_line_window_size_Å,
+                   use_MHD=use_MHD)
     return nothing
 end
 
@@ -180,7 +194,8 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
                         ne_warn_min=1e-4,
                         line_buffer_Å::Float64=10.0,
                         hydrogen_lines::Bool=true,
-                        hydrogen_line_window_size_Å::Float64=150.0)
+                        hydrogen_line_window_size_Å::Float64=150.0,
+                        use_MHD::Union{Nothing,Bool}=nothing)
     # deal with abundances
     abs_abundances = @. 10^(A_X - 12) # n(X) / n_tot
     abs_abundances ./= sum(abs_abundances) #normalize so that sum(n(X)/n_tot) = 1
@@ -255,7 +270,7 @@ function compute_alpha!(αs, αs_cont, wls::Korg.Wavelengths, linelist, zs, Ts, 
         _add_hydrogen_line_absorption!(αs, wls, Ts, nₑs,
                                        [nd[_HI_SPECIES] for nd in n_dicts],
                                        [nd[_HeI_SPECIES] for nd in n_dicts],
-                                       partition_funcs, hydrogen_line_window_size_Å)
+                                       partition_funcs, hydrogen_line_window_size_Å; use_MHD=use_MHD)
     end
 
     # mirror Korg synthesize.jl lines 253-265: add line opacity at the reference wavelength.
@@ -279,23 +294,31 @@ const _HI_SPECIES = Korg.Species("H I")
 const _HeI_SPECIES = Korg.Species("He I")
 
 """
-    _add_hydrogen_line_absorption!(αs, wls, Ts, nₑs, nH_I, nHe_I, partition_funcs, window_size_Å)
+    _add_hydrogen_line_absorption!(αs, wls, Ts, nₑs, nH_I, nHe_I, partition_funcs,
+                                   window_size_Å; use_MHD=nothing)
 
 Add hydrogen (Balmer/Brackett) line opacity to `αs` in-place, one atmosphere layer per row,
-mirroring `Korg.synthesize` (`synthesize.jl:284-294`). Korg computes hydrogen lines from
-dedicated Stark/MHD physics rather than from the linelist, so `Korg.line_absorption!` never
-emits them.
+mirroring `Korg.synthesize`. Korg computes hydrogen lines from dedicated Stark/MHD physics
+rather than from the linelist, so `Korg.line_absorption!` never emits them.
 
 Notes:
 - `ξ = 0`: microturbulence is applied downstream via FFT convolution on `αs` (as for the metal
   lines, which are passed `vmic=0`); passing a nonzero ξ here would double-count it.
-- `use_MHD` follows Korg's default (`wls[end] < 13000 Å`).
-- Not added to the 5000 Å reference opacity `α_ref` — matches Korg (`synthesize.jl:255-274`).
+- Not added to the 5000 Å reference opacity `α_ref`. This matches Korg, which builds `α5`
+  from the continuum plus a 5000 Å linelist and adds hydrogen lines only to `α`.
+- `use_MHD=nothing` (the default) selects the MHD occupation-probability formalism only for
+  `wls[end] < 13000 Å`. **This deliberately differs from Korg**, whose
+  `use_MHD_for_hydrogen_lines` defaults to `true` at all wavelengths and merely warns above
+  13000 Å that `false` is recommended. We follow that recommendation automatically, so an
+  FormationTemps-vs-Korg comparison in the near-IR (e.g. the APOGEE H band) will disagree
+  unless you pass `use_MHD=true` explicitly to reproduce Korg's default.
 """
 function _add_hydrogen_line_absorption!(αs, wls::Korg.Wavelengths, Ts, nₑs, nH_I, nHe_I,
-                                        partition_funcs, window_size_Å::Float64)
+                                        partition_funcs, window_size_Å::Float64;
+                                        use_MHD::Union{Nothing,Bool}=nothing)
     window_cm = window_size_Å * ANGSTROM_TO_CM
-    use_MHD = wls[end] < 13000 * ANGSTROM_TO_CM   # wls in cm
+    # see the note above: not Korg's default, but Korg's own recommendation past 13000 Å
+    use_MHD = isnothing(use_MHD) ? (wls[end] < 13000 * ANGSTROM_TO_CM) : use_MHD  # wls in cm
     H_I_pf = partition_funcs[_HI_SPECIES]
     Threads.@threads for i in eachindex(Ts)
         Korg.hydrogen_line_absorption!(view(αs, i, :), wls, Ts[i], nₑs[i],

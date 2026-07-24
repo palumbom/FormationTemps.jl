@@ -187,7 +187,8 @@ function _compute_alpha_cached!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist, 
                                 cutoff_threshold=3e-4,
                                 threaded::Bool=true,
                                 hydrogen_lines::Bool=true,
-                                hydrogen_line_window_size_Å::Float64=150.0) where {T<:AF}
+                                hydrogen_line_window_size_Å::Float64=150.0,
+                                use_MHD::Union{Nothing,Bool}=nothing) where {T<:AF}
     N = length(Ts)
     N == 0 && return nothing
 
@@ -224,7 +225,7 @@ function _compute_alpha_cached!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist, 
     if hydrogen_lines
         _add_hydrogen_line_absorption!(αs, wls, Ts, ne_view,
                                        nds_by_spec[_HI_SPECIES], nds_by_spec[_HeI_SPECIES],
-                                       partition_funcs, hydrogen_line_window_size_Å)
+                                       partition_funcs, hydrogen_line_window_size_Å; use_MHD=use_MHD)
     end
 
     # Persist solved n_e profile for warm-starting the next column.
@@ -250,14 +251,16 @@ function compute_alpha!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist,
                         threaded::Bool=true,
                         refresh_abundances::Bool=false,
                         hydrogen_lines::Bool=true,
-                        hydrogen_line_window_size_Å::Float64=150.0) where {T<:AF}
+                        hydrogen_line_window_size_Å::Float64=150.0,
+                        use_MHD::Union{Nothing,Bool}=nothing) where {T<:AF}
     refresh_abundances && set_abundances!(cache, A_X)
     _compute_alpha_cached!(αs, wls, linelist, atm.Ts, atm.nd, atm.nₑ, cache;
                            partition_funcs=partition_funcs,
                            ne_warn_thresh=ne_warn_thresh,
                            cutoff_threshold=cutoff_threshold, threaded=threaded,
                            hydrogen_lines=hydrogen_lines,
-                           hydrogen_line_window_size_Å=hydrogen_line_window_size_Å)
+                           hydrogen_line_window_size_Å=hydrogen_line_window_size_Å,
+                           use_MHD=use_MHD)
     return nothing
 end
 
@@ -270,14 +273,16 @@ function compute_alpha!(αs::AA{T, 2}, wls::Korg.Wavelengths, linelist,
                         threaded::Bool=true,
                         refresh_abundances::Bool=false,
                         hydrogen_lines::Bool=true,
-                        hydrogen_line_window_size_Å::Float64=150.0) where {T<:AF}
+                        hydrogen_line_window_size_Å::Float64=150.0,
+                        use_MHD::Union{Nothing,Bool}=nothing) where {T<:AF}
     refresh_abundances && set_abundances!(cache, A_X)
     _compute_alpha_cached!(αs, wls, linelist, Ts, nds, nes, cache;
                            partition_funcs=partition_funcs,
                            ne_warn_thresh=ne_warn_thresh,
                            cutoff_threshold=cutoff_threshold, threaded=threaded,
                            hydrogen_lines=hydrogen_lines,
-                           hydrogen_line_window_size_Å=hydrogen_line_window_size_Å)
+                           hydrogen_line_window_size_Å=hydrogen_line_window_size_Å,
+                           use_MHD=use_MHD)
     return nothing
 end
 
@@ -289,14 +294,16 @@ function compute_alpha!(αs::AA{T, 2}, αs_cont::AA{T, 2}, wls::Korg.Wavelengths
                         threaded::Bool=true,
                         refresh_abundances::Bool=false,
                         hydrogen_lines::Bool=true,
-                        hydrogen_line_window_size_Å::Float64=150.0) where {T<:AF}
+                        hydrogen_line_window_size_Å::Float64=150.0,
+                        use_MHD::Union{Nothing,Bool}=nothing) where {T<:AF}
     compute_alpha!(αs, wls, linelist, atm, A_X, cache;
                    partition_funcs=partition_funcs,
                    ne_warn_thresh=ne_warn_thresh,
                    cutoff_threshold=cutoff_threshold,
                    threaded=threaded, refresh_abundances=refresh_abundances,
                    hydrogen_lines=hydrogen_lines,
-                   hydrogen_line_window_size_Å=hydrogen_line_window_size_Å)
+                   hydrogen_line_window_size_Å=hydrogen_line_window_size_Å,
+                   use_MHD=use_MHD)
     _fill_continuum_from_cache!(αs_cont, cache, wls)
     return nothing
 end
@@ -308,13 +315,15 @@ function compute_alpha!(αs::AA{T, 2}, αs_cont::AA{T, 2}, wls::Korg.Wavelengths
                         ne_warn_thresh=0.1, cutoff_threshold=3e-4,
                         threaded::Bool=true, refresh_abundances::Bool=false,
                         hydrogen_lines::Bool=true,
-                        hydrogen_line_window_size_Å::Float64=150.0) where {T<:AF}
+                        hydrogen_line_window_size_Å::Float64=150.0,
+                        use_MHD::Union{Nothing,Bool}=nothing) where {T<:AF}
     compute_alpha!(αs, wls, linelist, zs, Ts, nds, nes, A_X, cache;
                    partition_funcs=partition_funcs, ne_warn_thresh=ne_warn_thresh,
                    cutoff_threshold=cutoff_threshold, threaded=threaded,
                    refresh_abundances=refresh_abundances,
                    hydrogen_lines=hydrogen_lines,
-                   hydrogen_line_window_size_Å=hydrogen_line_window_size_Å)
+                   hydrogen_line_window_size_Å=hydrogen_line_window_size_Å,
+                   use_MHD=use_MHD)
     _fill_continuum_from_cache!(αs_cont, cache, wls)
     return nothing
 end

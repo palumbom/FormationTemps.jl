@@ -1,7 +1,12 @@
 let
 # Validates the ring-by-ring μ-quadrature disk integration (method=:quadrature)
 # against the explicit tile-based disk integration (method=:disk), which is the
-# reference/ground truth. CPU-only. See disk_integration_quadrature_notes.md.
+# reference/ground truth. CPU-only.
+#
+# Tolerances are in Kelvin on form_temps and reflect a real, documented accuracy floor:
+# the ring Doppler kernel lives on the wavelength pixel grid, so a narrow kernel (low
+# vsini) is resolved only to ~pixel accuracy. See the `_ring_doppler_kernel` docstring
+# and docs/src/methods.md for why that floor is accepted rather than engineered away.
 using FormationTemps; FT = FormationTemps
 using Korg
 using Statistics
@@ -16,7 +21,7 @@ Teff, logg, Fe_H = 5777.0, 4.44, 0.0
 Nϕ = 64          # tiling ground-truth resolution
 
 # tiling (ground truth) vs quadrature for one star; returns (tiling, quad, interior)
-function run_pair(; vsini, istar, α₂=0.0, α₄=0.0, ζ=ζ_RT, Nμ=16, N_az=256)
+function run_pair(; vsini, istar, α₂=0.0, α₄=0.0, ζ=ζ_RT, Nμ=32, N_az=256)
     star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ,
                         v_micro=ξ, istar=istar, α₂=α₂, α₄=α₄)
     rt = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:disk,

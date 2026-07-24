@@ -8,6 +8,10 @@ and a Doppler shift, using FFT convolution. The kernel width is wavelength-depen
 Scalar `v_los` and `v_mic` apply the same kernel to every row; vectors specify per-row
 values. The GPU implementation (`convolve_wavelength_axis_gpu`) builds the same
 kernel on device, so CPU and GPU agree to floating-point precision.
+
+The convolution padding is derived from the `v_los`/`v_mic` actually passed, so a large
+Doppler shift cannot wrap the padded linear convolution. It never falls below the
+historical fixed padding, so results are unchanged wherever that was already sufficient.
 """
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::T, v_mic::T) where {T<:AF}
     Δλ = median(diff(xs))
@@ -25,18 +29,22 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::T, v_mic::T) 
     kernel ./= ifelse(iszero(s), one(T), s)
     iszero(s) && @warn "Doppler kernel underflowed (zero-sum); convolved αs set to zero. v_los probably exceeds wavelength window." maxlog=3
 
-    return _padded_convolve(collect(T, ys), kernel)
+    # kernel reaches |v_los| (shift) + ~3·v_mic (width); pad for both
+    Npad = conv_npad_for_velocity(λ0, Δλ, conv_kernel_vmax(v_los, zero(T), v_mic))
+    return _padded_convolve(collect(T, ys), kernel; Npad=Npad)
 end
 
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::AA{T,1}, v_mic::AA{T,1}) where {T<:AF}
     Nλ = length(xs)
-    Npad = 512
-    L, _, pad_left, _ = _conv_mem_geometry(Nλ, Npad)
-
     Δλ = median(diff(xs))
     σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
     i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
+
+    # pad for the widest per-row kernel: max|v_los| (shift) + ~3·max(v_mic) (width)
+    Npad = conv_npad_for_velocity(λ0, Δλ,
+                                  conv_kernel_vmax(maximum(abs, v_los), zero(T), v_mic))
+    L, _, pad_left, _ = _conv_mem_geometry(Nλ, Npad)
 
     ys_out = zeros(T, size(ys))
     kbuf = zeros(T, L)

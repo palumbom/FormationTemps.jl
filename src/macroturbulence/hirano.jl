@@ -118,7 +118,8 @@ See also: [`hirano_rotmacro_ft_kernel`](@ref), [`convolve_hirano_rotmacro_gpu`](
 """
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
                                   ζ_rt::T, u1::T, u2::T;
-                                  intres::Int=HIRANO_QUADRATURE_NPTS) where T<:AF
+                                  intres::Int=HIRANO_QUADRATURE_NPTS,
+                                  Npad::Int=512) where T<:AF
     N = length(xs)
     i0 = N ÷ 2 + 1
     λ0 = xs[i0]
@@ -136,12 +137,13 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
     # normalization underflow guard".
     kernel ./= sum(kernel)
 
-    return _padded_convolve(collect(T, ys), kernel)
+    return _padded_convolve(collect(T, ys), kernel; Npad=Npad)
 end
 
 function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
                                   ζ_rt::T, u1::T, u2::T;
-                                  intres::Int=HIRANO_QUADRATURE_NPTS) where T<:AF
+                                  intres::Int=HIRANO_QUADRATURE_NPTS,
+                                  Npad::Int=512) where T<:AF
     N = length(xs)
     i0 = N ÷ 2 + 1
     λ0 = xs[i0]
@@ -159,7 +161,7 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     # normalization underflow guard".
     kernel ./= sum(kernel)
 
-    return _padded_convolve(collect(T, ys), kernel)
+    return _padded_convolve(collect(T, ys), kernel; Npad=Npad)
 end
 
 function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0.43, u2::T=0.31, intres::Int=HIRANO_QUADRATURE_NPTS) where T<:AF

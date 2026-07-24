@@ -1,6 +1,6 @@
 name = "FormationTemps"
 uuid = "03bcd87b-2230-4045-a5fa-95a5fcdd1ff8"
-version = "2.0.0"
+version = "3.0.0"
 authors = ["Michael Palumbo"]
 
 [workspace]

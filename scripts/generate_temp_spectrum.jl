@@ -25,7 +25,7 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
 # vacuum or air wavelengths
-vacuum_wavs = false
+vacuum_wavs = true
 wav_label = vacuum_wavs ? "vacuum" : "air"
 
 # set directory
