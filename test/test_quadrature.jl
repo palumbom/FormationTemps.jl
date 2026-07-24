@@ -106,6 +106,42 @@ end
                                        showprogress=false, ne_warn_thresh=Inf)
         @test r_alias.form_temps == r_method.form_temps
     end
+
+    @testset "method/convolve resolution is warned about, not silent" begin
+        # `convolve` is deprecated in favour of `method`. Two things must be audible:
+        # the deprecation itself, and `convolve` being overridden when both are passed.
+        # Uses :quadrature so each call is cheap.
+        star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=0.0, v_macro=0.0, v_micro=ξ)
+
+        # convolve=false is indistinguishable from the default, so it must stay quiet —
+        # otherwise every existing caller gets noise for using the old default
+        @test_logs min_level=Base.CoreLogging.Warn begin
+            calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:quadrature,
+                                convolve=false, ne_warn_thresh=Inf)
+        end
+
+        # convolve=true actually changes behaviour, so it must warn
+        @test_logs (:warn, r"`convolve` is deprecated") match_mode=:any begin
+            calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, convolve=true,
+                                u1=0.43, u2=0.31, showprogress=false, ne_warn_thresh=Inf)
+        end
+
+        # both given: `method` wins, and says so rather than dropping convolve silently
+        r = @test_logs (:warn, r"ignored because `method=") match_mode=:any begin
+            calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:quadrature,
+                                convolve=true, ne_warn_thresh=Inf)
+        end
+        # and it really did run the quadrature, not Hirano
+        r_q = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:quadrature,
+                                  ne_warn_thresh=Inf)
+        @test r.form_temps == r_q.form_temps
+    end
+
+    @testset "unknown method is rejected" begin
+        star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=0.0, v_macro=0.0, v_micro=ξ)
+        @test_throws AssertionError calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false,
+                                                        method=:nonsense, ne_warn_thresh=Inf)
+    end
 end
 
 end

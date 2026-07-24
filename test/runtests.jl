@@ -24,6 +24,8 @@ end
 include("test_definitions.jl")
 include("test_disk_velocity.jl")
 include("test_ring_kernel.jl")
+include("test_conv_padding.jl")
+include("test_hydrogen_lines.jl")
 include("test_quadrature.jl")
 include("test_atmosphere.jl")
 include("test_kernels.jl")

@@ -20,10 +20,15 @@ linelist    = [Korg.Line(wl, log_gf, species, E_lower, gamma_rad, gamma_stark, g
 
 A_X = Korg.asplund_2009_solar_abundances
 
-# resample atmosphere to uniform log-τ grid (same grid used by both FT and Korg below)
+# Resample the atmosphere to a uniform log-τ grid and give BOTH sides the same grid.
+# Before 2.1 the Atmosphere constructors resampled internally, so `AtmosphereGPU(atm_korg)`
+# happened to land on the same grid Korg was handed here. They no longer do (the τ
+# integrators consume the native per-interval spacing directly), so the resampled model has
+# to be passed in explicitly — otherwise this comparison silently pits FT on the native
+# non-uniform grid against Korg on a uniform one.
 atm_korg      = Korg.interpolate_marcs(5777, 4.44, A_X)
 atm_resampled = FT._resample_log_tau(atm_korg)
-atm_gpu       = FT.AtmosphereGPU(atm_korg)
+atm_gpu       = FT.AtmosphereGPU(atm_resampled)
 
 Natm   = atm_gpu.Natm
 Ts_gpu = atm_gpu.Ts_gpu
@@ -45,8 +50,11 @@ sol = Korg.synthesize(atm_resampled, linelist, A_X, λs_korg;
 αs      = zeros(Natm, length(λs_korg))
 αs_cont = zeros(Natm, length(λs_korg))
 α_ref   = zeros(Natm)
+# hydrogen_lines=false to match the Korg call above. Inert at this wavelength (Fe I 6173 is
+# 389 Å from Hα, outside the 150 Å per-line window) but stated explicitly so the comparison
+# stays apples-to-apples if the window ever moves nearer a Balmer line.
 FT.compute_alpha!(αs, αs_cont, Korg.Wavelengths(λs_korg), linelist, atm_gpu, A_X;
-                  α_ref_out=α_ref)
+                  α_ref_out=α_ref, hydrogen_lines=false)
 
 # convolve absorption with microturbulence
 Nλ   = length(λs_korg)
