@@ -40,7 +40,7 @@ end
     Ts = [4000.0, 5000.0, 6000.0, 7000.0]
 
     @testset "zero total contribution → NaN + warning" begin
-        # reachable: the microturbulence underflow guard deliberately zeros a row when the
+        # reachable: the microturbulence underflow guard zeros a row when the
         # Doppler shift moves the kernel out of the window, which can zero a whole column
         empty = reshape([0.0, 0.0, 0.0], 3, 1)
         ft = @test_logs (:warn, r"no positive total") match_mode=:any begin

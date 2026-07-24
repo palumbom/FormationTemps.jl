@@ -22,7 +22,7 @@ first_moment(K) = sum((eachindex(K) .- i0) .* K)      # in pixels
 rv_offset(K) = first_moment(K) * Δv                   # in m/s
 
 # independent reference: brute-force nearest-bin histogram at very high sampling.
-# deliberately a different algorithm from both production paths.
+# a different algorithm from both production paths.
 function reference_kernel(μ, vsini, iₛ, α₂, α₄; N=2_000_000)
     r = sqrt(max(1 - μ^2, 0.0))
     K = zeros(Float64, Nλ)

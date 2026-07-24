@@ -63,16 +63,10 @@ then selects which latitude bands — rotating at different rates — are visibl
 
 ## Accuracy notes
 
-- **`Nμ` is the most effective accuracy knob**, and defaults to 32. Worst-pixel `form_temps`
-  differences from `method=:disk` on a non-rotating solar case, which isolates the
-  μ-quadrature:
-
-  | `Nμ` | 8 | 16 | 32 (default) | 64 |
-  |---|---|---|---|---|
-  | worst pixel | 0.96 K | 0.67 K | 0.04 K | 0.015 K |
-
-  Cost scales linearly with `Nμ`. Drop to 16 only if you need the speed and can accept
-  ~0.7 K.
+- **`Nμ` is the most effective accuracy knob** for slow rotators, and defaults to 32. Cost
+  scales linearly with it. Halving it to 16 costs roughly an order of magnitude in
+  worst-pixel agreement with `method=:disk`; doubling it to 64 buys comparatively little.
+  `test_quadrature.jl` asserts this convergence.
 
 - **Formation temperatures in deep line cores are lower limits.** Where more than half the
   flux contribution comes from the topmost layer interval, the 50% crossing is set by the

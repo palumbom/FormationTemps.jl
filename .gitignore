@@ -5,6 +5,7 @@ docs/build
 docs/src/index.md
 .julia_env/
 .claude/*
+!.claude/CLAUDE.md
 .CondaPkg
 *__pycache__*
 

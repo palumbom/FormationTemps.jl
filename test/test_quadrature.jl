@@ -91,6 +91,23 @@ end
         @test fine_err < coarse_err
     end
 
+    @testset "Nμ default is justified: 32 beats 16 by an order of magnitude" begin
+        # vsini=0 bypasses the ring Doppler kernel, so this isolates the μ-quadrature and
+        # anchors the accuracy claim the Integration Methods guide makes for the default.
+        star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=0.0, v_macro=ζ_RT,
+                            v_micro=ξ, istar=90.0)
+        rt = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:disk,
+                                 Nϕ=Nϕ, showprogress=false, ne_warn_thresh=Inf)
+        err(Nμ) = begin
+            rq = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false,
+                                     method=:quadrature, Nμ=Nμ, ne_warn_thresh=Inf)
+            maximum(abs.(rq.form_temps .- rt.form_temps))
+        end
+        e16, e32 = err(16), err(32)
+        @test e32 < e16 / 5          # order-of-magnitude class improvement
+        @test e32 < 0.2              # and the default is converged, in K
+    end
+
     @testset "formation temps within atmosphere T range" begin
         _, rq, _ = run_pair(vsini=15000.0, istar=90.0)
         atm = rq.atmosphere

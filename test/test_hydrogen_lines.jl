@@ -3,14 +3,14 @@ let
 #
 # Korg computes hydrogen lines from dedicated Stark/MHD physics rather than from the
 # linelist, so `Korg.line_absorption!` never emits them and FormationTemps has to add them
-# explicitly. Three properties are load-bearing:
+# explicitly. Three properties are asserted:
 #
 #   1. The opacity lands in `αs` only — never in `αs_cont`, and never in the 5000 Å
 #      reference opacity `α_ref`. Otherwise Balmer lines would not appear as features
 #      against the continuum, and the anchored τ scale would be biased.
 #   2. `hydrogen_lines=false` suppresses it exactly (needed to reproduce pre-2.1 results and
 #      to compare against `Korg.synthesize(...; hydrogen_lines=false)`).
-#   3. `use_MHD` follows FormationTemps' documented rule, which deliberately DIFFERS from
+#   3. `use_MHD` follows FormationTemps' documented rule, which differs from
 #      Korg's: Korg defaults `use_MHD_for_hydrogen_lines=true` at all wavelengths and merely
 #      warns above 13000 Å, while we follow that warning automatically.
 using FormationTemps; FT = FormationTemps
@@ -81,7 +81,7 @@ end
         @test on == off
     end
 
-    @testset "use_MHD rule (deliberately not Korg's default)" begin
+    @testset "use_MHD rule (differs from Korg default)" begin
         # Below 13000 Å the default enables MHD, matching Korg.
         lo_default, _, _, _ = alphas(6552.0, 6572.0, 0.05, 6558.0)
         lo_true, _, _, _    = alphas(6552.0, 6572.0, 0.05, 6558.0; use_MHD=true)

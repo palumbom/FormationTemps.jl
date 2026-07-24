@@ -136,7 +136,7 @@ half_support_px(λ0, Δλ, vmax) = ceil(Int, vmax / (FT.c_ms * Δλ / λ0))
         wls = [l.wl * FT.CM_TO_ANGSTROM for l in linelist]
         λ0 = 0.5 * (first(wls) + last(wls))
         vmax = FT.conv_kernel_vmax(star.vsini, star.ζ, star.ξ)
-        # confirm this configuration genuinely exceeds the old fixed padding
+        # confirm this configuration exceeds the padding floor
         @test FT.conv_npad_for_velocity(λ0, Δλ, vmax) > 512
 
         r = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:quadrature,
