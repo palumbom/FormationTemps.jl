@@ -1,5 +1,5 @@
 let
-# Tests for hydrogen (Balmer/Brackett) line opacity, which is ON by default as of 2.1.
+# Tests for hydrogen (Balmer/Brackett) line opacity, which is on by default.
 #
 # Korg computes hydrogen lines from dedicated Stark/MHD physics rather than from the
 # linelist, so `Korg.line_absorption!` never emits them and FormationTemps has to add them
@@ -8,8 +8,8 @@ let
 #   1. The opacity lands in `αs` only — never in `αs_cont`, and never in the 5000 Å
 #      reference opacity `α_ref`. Otherwise Balmer lines would not appear as features
 #      against the continuum, and the anchored τ scale would be biased.
-#   2. `hydrogen_lines=false` suppresses it exactly (needed to reproduce pre-2.1 results and
-#      to compare against `Korg.synthesize(...; hydrogen_lines=false)`).
+#   2. `hydrogen_lines=false` suppresses it exactly, which is what makes comparison against
+#      `Korg.synthesize(...; hydrogen_lines=false)` meaningful.
 #   3. `use_MHD` follows FormationTemps' documented rule, which differs from
 #      Korg's: Korg defaults `use_MHD_for_hydrogen_lines=true` at all wavelengths and merely
 #      warns above 13000 Å, while we follow that warning automatically.

@@ -34,9 +34,9 @@
 end
 
 @testset "Formation temperature degenerate cases are reported, not silent" begin
-    # Two failure modes have no meaningful median and previously returned a plausible-looking
-    # number. Both must now yield NaN and say so. These are diagnostics, which rot quietly if
-    # untested: a refactor that stopped emitting them would otherwise go unnoticed.
+    # Two failure modes have no meaningful median; both must yield NaN and warn. These are
+    # diagnostics, which rot quietly if untested: a refactor that stopped emitting them
+    # would otherwise go unnoticed.
     Ts = [4000.0, 5000.0, 6000.0, 7000.0]
 
     @testset "zero total contribution → NaN + warning" begin
@@ -77,7 +77,7 @@ end
 @testset "Formation temperature boundary pinning is flagged" begin
     # When over half the flux contribution comes from the topmost layer interval, the 50%
     # crossing is set by where the model atmosphere was truncated rather than by where the
-    # line forms. Expected in deep line cores (Balmer especially, now on by default), and the
+    # line forms. Expected in deep line cores (Balmer especially, which are on by default), and the
     # returned value must be read as a lower limit rather than a measurement.
     Ts = [4000.0, 5000.0, 6000.0, 7000.0]
     pinned = reshape([0.9, 0.05, 0.05], 3, 1)     # 90% of the flux in the top interval

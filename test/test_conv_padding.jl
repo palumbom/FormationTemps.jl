@@ -38,9 +38,9 @@ half_support_px(λ0, Δλ, vmax) = ceil(Int, vmax / (FT.c_ms * Δλ / λ0))
         @test FT.conv_kernel_vmax(1000.0, 0.0, Float64[]) == FT.conv_kernel_vmax(1000.0, 0.0, 0.0)
     end
 
-    @testset "conv_npad_for_velocity honours the historical floor" begin
-        # a narrow kernel must not *reduce* the padding below the pre-2.1 value, so existing
-        # results stay bit-identical wherever 512 was already enough
+    @testset "conv_npad_for_velocity respects the padding floor" begin
+        # a narrow kernel gets the floor value, so results stay bit-identical wherever the
+        # floor already suffices
         @test FT.conv_npad_for_velocity(6000.0, 0.01, 0.0) == 512
         @test FT.conv_npad_for_velocity(6000.0, 0.01, FT.conv_kernel_vmax(2100.0, 3400.0, 850.0)) == 512
         @test FT.conv_npad_for_velocity(6000.0, 0.01, FT.conv_kernel_vmax(15000.0, 3400.0, 850.0)) == 512
@@ -49,8 +49,7 @@ half_support_px(λ0, Δλ, vmax) = ceil(Int, vmax / (FT.c_ms * Δλ / λ0))
     end
 
     @testset "invariant: pad_left ≥ kernel half-support" begin
-        # the property that actually matters, swept over the grid/rotation space. Includes
-        # combinations the old fixed 512 could not cover.
+        # the property that actually matters, swept over the grid/rotation space
         Nλ = 2048
         for λ0 in (5000.0, 6000.0, 16000.0)
             for Δλ in (0.01, 0.005, 0.002, 0.001)
@@ -101,17 +100,17 @@ half_support_px(λ0, Δλ, vmax) = ceil(Int, vmax / (FT.c_ms * Δλ / λ0))
         @test err(edge_line, 512) > 0.05             # measured 0.219
         @test err(edge_line, Npad_derived) < 1e-12   # measured 8e-16
 
-        # and the masked case, which is why the old fixed padding survived so long: with
-        # both edges on the same continuum the same under-padding is nearly harmless
+        # the masked case: with both edges on the same continuum, the same under-padding is
+        # nearly harmless
         flat_edges = @. 1.0 - 0.6 * exp(-0.5 * ((λs - (λ0 - 1.5)) / 0.05)^2) -
                               0.3 * exp(-0.5 * ((λs - (λ0 + 1.2)) / 0.08)^2)
         @test err(flat_edges, 512) < 1e-5            # measured 9.4e-7
         @test err(flat_edges, Npad_derived) < 1e-12
     end
 
-    @testset "narrow kernels are bit-identical to the old fixed padding" begin
-        # regression guard: in the regime the whole existing test suite lives in, the new
-        # padding must reproduce Npad=512 exactly, not merely closely
+    @testset "narrow kernels are bit-identical at the padding floor" begin
+        # regression guard: in the regime the rest of the suite lives in, the
+        # derived padding must reproduce the floor exactly, not merely closely
         λ0, Δλ, Nλ = 6000.0, 0.01, 2048
         vmax = FT.conv_kernel_vmax(2100.0, 3400.0, 850.0)
         @test FT.conv_npad_for_velocity(λ0, Δλ, vmax) == 512
