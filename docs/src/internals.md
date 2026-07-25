@@ -68,6 +68,20 @@ gray_iso_rt_macro_kernel
 rt_macro_kernel
 ```
 
+## Contribution Function Diagnostics
+
+A formation temperature is only meaningful where the flux contribution has decayed before the
+model atmosphere is truncated. `ceiling_ratio` measures how far from that condition each
+wavelength is, and `boundary_mask` thresholds it. `calc_formation_temp` warns on the same
+statistic at the `BOUNDARY_R_THRESH` default, so its count matches `boundary_mask(result)`
+unless you pass a different `r_thresh`.
+
+```@docs
+ceiling_ratio
+boundary_mask
+form_temps_from_cfunc
+```
+
 ## Absorption Cache
 
 `AlphaCache` provides a reusable cache that accelerates repeated `compute_alpha!` calls

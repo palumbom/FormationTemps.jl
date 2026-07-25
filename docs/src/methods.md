@@ -68,11 +68,23 @@ then selects which latitude bands — rotating at different rates — are visibl
   worst-pixel agreement with `method=:disk`; doubling it to 64 buys comparatively little.
   `test_quadrature.jl` asserts this convergence.
 
-- **Formation temperatures in deep line cores are lower limits.** Where more than half the
-  flux contribution comes from the topmost layer interval, the 50% crossing is set by the
-  top of the MARCS grid rather than by the line's actual formation depth.
-  `form_temps_from_cfunc` counts and warns about affected wavelengths. Balmer cores are the
-  common case, and hydrogen lines are on by default.
+- **Formation temperatures in strong saturated cores are lower limits.** Where the flux
+  contribution is still peaking at the top of the MARCS grid, `form_temps` is set by where the
+  model was truncated rather than by the line's actual formation depth.
+  `result.ceiling_ratio` quantifies this per wavelength and
+  [`boundary_mask`](@ref) flags the affected wavelengths; a warning reports the count. Exclude
+  them before interpreting a formation-temperature spectrum:
+
+  ```julia
+  result = calc_formation_temp(star, linelist)
+  good = .!boundary_mask(result)          # or boundary_mask(result; r_thresh=…)
+  ```
+
+  Note that Balmer lines are *not* the usual cause. Their lower level (n=2) sits ~10.2 eV
+  up, so its population — and hence the line opacity — is negligible in the cool upper
+  photosphere and rises steeply with depth. In LTE on a MARCS grid, Hα is a shallow feature
+  forming well inside the model rather than at its ceiling; the deep chromospheric core seen
+  in the real Sun is outside what a photospheric model can produce.
 
 - **Convolution padding is sized from the kernel support.** The rotational, macroturbulent
   and microturbulent kernels are applied as padded linear convolutions; the padding is

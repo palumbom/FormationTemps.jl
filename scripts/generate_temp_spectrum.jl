@@ -25,7 +25,7 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
 # vacuum or air wavelengths
-vacuum_wavs = true
+vacuum_wavs = false
 wav_label = vacuum_wavs ? "vacuum" : "air"
 
 # set directory
@@ -89,13 +89,11 @@ nd = atm_cpu.nd
 Ts = atm_cpu.Ts
 τs_ref = atm_cpu.τs
 
-# boundary-contamination mask: flag pixels whose flux contribution has not decayed by
-# the top of the LTE model — its peak is pinned at/near the truncated ceiling, so
-# form_temp is boundary-biased. Ratio of top-slab contribution to the column peak:
-# ~0 for resolved lines, ~1 for truncated cores. The distribution is bimodal, so the
-# threshold is insensitive. Pure reduction over cont_func (= C·Δτ); no recomputation.
-r_thresh = 0.33   # flag if top-slab contribution exceeds this fraction of the column peak
-_ceiling_ratio(cfunc) = vec(cfunc[1, :]) ./ max.(vec(maximum(cfunc, dims=1)), eps())
+# boundary-contamination mask: flag pixels whose flux contribution has not decayed by the top
+# of the LTE model, so form_temp is biased toward the truncated ceiling. FT.ceiling_ratio and
+# FT.boundary_mask are the core definitions; calc_formation_temp warns on the same statistic
+# and threshold, so the warnings below and this mask always identify the same pixels.
+r_thresh = FT.BOUNDARY_R_THRESH
 
 # [doc:chunked-start]
 # chunked computation parameters
@@ -157,9 +155,9 @@ let chunk_idx = Ref(0)
             g["flux"] = result.flux
             g["temp"] = result.form_temps
             g["cfunc"] = result.cont_func
-            r = _ceiling_ratio(result.cont_func)
+            r = FT.ceiling_ratio(result)
             g["ceiling_ratio"] = r
-            g["mask"] = UInt8.(r .> r_thresh)
+            g["mask"] = UInt8.(FT.boundary_mask(result; r_thresh=r_thresh))
         end
 
         FT.calc_formation_temp_chunked(star_props, linelist;
@@ -288,9 +286,9 @@ h5open(outfile, "r") do h5in
         g_out["flux"] = all_flux
         g_out["temp"] = all_temps
         g_out["cfunc"] = all_cfunc
-        r = _ceiling_ratio(all_cfunc)
+        r = FT.ceiling_ratio(all_cfunc)
         g_out["ceiling_ratio"] = r
-        g_out["mask"] = UInt8.(r .> r_thresh)
+        g_out["mask"] = UInt8.(FT.boundary_mask(all_cfunc; r_thresh=r_thresh))
     end
 end
 # [doc:blend-end]

@@ -24,14 +24,16 @@ Returns a `FormTempResult` with fields:
 - `flux`: normalized flux (`sum(cfunc_dt_flux) / sum(cfunc_dt_flux_cont)`).
 - `form_temps`: formation temperature defined at 50% of the cumulative flux contribution.
 - `cont_func`: contribution function, shape `(Natm - 1, Nλ)`.
+- `ceiling_ratio`: per-wavelength top-of-atmosphere contamination statistic; see
+  [`ceiling_ratio`](@ref) and [`boundary_mask`](@ref).
 - `atmosphere`: atmosphere structure used for the calculation.
 
-!!! warning "Formation temperatures can be pinned to the top of the atmosphere"
-    Where over half the flux contribution comes from the topmost layer interval, the 50%
-    crossing is set by where the MARCS grid was truncated rather than by where the line
-    forms, so the value is a lower limit. This happens in deep line cores, notably the
-    Balmer lines, which are included by default and form well above the photosphere.
-    [`form_temps_from_cfunc`](@ref) counts and warns about such wavelengths.
+!!! warning "Formation temperatures can be contaminated by the top of the atmosphere"
+    Where the flux contribution is still peaking at the top of the model, `form_temps` is
+    biased toward the truncated ceiling and should be read as a lower limit. This happens in
+    strong saturated cores. `result.ceiling_ratio` quantifies it per wavelength and
+    [`boundary_mask`](@ref) flags the affected wavelengths; a warning is emitted with the
+    count.
 
 # Disk-integration method
 

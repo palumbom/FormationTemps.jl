@@ -20,7 +20,9 @@ chunks = calc_formation_temp_chunked(star, linelist;
     Δλ=0.01, method=:disk, Nϕ=32)
 ```
 
-Each element of `chunks` is a full [`FormTempResult`](@ref) with `wavs`, `flux`, `form_temps`, `cont_func`, and `atmosphere` fields. Adjacent chunks overlap by `overlap` Angstroms, so the caller can blend or cut at the midpoint.
+Each element of `chunks` is a full [`FormTempResult`](@ref) with `wavs`, `flux`, `form_temps`, `cont_func`, `ceiling_ratio`, and `atmosphere` fields. Adjacent chunks overlap by `overlap` Angstroms, so the caller can blend or cut at the midpoint.
+
+Note that `ceiling_ratio` is a per-chunk reduction over `cont_func`, so if you stitch chunks together, recompute it from the stitched contribution function ([`ceiling_ratio`](@ref) accepts a bare matrix) rather than concatenating the per-chunk vectors.
 
 ## Streaming to disk
 

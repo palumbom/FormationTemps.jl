@@ -69,6 +69,16 @@ plt.show()
 ```
 ![formation_temps](./docs/src/static/temp_example_jl.png)
 
+In strong saturated line cores the flux contribution can still be rising where the model
+atmosphere is truncated, which biases the formation temperature toward the top boundary. The
+result carries a `ceiling_ratio` statistic for this, and `boundary_mask` flags the affected
+wavelengths, so they can be excluded before interpreting a spectrum:
+
+```julia
+good = .!boundary_mask(form_temp_result)
+ax1.plot(wavs[good], temp[good], c="k")
+```
+
 More detail on the above example can be found in the [Basic Tutorial](https://michaelpalumbo.me/FormationTemps.jl/stable/tutorial/) and the [high-level API documentation](https://michaelpalumbo.me/FormationTemps.jl/stable/internals/).
 
 ### Calling FormationTemps.jl from Python

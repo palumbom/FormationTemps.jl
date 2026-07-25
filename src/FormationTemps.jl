@@ -77,6 +77,7 @@ include("chunked.jl")
 include("turb_fits.jl")
 
 export round_to_power, elav, searchsortednearest, form_temps_from_cfunc,
+       ceiling_ratio, boundary_mask,
        calc_formation_temp, calc_formation_temp_chunked, StellarProps,
        FormTempResult, vmac_fit, vmic_fit, convolve_gray_rotation,
        convolve_hirano_rotmacro, convolve_iso_rt_macro,
