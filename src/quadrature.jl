@@ -243,31 +243,31 @@ function _calc_formation_temp_quadrature_cpu(star::StellarProps, linelist; Δλ:
     ws = CPUTileWorkspace(T, Natm, Nλ; Npad=Npad)
     v0 = copy(atm_cpu.v_los)                 # zero-rotation base velocity (length Natm)
     iₛ = deg2rad(T(90) - star.istar)
-
-    # TODO(hoist-micro): the microturbulent convolution in the loop below is μ-independent
-    # (v0 and v_mic are both fixed), so it recomputes the same (Natm × Nλ) result on every
-    # μ node — 2·Nμ FFT convolutions where 2 would do. Hoisting the two
-    # _convolve_micro_inplace! calls above the loop and feeding ws.αs_broad /
-    # ws.αs_cont_broad straight to _calc_tau_cpu! would fix it.
+    i0 = Nλ ÷ 2 + 1
 
     cfunc_dt_flux = zeros(T, Natm - 1, Nλ)
     cfunc_dt_flux_cont = zeros(T, Natm - 1, Nλ)
     G_k = zeros(T, Natm - 1, Nλ)
     G_k_cont = zeros(T, Natm - 1, Nλ)
+    ring_out = zeros(T, Natm - 1, Nλ)        # ring-convolved cfunc_dt, reused per node
+
+    # Microturbulence depends only on v0 and v_mic, both fixed across the μ loop, so it is
+    # applied once here. Inside the loop ws.αs_broad / ws.αs_cont_broad are only read (the
+    # macro convolution and τ integration use separate buffers), so these stay valid.
+    _convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, v0, atm_cpu.v_mic, ws)
+    _convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, v0, atm_cpu.v_mic, ws)
 
     for k in eachindex(μ_grid)
         μ_k = T(μ_grid[k])
         wq = T(μ_weights[k]) * μ_k            # projected-area weight (∫ μ dμ)
 
-        # G_k(z,λ; μ_k), zero Doppler: micro(v_mic) → τ(μ_k) → intensity → cfunc_dt → macro(μ_k)
-        _convolve_micro_inplace!(ws.αs_broad, λs_korg, αs, v0, atm_cpu.v_mic, ws)
+        # G_k(z,λ; μ_k), zero Doppler: τ(μ_k) → intensity → cfunc_dt → macro(μ_k)
         _calc_tau_cpu!(μ_k, ws.αs_broad, ws.τs_int)
         calc_intensity_cfunc_cpu!(ws.cfunc_int, Ts, λs_korg, ws.τs_int)
         @views ws.cfunc_dt_int .= ws.cfunc_int .* (ws.τs_int[2:end, :] .- ws.τs_int[1:end-1, :])
         _convolve_macro_inplace!(G_k, λs_korg, ws.cfunc_dt_int, star.ζ, μ_k, ws)
 
         # continuum
-        _convolve_micro_inplace!(ws.αs_cont_broad, λs_korg, αs_cont, v0, atm_cpu.v_mic, ws)
         _calc_tau_cpu!(μ_k, ws.αs_cont_broad, ws.τs_int_cont)
         calc_intensity_cfunc_cpu!(ws.cfunc_int_cont, Ts, λs_korg, ws.τs_int_cont)
         @views ws.cfunc_dt_int_cont .= ws.cfunc_int_cont .* (ws.τs_int_cont[2:end, :] .- ws.τs_int_cont[1:end-1, :])
@@ -279,8 +279,14 @@ function _calc_formation_temp_quadrature_cpu(star::StellarProps, linelist; Δλ:
             cfunc_dt_flux_cont .+= wq .* G_k_cont
         else
             K = _ring_doppler_kernel(μ_k, star.vsini, iₛ, star.α₂, star.α₄, λs_korg, N_az)
-            cfunc_dt_flux .+= wq .* _padded_convolve(G_k, K; Npad=Npad)
-            cfunc_dt_flux_cont .+= wq .* _padded_convolve(G_k_cont, K; Npad=Npad)
+            # same padded linear convolution as _padded_convolve, through the workspace
+            # plans and buffers: one kernel FT serves both signals, and no per-row allocation
+            _kernel_to_dft_layout!(ws.kernel_real, K, i0)
+            mul!(ws.kernel_ft, ws.fft_plan, ws.kernel_real)
+            _apply_fft_kernel!(ring_out, G_k, ws.kernel_ft, ws, Natm - 1)
+            cfunc_dt_flux .+= wq .* ring_out
+            _apply_fft_kernel!(ring_out, G_k_cont, ws.kernel_ft, ws, Natm - 1)
+            cfunc_dt_flux_cont .+= wq .* ring_out
         end
     end
 
@@ -386,16 +392,24 @@ function _calc_formation_temp_quadrature_gpu(star::StellarProps, linelist; Δλ:
     cfunc_dt_flux = CUDA.zeros(G, Natm - 1, Nλ)
     cfunc_dt_flux_cont = CUDA.zeros(G, Natm - 1, Nλ)
 
+    # Microturbulence depends only on v_mic and the (zero) rotation velocity, both fixed
+    # across the μ loop, so it is applied once. convolve_wavelength_axis_gpu returns a view
+    # into cmem.conv_gpu, which the per-row kernel build reuses as scratch, so copy out.
+    copyto!(gpu_mem.αs, αs)
+    αs_b = copy(convolve_wavelength_axis_gpu(cmem, gpu_mem.λs, gpu_mem.αs,
+                                             gpu_mem.v_los_zeros, atm_gpu.v_mic))
+    copyto!(gpu_mem_cont.αs, αs_cont)
+    αs_cont_b = copy(convolve_wavelength_axis_gpu(cmem_cont, gpu_mem_cont.λs, gpu_mem_cont.αs,
+                                                  gpu_mem_cont.v_los_zeros, atm_gpu.v_mic))
+
     for k in eachindex(μ_grid)
         μ_k = G(μ_grid[k])
         wq = G(μ_weights[k]) * μ_k                  # projected-area weight (∫ μ dμ)
 
-        # per-μ depth-resolved intensity cfunc_dt at zero Doppler (micro→τ→intensity);
-        # calc_intensity_quantities returns independent copies.
-        # TODO(hoist-micro): the micro convolution inside these calls is μ-independent and is
-        # redone every node; cmem.signal_cached exists to skip it but is unused here.
-        G_k  = calc_intensity_quantities(αs,      atm_gpu, gpu_mem,      cmem,      μ_k, gpu_mem.v_los_zeros,      atm_gpu.v_mic).cfunc_dt
-        G_kc = calc_intensity_quantities(αs_cont, atm_gpu, gpu_mem_cont, cmem_cont, μ_k, gpu_mem_cont.v_los_zeros, atm_gpu.v_mic).cfunc_dt
+        # per-μ depth-resolved intensity cfunc_dt at zero Doppler (τ→intensity). The results
+        # alias gpu_mem/gpu_mem_cont and are consumed by the macro convolution below.
+        G_k  = calc_intensity_quantities_broadened!(αs_b,      atm_gpu, gpu_mem,      μ_k).cfunc_dt
+        G_kc = calc_intensity_quantities_broadened!(αs_cont_b, atm_gpu, gpu_mem_cont, μ_k).cfunc_dt
 
         # μ-dependent macroturbulence; copy out of the shared macmem.out_gpu buffer
         Gm  = copy(convolve_rt_macro_gpu(macmem, λs_G, G_k,  ζ, μ_k))

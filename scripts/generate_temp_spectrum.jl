@@ -132,6 +132,13 @@ let chunk_idx = Ref(0)
         HDF5.attributes(h5)["alpha2"] = star_props.α₂
         HDF5.attributes(h5)["alpha4"] = star_props.α₄
         HDF5.attributes(h5)["integration_method"] = String(integration_method)
+        # resolution parameters: Nϕ applies to :disk, Nμ/N_az to :quadrature. All are
+        # written unconditionally so integration_method alone says which were in force.
+        HDF5.attributes(h5)["N_phi"] = Nϕ
+        HDF5.attributes(h5)["N_mu"] = Nμ
+        HDF5.attributes(h5)["N_az"] = N_az
+        HDF5.attributes(h5)["delta_lambda"] = Δλ
+        HDF5.attributes(h5)["buffer"] = buffer
         HDF5.attributes(h5)["wavelength_frame"] = wav_label
         HDF5.attributes(h5)["mask_r_thresh"] = r_thresh
 
@@ -305,6 +312,11 @@ h5open(outfile, "r") do h5in
         HDF5.attributes(h5out)["alpha2"] = star_props.α₂
         HDF5.attributes(h5out)["alpha4"] = star_props.α₄
         HDF5.attributes(h5out)["integration_method"] = String(integration_method)
+        HDF5.attributes(h5out)["N_phi"] = Nϕ
+        HDF5.attributes(h5out)["N_mu"] = Nμ
+        HDF5.attributes(h5out)["N_az"] = N_az
+        HDF5.attributes(h5out)["delta_lambda"] = Δλ
+        HDF5.attributes(h5out)["buffer"] = buffer
         HDF5.attributes(h5out)["wavelength_frame"] = wav_label
         HDF5.attributes(h5out)["mask_r_thresh"] = r_thresh
 

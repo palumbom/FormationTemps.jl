@@ -133,6 +133,38 @@ function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GP
     return nothing
 end
 
+"""
+    calc_intensity_quantities_broadened!(αs_b, atm, mem, μ_tile)
+
+Intensity contribution function and its optical-depth differential from opacities that are
+**already** microturbulence-broadened: [`calc_intensity_quantities`](@ref) without the
+convolution step.
+
+For callers whose broadened opacities do not depend on `μ_tile` — the ring quadrature applies
+its Doppler shift after the transfer solve — so that one convolution serves every μ node.
+
+The returned `cfunc`/`cfunc_dt` alias `mem.cfunc`/`mem.cfunc_dt`; consume them before the
+next call sharing `mem`.
+"""
+function calc_intensity_quantities_broadened!(αs_b::CA{T,2}, atm::AtmosphereGPU{T},
+                                              mem::GPUMemory, μ_tile::T) where T<:AF
+    if mem.use_anchored
+        calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_b, mem.τs)
+    else
+        calc_tau_bezier_cached!(μ_tile, atm.zs_gpu, αs_b, mem.τs,
+                                mem.tau_ds, mem.tau_alphaC)
+    end
+
+    # separate cfunc and cfunc_dt launches, as in calc_intensity_quantities: the fused
+    # kernel writes intensity, not the cfunc matrix this path needs
+    Natm, Nλ = size(αs_b)
+    ts = (32, 16)
+    bs = (cld(Nλ, ts[1]), cld(Natm, ts[2]))
+    @cuda threads=ts blocks=bs calc_intensity_cfunc!(μ_tile, atm.Ts_gpu, mem.λs, mem.τs, mem.cfunc)
+    compute_cfunc_dt!(mem.cfunc_dt, mem.cfunc, mem.τs)
+    return IntensityContFunc(mem.cfunc, mem.cfunc_dt)
+end
+
 # Like calc_intensity_cfunc! but writes intensity directly (fused cfunc+reduce).
 # Does NOT populate mem.cfunc. Bézier path also skips mem.τs.
 # Use calc_intensity_cfunc! if you need the cfunc or τs matrices.
