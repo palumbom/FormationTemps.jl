@@ -109,6 +109,16 @@ The real-space tile accumulation kernels (`accumulate_batch_kernel!`, `accumulat
 
 All standalone GPU broadening functions that can short-circuit (ζ=0 or vsini=0) must do so **before** `copyto!(cmem.ys_gpu, ...)` and must return `CuArray(ys)` (a fresh allocation), not `cmem.ys_gpu` or `cmem.out_gpu`. Returning a shared buffer aliases it and causes the second call (continuum convolution) to overwrite the first call's result. The normal (non-short-circuit) return path uses `cmem.out_gpu`, which is safe because `extract_valid!` writes a fresh result into it on every call. This applies to the `convolve=true` (Hirano) path and standalone broadening benchmarks. The `convolve=false` disk integration path handles ζ=0 via a separate branch (`accumulate_batch!` instead of Fourier accumulation) and does not use `cmem.out_gpu`.
 
+#### Micro-convolution results alias workspace scratch
+
+`convolve_wavelength_axis_gpu` (every overload) and `convolve_wavelength_axis_batched!` return a `@view` into `cmem.conv_gpu` / `bcmem.conv_gpu` — the same buffer the per-row kernel build uses as scratch. CUDA.jl's `view` over a contiguous column range yields a `CuArray`, not a `SubArray`, so the return type carries no indication that the memory is not owned; `parent()` does not recover the workspace either. Check the device pointer if you need to confirm.
+
+The result is valid only until the next convolution on that memory object, and for the vector-`v_los` overloads it dies *before* the replacement exists: `_build_per_row_kernels!` opens with `fill!(cmem.conv_gpu, zero(T))`, so a held result reads all zeros from partway through the next call. The scalar-`v_los` overloads build into `cmem.kr_1d` instead and only clobber `conv_gpu` at the inverse FFT.
+
+`copy` the result if it must outlive the next convolution. The callers in `contribution.jl` consume it immediately (τ integration) and need no copy; the `:quadrature` drivers hoist the convolution out of the μ loop and so must copy. Do not substitute "nothing else uses this `cmem`" for the copy — `convenience.jl` also overlays the batched macro padding buffer on `bcmem.conv_gpu` through `unsafe_wrap`, so the memory has more writers than the call graph suggests.
+
+Contrast the macro convolutions (`convolve_rt_macro_gpu` and friends), which extract into the dedicated `cmem.out_gpu`: that buffer survives a kernel build, but is still overwritten by the next macro call on the same `cmem` (see the slice convention above).
+
 #### DFT Layout Conventions
 
 Two DFT layout conventions coexist. The microturbulence kernels (`kernel_to_dft_layout_2d_*_gpu!`) place zero-lag at index **1** (`idx = d >= 0 ? d + 1 : L + d + 1`). The macro kernel precomputation (`compute_rt_macro_dft_layout_2d!`) places zero-lag at index **L** (`idx = d > 0 ? d : L + d`), matching the serial `precompute_rt_macro_kernel_ft` path (roll + ifftshift produces zero-lag at L for even-length arrays). Each convention is internally consistent within its own FFT pipeline.
