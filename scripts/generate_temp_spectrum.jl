@@ -25,14 +25,13 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
 # vacuum or air wavelengths
-vacuum_wavs = false
+vacuum_wavs = true
 wav_label = vacuum_wavs ? "vacuum" : "air"
 
 # set directory
 cephdir = abspath("/mnt/home/mpalumbo/ceph/")
 outdir = joinpath(cephdir, "formation_temps")
-tmpdir = joinpath(outdir, "tmp")
-if !isdir(tmpdir); mkdir(tmpdir); end
+mkpath(outdir)
 outfile = joinpath(outdir, "temp_spectrum_$(wav_label)_chunks_new.h5")
 outfile_1d = joinpath(outdir, "temp_spectrum_$(wav_label)_1D_new.h5")
 
@@ -62,7 +61,6 @@ gamma_stark = [l.gamma_stark for l in linelist]
 # set parameters
 Teff = 5777.0
 logg = 4.44
-A_X = Korg.asplund_2020_solar_abundances
 Fe_H = 0.0
 vsini = 2100.0
 ζ_RT = 3400.0
@@ -90,9 +88,9 @@ Ts = atm_cpu.Ts
 τs_ref = atm_cpu.τs
 
 # boundary-contamination mask: flag pixels whose flux contribution has not decayed by the top
-# of the LTE model, so form_temp is biased toward the truncated ceiling. FT.ceiling_ratio and
-# FT.boundary_mask are the core definitions; calc_formation_temp warns on the same statistic
-# and threshold, so the warnings below and this mask always identify the same pixels.
+# of the LTE model, so form_temp is biased toward the truncated ceiling. r_thresh is passed
+# into the calculation, which warns on it and records it on each result, so FT.boundary_mask
+# below reproduces exactly the pixels that were warned about.
 r_thresh = FT.BOUNDARY_R_THRESH
 
 # [doc:chunked-start]
@@ -107,7 +105,7 @@ buffer = 3.0
 # disk-integration method: true → :quadrature (fast ring-by-ring μ-quadrature),
 # false → :disk (explicit tiling reference). Nμ/N_az are the quadrature node counts.
 use_quadrature = true
-Nμ = 16
+Nμ = 32
 N_az = 256
 integration_method = use_quadrature ? :quadrature : :disk
 quad_kwargs = use_quadrature ? (Nμ=Nμ, N_az=N_az) : NamedTuple()
@@ -157,7 +155,7 @@ let chunk_idx = Ref(0)
             g["cfunc"] = result.cont_func
             r = FT.ceiling_ratio(result)
             g["ceiling_ratio"] = r
-            g["mask"] = UInt8.(FT.boundary_mask(result; r_thresh=r_thresh))
+            g["mask"] = UInt8.(FT.boundary_mask(result))
         end
 
         FT.calc_formation_temp_chunked(star_props, linelist;
@@ -166,7 +164,7 @@ let chunk_idx = Ref(0)
                                         overlap=overlap,
                                         Δλ=Δλ, buffer=buffer,
                                         method=integration_method, Nϕ=Nϕ, quad_kwargs...,
-                                        ne_warn_thresh=Inf,
+                                        r_thresh=r_thresh, ne_warn_thresh=Inf,
                                         callback=write_chunk)
     end
 end
@@ -185,73 +183,109 @@ end
 
 # [doc:blend-start]
 println(">>> Splicing chunks (blend)...")
-h5open(outfile, "r") do h5in
-    chunk_names = sort(filter(name -> startswith(name, "chunk_"), collect(keys(h5in))))
+
+# one chunk's datasets; chunks are streamed rather than all held at once, so peak memory is
+# the accumulator plus a single chunk
+function read_chunk(h5in, gn)
+    g = h5in[gn]
+    return (wavs = vec(read(g["wavs"])),
+            flux = vec(read(g["flux"])),
+            temp = vec(read(g["temp"])),
+            cfunc = read(g["cfunc"]),
+            lc = vec(read(g["line_centers"])))
+end
+
+# Stitch per-chunk results into one spectrum, linearly crossfading each overlap.
+#
+# The accumulator is preallocated at its final width and written in place. Growing it with
+# hcat once per chunk instead costs O(nchunks^2) bytes copied — 223 GiB at the production
+# config, against 2.9 GiB of writes here.
+function blend_chunks(h5in, chunk_names; overlap, Δλ)
     nchunks = length(chunk_names)
-    if nchunks == 0
-        error("No chunk groups found in $(outfile).")
+
+    # the width arithmetic requires every chunk to share one Nλ; calc_formation_temp_chunked
+    # rounds its upper bound up so that holds, but check before allocating rather than assume
+    Nλ_chunk = length(h5in[first(chunk_names)]["wavs"])
+    for gn in chunk_names
+        @assert length(h5in[gn]["wavs"]) == Nλ_chunk "chunk $gn has non-uniform Nλ"
     end
 
-    # read all chunks into memory for blending
-    raw_wavs  = Vector{Vector{Float64}}(undef, nchunks)
-    raw_flux  = Vector{Vector{Float64}}(undef, nchunks)
-    raw_temp  = Vector{Vector{Float64}}(undef, nchunks)
-    raw_cfunc = Vector{Matrix{Float64}}(undef, nchunks)
-    raw_lc    = Vector{Vector{Float64}}(undef, nchunks)
-    for (i, gn) in enumerate(chunk_names)
-        g = h5in[gn]
-        raw_wavs[i]  = vec(read(g["wavs"]))
-        raw_flux[i]  = vec(read(g["flux"]))
-        raw_temp[i]  = vec(read(g["temp"]))
-        raw_cfunc[i] = read(g["cfunc"])
-        raw_lc[i]    = vec(read(g["line_centers"]))
-    end
-
-    # blend: accumulate starting from chunk 1, linearly crossfade in overlap
     N_ov = max(0, round(Int, overlap / Δλ) + 1)
+    n_tail = Nλ_chunk - N_ov
+    total = Nλ_chunk + (nchunks - 1) * n_tail
+    @assert n_tail > 0 "overlap must be smaller than chunk_width"
 
-    all_wavs  = copy(raw_wavs[1])
-    all_flux  = copy(raw_flux[1])
-    all_temps = copy(raw_temp[1])
-    all_cfunc = copy(raw_cfunc[1])
-    all_lc    = copy(raw_lc[1])
+    c1 = read_chunk(h5in, first(chunk_names))
+    Nrows = size(c1.cfunc, 1)
+
+    all_wavs = Vector{Float64}(undef, total)
+    all_flux = Vector{Float64}(undef, total)
+    all_temps = Vector{Float64}(undef, total)
+    all_cfunc = Matrix{Float64}(undef, Nrows, total)
+    all_lc = Float64[]
+
+    all_wavs[1:Nλ_chunk] .= c1.wavs
+    all_flux[1:Nλ_chunk] .= c1.flux
+    all_temps[1:Nλ_chunk] .= c1.temp
+    all_cfunc[:, 1:Nλ_chunk] .= c1.cfunc
+    append!(all_lc, c1.lc)
+    off = Nλ_chunk
 
     for i in 2:nchunks
-        Nλ_new = length(raw_wavs[i])
-        N_ov_actual = min(N_ov, length(all_wavs), Nλ_new)
+        c = read_chunk(h5in, chunk_names[i])
 
-        # blend the overlap region
-        for k in 1:N_ov_actual
-            w_new = Float64(k) / Float64(N_ov_actual + 1)
+        # crossfade the overlap: accumulator cols (off-N_ov+1):off against chunk cols 1:N_ov
+        @inbounds for k in 1:N_ov
+            w_new = Float64(k) / Float64(N_ov + 1)
             w_old = 1.0 - w_new
-            acc_idx = length(all_wavs) - N_ov_actual + k
-            all_flux[acc_idx]  = w_old * all_flux[acc_idx]  + w_new * raw_flux[i][k]
-            all_temps[acc_idx] = w_old * all_temps[acc_idx] + w_new * raw_temp[i][k]
-            all_cfunc[:, acc_idx] .= w_old .* all_cfunc[:, acc_idx] .+ w_new .* raw_cfunc[i][:, k]
+            d = off - N_ov + k
+            all_flux[d] = w_old * all_flux[d] + w_new * c.flux[k]
+            all_temps[d] = w_old * all_temps[d] + w_new * c.temp[k]
+            @views all_cfunc[:, d] .= w_old .* all_cfunc[:, d] .+ w_new .* c.cfunc[:, k]
         end
 
-        # append the non-overlapping tail
-        if N_ov_actual < Nλ_new
-            tail = (N_ov_actual + 1):Nλ_new
-            append!(all_wavs, raw_wavs[i][tail])
-            append!(all_flux, raw_flux[i][tail])
-            append!(all_temps, raw_temp[i][tail])
-            all_cfunc = hcat(all_cfunc, raw_cfunc[i][:, tail])
-            append!(all_lc, raw_lc[i][filter(j -> raw_lc[i][j] > all_wavs[end - length(tail)], eachindex(raw_lc[i]))])
-        end
+        # write the non-overlapping tail in place
+        dst = (off + 1):(off + n_tail)
+        src = (N_ov + 1):Nλ_chunk
+        @views all_wavs[dst] .= c.wavs[src]
+        @views all_flux[dst] .= c.flux[src]
+        @views all_temps[dst] .= c.temp[src]
+        @views all_cfunc[:, dst] .= c.cfunc[:, src]
+        # no need to filter to the new tail: line centres are bit-identical across
+        # chunks (same Line objects), so sort(unique(·)) and the trim below dedupe
+        append!(all_lc, c.lc)
+        off += n_tail
     end
-    all_lc = sort(unique(all_lc))
+    @assert off == total
+    return (wavs = all_wavs, flux = all_flux, temps = all_temps, cfunc = all_cfunc,
+            lc = sort(unique(all_lc)))
+end
 
-    # trim to actual linelist extent + buffer
+h5open(outfile, "r") do h5in
+    chunk_names = sort(filter(name -> startswith(name, "chunk_"), collect(keys(h5in))))
+    if isempty(chunk_names)
+        error("No chunk groups found in $(outfile).")
+    end
+    nchunks = length(chunk_names)
+    b = blend_chunks(h5in, chunk_names; overlap=overlap, Δλ=Δλ)
+
+    # Trim to the actual linelist extent + buffer. The grid is uniform and trim_lo coincides
+    # with the first chunk's start, so the kept region is one contiguous range — the trim only
+    # drops the overshoot from rounding the last chunk's upper bound. Taking a view of the
+    # cfunc columns rather than a slice avoids a second full-size copy.
     wls_Å = [l.wl * 1e8 for l in linelist]
     trim_lo = first(wls_Å) - buffer
     trim_hi = last(wls_Å) + buffer
-    keep = (all_wavs .>= trim_lo) .& (all_wavs .<= trim_hi)
-    all_wavs  = all_wavs[keep]
-    all_flux  = all_flux[keep]
-    all_temps = all_temps[keep]
-    all_cfunc = all_cfunc[:, keep]
-    all_lc = all_lc[(all_lc .>= trim_lo) .& (all_lc .<= trim_hi)]
+    lo = findfirst(>=(trim_lo), b.wavs)
+    hi = findlast(<=(trim_hi), b.wavs)
+    @assert lo !== nothing && hi !== nothing && hi >= lo "trim removed the whole spectrum"
+    keep = lo:hi
+
+    all_wavs = b.wavs[keep]
+    all_flux = b.flux[keep]
+    all_temps = b.temps[keep]
+    all_cfunc = view(b.cfunc, :, keep)
+    all_lc = b.lc[(b.lc .>= trim_lo) .& (b.lc .<= trim_hi)]
 
     # write blended result as a single group
     h5open(outfile_1d, "w") do h5out

@@ -62,20 +62,19 @@ ceiling_ratio(result::FormTempResult) = result.ceiling_ratio
 
 """
     boundary_mask(cfunc_dt; r_thresh=BOUNDARY_R_THRESH) -> BitVector
-    boundary_mask(result::FormTempResult; r_thresh=BOUNDARY_R_THRESH) -> BitVector
+    boundary_mask(result::FormTempResult; r_thresh=result.r_thresh) -> BitVector
 
 Flag wavelengths whose formation temperature is contaminated by the top of the model
 atmosphere, i.e. where [`ceiling_ratio`](@ref) exceeds `r_thresh`.
 
-`form_temps_from_cfunc` warns on this same statistic, so at a given `r_thresh` the warning and
-the mask identify exactly the same wavelengths. `calc_formation_temp` warns at the
-`BOUNDARY_R_THRESH` default; if you mask at a different threshold, the count in the warning
-will not match your mask.
+For a `FormTempResult` the threshold defaults to the one the calculation used, so the mask
+reproduces exactly the wavelengths it warned about. Pass `r_thresh` explicitly to re-threshold
+after the fact.
 """
 boundary_mask(cfunc_dt::AA{<:AF,2}; r_thresh::Real=BOUNDARY_R_THRESH) =
     ceiling_ratio(cfunc_dt) .> r_thresh
 
-boundary_mask(result::FormTempResult; r_thresh::Real=BOUNDARY_R_THRESH) =
+boundary_mask(result::FormTempResult; r_thresh::Real=result.r_thresh) =
     result.ceiling_ratio .> r_thresh
 
 """

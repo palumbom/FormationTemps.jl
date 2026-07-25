@@ -12,6 +12,7 @@ end
                         gpu_precision=Float64, method=:disk,
                         minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN,
                         Nϕ=128, Nμ=32, N_az=256,
+                        r_thresh=BOUNDARY_R_THRESH,
                         showprogress=true, kwargs...)
 
 Compute flux formation temperatures, normalized flux, and flux contribution function for a given `star` and `linelist`.
@@ -25,15 +26,17 @@ Returns a `FormTempResult` with fields:
 - `form_temps`: formation temperature defined at 50% of the cumulative flux contribution.
 - `cont_func`: contribution function, shape `(Natm - 1, Nλ)`.
 - `ceiling_ratio`: per-wavelength top-of-atmosphere contamination statistic; see
-  [`ceiling_ratio`](@ref) and [`boundary_mask`](@ref).
+  [`ceiling_ratio`](@ref).
+- `r_thresh`: the contamination threshold used, echoing the `r_thresh` keyword.
 - `atmosphere`: atmosphere structure used for the calculation.
 
 !!! warning "Formation temperatures can be contaminated by the top of the atmosphere"
     Where the flux contribution is still peaking at the top of the model, `form_temps` is
     biased toward the truncated ceiling and should be read as a lower limit. This happens in
-    strong saturated cores. `result.ceiling_ratio` quantifies it per wavelength and
-    [`boundary_mask`](@ref) flags the affected wavelengths; a warning is emitted with the
-    count.
+    strong saturated cores. `result.ceiling_ratio` quantifies it per wavelength, and
+    [`boundary_mask`](@ref) flags the affected wavelengths using the `r_thresh` recorded on
+    the result — the same wavelengths the calculation warns about. Set `r_thresh` to move the
+    threshold for both.
 
 # Disk-integration method
 
@@ -88,6 +91,7 @@ function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEF
                              minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                              u1::T=NaN, u2::T=NaN, Nϕ::Int=128,
                              Nμ::Int=32, N_az::Int=256,
+                             r_thresh::Real=BOUNDARY_R_THRESH,
                              kwargs...) where T<:AF
     # resolve the disk-integration method. `method` (preferred) selects among
     # :disk (explicit tiling), :hirano (analytic convolution), :quadrature
@@ -112,11 +116,13 @@ function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEF
             return _calc_formation_temp_quadrature_gpu(star, linelist; Δλ=Δλ,
                                                        gpu_precision=gpu_precision,
                                                        minλ, maxλ, buffer,
-                                                       Nμ=Nμ, N_az=N_az, kwargs...)
+                                                       Nμ=Nμ, N_az=N_az,
+                                                       r_thresh=r_thresh, kwargs...)
         else
             return _calc_formation_temp_quadrature_cpu(star, linelist; Δλ=Δλ,
                                                        minλ, maxλ, buffer,
-                                                       Nμ=Nμ, N_az=N_az, kwargs...)
+                                                       Nμ=Nμ, N_az=N_az,
+                                                       r_thresh=r_thresh, kwargs...)
         end
     end
 
@@ -125,11 +131,13 @@ function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEF
         return _calc_formation_temp_gpu(star, linelist; Δλ=Δλ,
                                         gpu_precision=gpu_precision,
                                         minλ, maxλ, buffer, convolve=conv,
-                                        u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
+                                        u1=u1, u2=u2, Nϕ=Nϕ,
+                                        r_thresh=r_thresh, kwargs...)
     else
         return _calc_formation_temp_cpu(star, linelist; Δλ=Δλ,
                                         minλ, maxλ, buffer, convolve=conv,
-                                        u1=u1, u2=u2, Nϕ=Nϕ, kwargs...)
+                                        u1=u1, u2=u2, Nϕ=Nϕ,
+                                        r_thresh=r_thresh, kwargs...)
     end
 end
 
@@ -137,6 +145,7 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
                                   minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128, showprogress::Bool=true,
+                                  r_thresh::Real=BOUNDARY_R_THRESH,
                                   kwargs...) where T<:AF
     # get linelist
     wls = [l.wl * CM_TO_ANGSTROM for l in linelist]
@@ -261,10 +270,11 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     flux_norm = vec(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1))
 
     # formation temperature at 50% cumulative flux contribution (node-anchored CDF)
-    form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts)
+    form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts; r_thresh=r_thresh)
 
     cont_func = cfunc_dt_flux
-    return FormTempResult(collect(λs_korg), flux_norm, form_temps, cont_func, atm_cpu)
+    return FormTempResult(collect(λs_korg), flux_norm, form_temps, cont_func, atm_cpu;
+                          r_thresh=r_thresh)
 end
 
 function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
@@ -272,6 +282,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
                                   minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                   convolve::Bool=false, u1::T=NaN, u2::T=NaN,
                                   Nϕ::Int=128, showprogress::Bool=true,
+                                  r_thresh::Real=BOUNDARY_R_THRESH,
                                   kwargs...) where T<:AF
     G = gpu_precision  # shorthand for GPU float type
 
@@ -640,8 +651,9 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
 
     # formation temperature at 50% cumulative flux contribution (node-anchored CDF);
     # extraction is host-side, so pass host copies
-    form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts))
+    form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts); r_thresh=r_thresh)
 
     cont_func = Array(cfunc_dt_flux)
-    return FormTempResult(G.(collect(λs_korg)), flux_norm, form_temps, cont_func, atm_gpu)
+    return FormTempResult(G.(collect(λs_korg)), flux_norm, form_temps, cont_func, atm_gpu;
+                          r_thresh=r_thresh)
 end

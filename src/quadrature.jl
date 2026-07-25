@@ -201,6 +201,7 @@ function _calc_formation_temp_quadrature_cpu(star::StellarProps, linelist; Δλ:
                                              minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                              Nμ::Int=32, N_az::Int=256,
                                              showprogress::Bool=true,
+                                             r_thresh::Real=BOUNDARY_R_THRESH,
                                              kwargs...) where T<:AF
     # --- setup (mirrors _calc_formation_temp_cpu) ---
     wls = [l.wl * CM_TO_ANGSTROM for l in linelist]
@@ -287,10 +288,11 @@ function _calc_formation_temp_quadrature_cpu(star::StellarProps, linelist; Δλ:
     flux_norm = vec(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1))
 
     # formation temperature at 50% cumulative flux contribution (node-anchored CDF)
-    form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts)
+    form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts; r_thresh=r_thresh)
 
     cont_func = cfunc_dt_flux
-    return FormTempResult(collect(λs_korg), flux_norm, form_temps, cont_func, atm_cpu)
+    return FormTempResult(collect(λs_korg), flux_norm, form_temps, cont_func, atm_cpu;
+                          r_thresh=r_thresh)
 end
 
 # ── GPU ─────────────────────────────────────────────────────────────────────────
@@ -324,6 +326,7 @@ function _calc_formation_temp_quadrature_gpu(star::StellarProps, linelist; Δλ:
                                              minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,
                                              Nμ::Int=32, N_az::Int=256,
                                              showprogress::Bool=true,
+                                             r_thresh::Real=BOUNDARY_R_THRESH,
                                              kwargs...) where T<:AF
     G = gpu_precision
 
@@ -415,8 +418,9 @@ function _calc_formation_temp_quadrature_gpu(star::StellarProps, linelist; Δλ:
 
     # formation temperature at 50% cumulative flux contribution (node-anchored CDF);
     # extraction is host-side, so pass host copies
-    form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts))
+    form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts); r_thresh=r_thresh)
 
     cont_func = Array(cfunc_dt_flux)
-    return FormTempResult(G.(collect(λs_korg)), flux_norm, form_temps, cont_func, atm_gpu)
+    return FormTempResult(G.(collect(λs_korg)), flux_norm, form_temps, cont_func, atm_gpu;
+                          r_thresh=r_thresh)
 end

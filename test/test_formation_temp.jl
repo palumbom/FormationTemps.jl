@@ -154,14 +154,63 @@ end
     end
 end
 
-@testset "FormTempResult carries a consistent ceiling_ratio" begin
-    # the five-argument constructor derives the field, so it cannot disagree with cont_func
-    Ts = [4000.0, 5000.0, 6000.0, 7000.0]
-    cf = hcat([0.9, 0.05, 0.05], [0.05, 0.9, 0.05])
+@testset "FormTempResult carries a consistent ceiling_ratio and threshold" begin
+    # the five-argument constructor derives ceiling_ratio, so it cannot disagree with
+    # cont_func, and records the threshold so boundary_mask reproduces the warned set
+    cf = hcat([0.9, 0.05, 0.05], [0.05, 0.9, 0.05], [0.4, 1.0, 0.1])
     atm = FT.AtmosphereCPU(Korg.interpolate_marcs(5777.0, 4.44, Korg.format_A_X(0.0)))
-    res = FormTempResult([1.0, 2.0], [1.0, 1.0], [5000.0, 6000.0], cf, atm)
+    mk(; kw...) = FormTempResult([1.0, 2.0, 3.0], ones(3), [5e3, 6e3, 7e3], cf, atm; kw...)
+
+    res = mk()
     @test res.ceiling_ratio == ceiling_ratio(cf)
     @test ceiling_ratio(res) == ceiling_ratio(cf)
+    @test res.r_thresh == FT.BOUNDARY_R_THRESH
     @test boundary_mask(res) == boundary_mask(cf)
-    @test boundary_mask(res; r_thresh=0.9) == (ceiling_ratio(cf) .> 0.9)
+
+    # the recorded threshold is what boundary_mask defaults to
+    res_hi = mk(r_thresh=0.5)
+    @test res_hi.r_thresh == 0.5
+    @test boundary_mask(res_hi) == (ceiling_ratio(cf) .> 0.5)
+    @test boundary_mask(res_hi) != boundary_mask(res)      # 0.4 column flips
+    # and an explicit threshold still overrides it
+    @test boundary_mask(res_hi; r_thresh=0.9) == (ceiling_ratio(cf) .> 0.9)
+end
+
+@testset "r_thresh reaches calc_formation_temp's warning and result" begin
+    # the whole point of plumbing it: a non-default threshold must drive BOTH the warning
+    # and the mask, so they cannot describe different wavelengths
+    linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[16000:16010]
+    linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
+    star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0, vsini=0.0,
+                        v_macro=0.0, v_micro=850.0)
+    # not named `run`: this file is included into Main, and shadowing Base.run there would
+    # leak into every test file included after it
+    synth(; kw...) = calc_formation_temp(star, linelist; Δλ=0.05, use_gpu=false,
+                                        method=:quadrature, Nμ=8, ne_warn_thresh=Inf, kw...)
+
+    r_default = synth()
+    @test r_default.r_thresh == FT.BOUNDARY_R_THRESH
+
+    # a threshold of 0 flags everything with any top-layer contribution; 1.0 flags nothing,
+    # since ceiling_ratio is at most 1 by construction
+    r_all  = synth(r_thresh=0.0)
+    r_none = synth(r_thresh=1.0)
+    @test r_all.r_thresh == 0.0
+    @test r_none.r_thresh == 1.0
+    @test all(boundary_mask(r_none) .== false)
+    @test count(boundary_mask(r_all)) >= count(boundary_mask(r_default))
+
+    # ceiling_ratio itself is threshold-free, so all three agree on the statistic
+    @test r_all.ceiling_ratio == r_default.ceiling_ratio == r_none.ceiling_ratio
+
+    # the warning count matches the mask at the threshold actually requested
+    logger = Test.TestLogger(respect_maxlog=false)
+    r_cap = Base.CoreLogging.with_logger(logger) do
+        synth(r_thresh=0.0)
+    end
+    msgs = filter(m -> occursin("peaking at the top", m),
+                  [string(l.message) for l in logger.logs])
+    @test !isempty(msgs)
+    n_reported = parse(Int, match(r"(\d+) of \d+ wavelengths", msgs[1]).captures[1])
+    @test n_reported == count(boundary_mask(r_cap))
 end
