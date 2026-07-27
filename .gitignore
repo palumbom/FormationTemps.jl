@@ -26,3 +26,8 @@ notes/
 *.venv
 *.npz
 *.env
+
+# documentation figures are part of the published site
+!docs/src/static/*.png
+!docs/src/static/*.gif
+!docs/src/assets/*.png

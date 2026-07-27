@@ -18,7 +18,10 @@ identifiers:
   - type: url
     value: 'https://arxiv.org/abs/2512.09861'
   - type: doi
-    value: '10.5281/zenodo.18343828'
+    value: '10.5281/zenodo.18343827'
+    description: >-
+      Concept DOI, resolving to the latest release. Prefer this over a
+      per-version DOI so the entry does not need updating at each release.
 repository-code: 'https://github.com/palumbom/FormationTemps.jl'
 license: MIT
-version: 2.0.0
+version: 3.0.0

@@ -7,7 +7,7 @@ FormationTemps.jl can be called from Python using [juliacall](https://juliapy.gi
 - Julia 1.12+: install from [julialang.org](https://julialang.org/downloads/) or via [juliaup](https://github.com/JuliaLang/juliaup).
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/) (recommended) or pip.
 
-## Installation
+## Installing the Python interface
 
 ### From a Local Clone
 
@@ -44,7 +44,7 @@ Finally, run the following once in Python to register the Julia dependency:
 ```python
 import juliapkg
 juliapkg.require_julia("~1.12")
-juliapkg.add("FormationTemps", "03bcd87b-2230-4045-a5fa-95a5fcdd1ff8", version="^1")
+juliapkg.add("FormationTemps", "03bcd87b-2230-4045-a5fa-95a5fcdd1ff8", version="^3")
 juliapkg.resolve()
 ```
 
@@ -130,15 +130,19 @@ Markdown.parse("```python\n" * code * "\n```")
     Subsequent calls in the same session are fast. Precompilation happens once
     per environment.
 
-!!! tip "GPU support (recommended for Python)"
-    Since CPU multithreading is unavailable from Python (see above), GPU
-    acceleration is the primary way to speed up disk integration from Python.
-    Pass `use_gpu=True` to `calc_formation_temp` if you have a CUDA-capable GPU
-    configured with Julia's [CUDA.jl](https://cuda.juliagpu.org/stable/).
+!!! tip "Getting speed without threads"
+    CPU multithreading is unavailable from Python (see above), which leaves two options.
+    Reach for `method=jl.Symbol("quadrature")` first: it solves the radiative transfer once
+    per μ node instead of once per surface tile, so it recovers most of the cost of the
+    missing threads without changing the physics — see [Integration Methods](@ref). Beyond
+    that, pass `use_gpu=True` if you have a CUDA-capable GPU configured with Julia's
+    [CUDA.jl](https://cuda.juliagpu.org/stable/); the two compose.
 
 !!! tip "Type mapping between Python and Julia"
     Keyword arguments map directly to Julia kwargs (e.g.,
-    `FT.calc_formation_temp(star, linelist, use_gpu=False, convolve=True)`).
+    `FT.calc_formation_temp(star, linelist, use_gpu=False)`).
+    One exception: `method` takes a Julia `Symbol`, and a Python `str` does not convert to
+    one — pass `method=jl.Symbol("quadrature")` rather than `method="quadrature"`.
     Julia arrays can be converted to numpy with `numpy.asarray(result.wavs)`,
     which is zero-copy for contiguous `Float64` arrays. Python `True`/`False`
     map to Julia `true`/`false` automatically. Note that juliacall uses 0-based

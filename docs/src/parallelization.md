@@ -6,6 +6,14 @@ CurrentModule = FormationTemps
 
 FormationTemps.jl parallelizes the disk integration pipeline in two complementary ways: CPU multithreading across stellar surface tiles, and GPU acceleration via [CUDA.jl](https://cuda.juliagpu.org/stable/). Both target the same bottleneck — the per-tile radiative transfer loop that dominates wall-clock time with `method=:disk`. (The [`:quadrature`](@ref "Integration Methods") method sidesteps most of this cost.)
 
+Which of the two applies depends on the method:
+
+| `method` | CPU threading | GPU |
+|---|---|---|
+| `:disk` | tiles distributed across Julia threads | batched per-tile kernels |
+| `:quadrature` | transfer is **serial**; only `compute_alpha!` is threaded | one transfer solve per μ node |
+| `:hirano` | transfer is serial; only `compute_alpha!` is threaded | yes |
+
 ## CPU Multithreading
 
 When `use_gpu=false` and `method=:disk`, `calc_formation_temp` distributes tiles across Julia threads. Start Julia with multiple threads to benefit:
@@ -61,9 +69,23 @@ On the GPU, tiles are processed in batches of `B` (up to 64). Steps 1–3 use ba
 
 All tile parameters (μ, dA, velocity) are uploaded to the GPU once before the tile loop — there are no host-device transfers during the loop. GPU memory is pre-allocated at the start of the call and reused throughout. The macro kernel FFTs for all unique μ values are precomputed in a single batched operation.
 
+### `method=:quadrature`
+
+The quadrature path replaces the tile loop with a loop over `Nμ` Gauss–Legendre nodes, so there is far less work to spread out. Two consequences for parallelism:
+
+- **The CPU transfer loop is serial.** `src/quadrature.jl` does not thread over μ nodes; the only threaded stage on this path is `compute_alpha!`, which is shared with every other method. The thread-scaling figure below and the "scales to ~16 threads" tip therefore describe `method=:disk` only. Extra threads still help — the absorption calculation is a large fraction of a quadrature call precisely because the transfer is now cheap — but not in proportion to the number of μ nodes.
+
+- **Microturbulence is applied once, not per node.** It depends only on `v_mic` and the (zero) rotation velocity, both fixed across the μ loop, so the absorption matrix is broadened before the loop starts. In the tile loop this cannot be hoisted, because there the per-tile Doppler kernel varies.
+
+- **Each μ node costs one transfer solve rather than one per tile.** For every node the loop solves τ and the depth-resolved intensity contribution, applies the μ-dependent radial-tangential macroturbulence kernel, then applies the ring Doppler kernel for that node's rotational broadening, and accumulates into the flux contribution with the projected-area quadrature weight. This is a reformulation rather than an approximation — radiative transfer is wavelength-local, so Doppler-shifting the input opacity shifts the emergent intensity identically, which is what allows rotation to be applied after the transfer solve. What survives is the discretization of the ring kernel on the pixel grid; see [Integration Methods](@ref) for the accuracy that implies.
+
+The μ loop is serial and short, so unlike the tile loop there is no batch sizing step and no batched multi-tile buffers — the pre-allocated working memory covers one node at a time. `gpu_precision=Float32` is *not* recommended on this path; see [Integration Methods](@ref).
+
 ## Benchmarks
 
-The results below were obtained on an Intel Xeon w5-3435X (16 cores / 32 threads) with an NVIDIA RTX 6000 Ada (48 GB). All benchmarks use a two-line Fe I test spectrum near 6300 Å with `Δλ = 0.005` Å, solar stellar parameters (`vsini = 2100` m/s, `ζ_RT = 3500` m/s, `ξ = 850` m/s), and `Nϕ = 128`. To reproduce, run `julia --project=. benchmarks/run_all.jl` — see the [`benchmarks/`](https://github.com/palumbom/FormationTemps.jl/tree/main/benchmarks) directory for individual scripts.
+The results below were obtained on an Intel Xeon w5-3435X (16 cores / 32 threads) with an NVIDIA RTX 6000 Ada (48 GB). Unless a figure states otherwise, benchmarks use the same configuration — a two-line Fe I test spectrum near 6300 Å with `Δλ = 0.005` Å, solar stellar parameters (`vsini = 2100` m/s, `ζ_RT = 3500` m/s, `ξ = 850` m/s), and `Nϕ = 128` — with whichever quantity is being swept varied about it.
+
+To reproduce, run `julia --project=. -t auto benchmarks/run_all.jl`. This regenerates every figure on this page as well as the accuracy and timing figures on the [Integration Methods](@ref) page; see the [`benchmarks/`](https://github.com/palumbom/FormationTemps.jl/tree/main/benchmarks) directory for the individual scripts.
 
 ### Per-tile breakdown
 
@@ -92,7 +114,7 @@ Individual broadening kernel timings for each convolution type (CPU vs GPU Float
 ## Performance tips
 
 - **GPU memory**: the first call to `calc_formation_temp` with `use_gpu=true` allocates GPU buffers and cuFFT plans. Subsequent calls with different parameters re-allocate. If GPU memory is tight, use `gpu_precision=Float32` to roughly halve usage.
-- **CPU threads**: CPU disk integration scales well to ~16 threads. Beyond that, FFTW plan contention and memory bandwidth limit gains. FFTW internal threading is disabled during the tile loop — parallelism comes from distributing tiles across Julia threads.
+- **CPU threads**: CPU disk integration (`method=:disk`) scales well to ~16 threads. Beyond that, FFTW plan contention and memory bandwidth limit gains. FFTW internal threading is disabled during the tile loop — parallelism comes from distributing tiles across Julia threads. `method=:quadrature` and `method=:hirano` thread only inside `compute_alpha!`, so they scale much more weakly with thread count.
 - **Absorption cost**: the `compute_alpha!` call (Korg chemical equilibrium + line absorption) runs on CPU for both paths and scales with the number of spectral lines × `Nλ`. For large linelists, this can dominate total time regardless of GPU acceleration.
 
 ## CPU vs. GPU numerical differences

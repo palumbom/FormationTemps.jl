@@ -23,7 +23,7 @@ At low spectral resolving power, convolutions can be used to approximate the eff
 
 ![convolution_vs_integration](static/convolution_vs_integration.png)
 
-## Parallelization
+## Running in parallel
 
 Disk integration (`method=:disk`, the default) is the most computationally intensive mode and benefits from parallelization on both CPU and GPU.
 

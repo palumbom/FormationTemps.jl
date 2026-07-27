@@ -48,8 +48,8 @@ vsini = 2100.0
 star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
 
 # high-level formation temperature calculation
-form_temp_result_conv = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, convolve=true, u1=0.43, u2=0.31)
-form_temp_result_int = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, convolve=false, Nϕ=16)
+form_temp_result_conv = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, method=:hirano, u1=0.43, u2=0.31)
+form_temp_result_int = FT.calc_formation_temp(star_props, linelist; Δλ=0.01, method=:disk, Nϕ=128)
 
 # parse out results
 wavs = form_temp_result_conv.wavs
@@ -166,5 +166,6 @@ ax2r.set_ylabel(L"T_{1/2}\ {\rm Error\ [K]}")
 ax1.legend(bbox_to_anchor=(0.33, 1.02, 1.05, 0.2), loc="lower center",
            mode="expand", borderaxespad=0, ncol=2)
 fig.tight_layout()
-fig.savefig("docs/src/static/convolution_vs_integration.png", bbox_inches="tight")
+fig.savefig(joinpath(FT.moddir, "docs", "src", "static", "convolution_vs_integration.png"),
+            bbox_inches="tight")
 plt.show()

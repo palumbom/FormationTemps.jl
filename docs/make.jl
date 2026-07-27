@@ -43,6 +43,41 @@ readme_text = replace_admonition(readme_text, "CAUTION", "!!! danger")
 readme_text = replace(readme_text, "## Parallelization" => "## Parallelization Overview")
 write(target_path, readme_text)
 
+# Check the static figures both ways: a reference with no file publishes a broken image,
+# and a file with no reference means a figure was regenerated but never wired into a page
+# (or was superseded and left behind). Runs after the README sync so figures referenced
+# only from the landing page count as used.
+function check_static_assets(src_dir)
+    static_dir = joinpath(src_dir, "static")
+    isdir(static_dir) || return
+    on_disk = Set(readdir(static_dir))
+
+    referenced = Set{String}()
+    missing_refs = Tuple{String,String}[]
+    for page in filter(f -> endswith(f, ".md"), readdir(src_dir))
+        text = read(joinpath(src_dir, page), String)
+        for m in eachmatch(r"static/([A-Za-z0-9_.\-]+)", text)
+            asset = m.captures[1]
+            push!(referenced, asset)
+            asset in on_disk || push!(missing_refs, (page, asset))
+        end
+    end
+
+    orphans = sort(collect(setdiff(on_disk, referenced)))
+    isempty(missing_refs) && isempty(orphans) && return
+
+    msg = "docs/src/static is out of sync with the pages:"
+    for (page, asset) in missing_refs
+        msg *= "\n  missing file: $page references static/$asset"
+    end
+    for asset in orphans
+        msg *= "\n  unreferenced: static/$asset is on disk but no page uses it"
+    end
+    error(msg * "\n(reference the file from a page, or delete it)")
+end
+
+check_static_assets(joinpath(docs_base, "src"))
+
 # set pages
 Introduction = "Quickstart" => "index.md"
 License = "License" => "license.md"

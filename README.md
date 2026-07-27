@@ -90,7 +90,9 @@ FormationTemps.jl can be called from Python. The instructions can be found in th
 
 ## Parallelization
 
-FormationTemps.jl parallelizes the disk integration pipeline in two ways. The CPU path distributes stellar surface tiles across Julia threads (`julia -t auto`); the GPU path offloads the full per-tile radiative transfer to an NVIDIA GPU via [CUDA.jl](https://cuda.juliagpu.org/stable/). GPU acceleration is enabled automatically when a compatible device is detected; pass `use_gpu=false` to force the CPU path. See the [Parallelization documentation](https://michaelpalumbo.me/FormationTemps.jl/stable/parallelization/) for setup, benchmarks, and limitations.
+FormationTemps.jl parallelizes the disk integration pipeline in two ways. The CPU path distributes stellar surface tiles across Julia threads (`julia -t auto`); the GPU path offloads the full per-tile radiative transfer to an NVIDIA GPU via [CUDA.jl](https://cuda.juliagpu.org/stable/). GPU acceleration is enabled automatically when a compatible device is detected; pass `use_gpu=false` to force the CPU path.
+
+Tile threading applies to the default `method=:disk`. `method=:quadrature` has no tile loop to distribute — its speedup comes from solving the radiative transfer once per μ node instead of once per surface tile — so on CPU it threads only inside the absorption calculation. See the [Parallelization documentation](https://michaelpalumbo.me/FormationTemps.jl/stable/parallelization/) for setup, benchmarks, and limitations.
 
 ## Caveats
 

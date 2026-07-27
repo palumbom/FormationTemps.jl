@@ -24,6 +24,20 @@ Each element of `chunks` is a full [`FormTempResult`](@ref) with `wavs`, `flux`,
 
 Note that `ceiling_ratio` is a per-chunk reduction over `cont_func`, so if you stitch chunks together, recompute it from the stitched contribution function ([`ceiling_ratio`](@ref) accepts a bare matrix) rather than concatenating the per-chunk vectors.
 
+## Choosing a method for chunked synthesis
+
+Chunking multiplies whatever a single `calc_formation_temp` call costs by the number of chunks, so the [integration method](@ref "Integration Methods") matters more here than anywhere else. `method=:quadrature` is usually the right choice: it reproduces the `:disk` physics — inclination and differential rotation included — while solving the radiative transfer once per μ node rather than once per surface tile. The example above pins `method=:disk, Nϕ=32`, which trades disk-integration accuracy for speed by coarsening the surface grid; `:quadrature` gets the speed without that trade.
+
+`Nμ` and `N_az` are forwarded through to each chunk like any other `calc_formation_temp` keyword:
+
+```julia
+chunks = calc_formation_temp_chunked(star, linelist;
+    chunk_width=50.0, wing_padding=30.0, overlap=5.0,
+    Δλ=0.01, method=:quadrature, Nμ=32)
+```
+
+One caveat specific to chunking: `:quadrature` applies rotation as a per-ring Doppler convolution on the wavelength grid, and it warns if that kernel is wider than the synthesis window. A chunk is a narrow window by construction, so a fast rotator may need a wider `chunk_width` than a slow one.
+
 ## Streaming to disk
 
 For very large linelists where even the accumulated `Vector{FormTempResult}` would exceed available memory, pass a `callback` function. This streams each chunk to disk as it completes, and `calc_formation_temp_chunked` returns `nothing`.
@@ -89,6 +103,8 @@ The key parameters are:
 | `overlap` | 5.0 | Overlap width (Angstroms) between adjacent chunks. Used during post-hoc stitching to blend or cut. |
 | `Δλ` | 0.001 | Wavelength step size in Angstroms. |
 | `buffer` | 2.0 | Extra wavelength range (Angstroms) beyond the linelist edges. |
+
+All remaining keywords — `method`, `Nϕ`, `Nμ`, `N_az`, `use_gpu`, `gpu_precision`, `r_thresh` — are forwarded unchanged to [`calc_formation_temp`](@ref) for every chunk.
 
 !!! tip "Choosing `wing_padding`"
     Too small a `wing_padding` causes lines near chunk edges to be computed without their full wings, introducing residuals at stitch boundaries. 30 Angstroms is conservative; 15 Angstroms suffices for most lines but not for very broad resonant lines (e.g., H-alpha).

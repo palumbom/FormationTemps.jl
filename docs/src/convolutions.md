@@ -77,4 +77,8 @@ The numerical disk integration approximates the stellar surface with an ``N_\phi
 
 ![disk integration convergence](static/disk_int_convergence.png)
 
-At ``N_\phi = 128`` (the default), the mean error is well below 1% and the maximum error is on the order of a few tenths of a percent. Doubling to ``N_\phi = 256`` or ``512`` reduces the error further but with diminishing returns and quadratically increasing cost (since the number of visible tiles scales as ``\sim N_\phi^2``). For most applications ``N_\phi = 128`` provides a good balance between accuracy and runtime.
+At ``N_\phi = 128`` (the default), the mean error is well below 1% and the maximum error is on the order of a few tenths of a percent. Doubling to ``N_\phi = 256`` or ``512`` reduces the error further but with diminishing returns and quadratically increasing cost, since the number of visible tiles scales as ``\sim N_\phi^2``:
+
+![cost vs Nphi](static/benchmark_nphi.png)
+
+The dotted line marks the cost of the absorption calculation (`compute_alpha!`), which is independent of ``N_\phi``. Below it there is nothing to gain from a coarser surface grid — the calculation is no longer tile-bound. For most applications ``N_\phi = 128`` provides a good balance between accuracy and runtime; if it is too slow, prefer [`method=:quadrature`](@ref "Integration Methods") over coarsening ``N_\phi``, since it reduces the transfer cost rather than the fidelity of the surface grid.

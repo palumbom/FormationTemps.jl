@@ -512,9 +512,14 @@ try
     if !isempty(alpha_times)
         alpha_med = median(filter(!isnan, alpha_times))
         ax.axhline(y=alpha_med, color="#999999", ls=":", lw=1.5, zorder=1)
-        ax.text(ax.get_xlim()[1] * 1.1, alpha_med * 1.08,
+        # x in axes fraction, y in data: anchors the label to the left edge regardless of the
+        # log limits. PythonCall indexes Py tuples 0-based, so get_xlim()[1] is the *upper*
+        # limit and put this label off the right edge of the plot.
+        # below the line: the lowest data series runs just above it and would overlap
+        ax.text(0.02, alpha_med * 0.93,
                 @sprintf("{\\rm absorption cost (%.1f s)}", alpha_med),
-                fontsize=7, color="#777777", va="bottom")
+                transform=ax.get_yaxis_transform(),
+                fontsize=7, color="#777777", va="top")
     end
 
     ax.set_xscale("log")

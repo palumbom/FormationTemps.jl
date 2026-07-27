@@ -31,11 +31,19 @@ function run_script(path; args=String[], threads=nothing)
     return true
 end
 
-# ── in-process benchmarks (need GPU, benefit from current thread count) ───────
+# ── single-threaded benchmarks (these time per-tile / per-kernel work, so extra
+#    threads would change what is being measured) ─────────────────────────────
 scripts_inprocess = [
     joinpath(BENCH_DIR, "benchmark_convolutions.jl"),
     joinpath(BENCH_DIR, "benchmark_disk_integration.jl"),
     joinpath(BENCH_DIR, "benchmark_memory.jl"),
+]
+
+# ── multithreaded benchmarks (read no ARGS; need threads from the parent) ─────
+scripts_threaded = [
+    joinpath(BENCH_DIR, "benchmark_quadrature.jl"),      # quadrature_*.png
+    joinpath(BENCH_DIR, "disk_int_error.jl"),            # disk_int_convergence.png
+    joinpath(BENCH_DIR, "gpu_precision_comparison.jl"),  # gpu_precision_*.png
 ]
 
 # ── subprocess benchmarks (set their own thread counts) ───────────────────────
@@ -58,6 +66,11 @@ for path in scripts_inprocess
     ok || push!(failed, basename(path))
 end
 
+for path in scripts_threaded
+    ok = run_script(path; threads=max_threads)
+    ok || push!(failed, basename(path))
+end
+
 for (path, args) in scripts_subprocess
     ok = run_script(path; args=args)
     ok || push!(failed, basename(path))
@@ -69,6 +82,7 @@ println("=" ^ 70)
 println("  Generating plots")
 println("=" ^ 70)
 run_script(joinpath(BENCH_DIR, "plot_benchmarks.jl")) || push!(failed, "plot_benchmarks.jl")
+run_script(joinpath(BENCH_DIR, "plot_quadrature.jl")) || push!(failed, "plot_quadrature.jl")
 
 # summary
 println()
