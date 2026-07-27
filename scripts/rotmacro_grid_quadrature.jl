@@ -349,7 +349,7 @@ for k in eachindex(vsinis)
         iax4.plot(λs_korg, form_temp_integration, c="k", label=L"{\rm Integration}")
         iax4.plot(λs_korg, form_temp_convolution, c="tab:blue", label=L"{\rm Convolution}")
         iax4.set_frame_on(true)
-        iax4.set_ylim(4200, 6200)
+        iax4.set_ylim(4500, 6300)
         iax4.grid(false)
 
         # create legend
