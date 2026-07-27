@@ -9,7 +9,7 @@ star = StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0,
 # returns Vector{FormTempResult}, one per chunk
 chunks = calc_formation_temp_chunked(star, linelist;
     chunk_width=50.0, wing_padding=30.0, overlap=5.0,
-    Δλ=0.01, method=:disk, Nϕ=32)</code></pre><p>Each element of <code>chunks</code> is a full <a href="../internals/#FormationTemps.FormTempResult"><code>FormTempResult</code></a> with <code>wavs</code>, <code>flux</code>, <code>form_temps</code>, <code>cont_func</code>, and <code>atmosphere</code> fields. Adjacent chunks overlap by <code>overlap</code> Angstroms, so the caller can blend or cut at the midpoint.</p><h2 id="Streaming-to-disk"><a class="docs-heading-anchor" href="#Streaming-to-disk">Streaming to disk</a><a id="Streaming-to-disk-1"></a><a class="docs-heading-anchor-permalink" href="#Streaming-to-disk" title="Permalink"></a></h2><p>For very large linelists where even the accumulated <code>Vector{FormTempResult}</code> would exceed available memory, pass a <code>callback</code> function. This streams each chunk to disk as it completes, and <code>calc_formation_temp_chunked</code> returns <code>nothing</code>.</p><p>The following example is from <code>scripts/generate_temp_spectrum.jl</code> and writes each chunk to an HDF5 group:</p><pre><code class="language-julia hljs">println(&quot;&gt;&gt;&gt; Synthesizing chunks...&quot;)
+    Δλ=0.01, method=:disk, Nϕ=32)</code></pre><p>Each element of <code>chunks</code> is a full <a href="../internals/#FormationTemps.FormTempResult"><code>FormTempResult</code></a> with <code>wavs</code>, <code>flux</code>, <code>form_temps</code>, <code>cont_func</code>, <code>ceiling_ratio</code>, and <code>atmosphere</code> fields. Adjacent chunks overlap by <code>overlap</code> Angstroms, so the caller can blend or cut at the midpoint.</p><p>Note that <code>ceiling_ratio</code> is a per-chunk reduction over <code>cont_func</code>, so if you stitch chunks together, recompute it from the stitched contribution function (<a href="../internals/#FormationTemps.ceiling_ratio"><code>ceiling_ratio</code></a> accepts a bare matrix) rather than concatenating the per-chunk vectors.</p><h2 id="Streaming-to-disk"><a class="docs-heading-anchor" href="#Streaming-to-disk">Streaming to disk</a><a id="Streaming-to-disk-1"></a><a class="docs-heading-anchor-permalink" href="#Streaming-to-disk" title="Permalink"></a></h2><p>For very large linelists where even the accumulated <code>Vector{FormTempResult}</code> would exceed available memory, pass a <code>callback</code> function. This streams each chunk to disk as it completes, and <code>calc_formation_temp_chunked</code> returns <code>nothing</code>.</p><p>The following example is from <code>scripts/generate_temp_spectrum.jl</code> and writes each chunk to an HDF5 group:</p><pre><code class="language-julia hljs">println(&quot;&gt;&gt;&gt; Synthesizing chunks...&quot;)
 let chunk_idx = Ref(0)
     h5open(outfile, &quot;w&quot;) do h5
         # metadata
@@ -28,6 +28,13 @@ let chunk_idx = Ref(0)
         HDF5.attributes(h5)[&quot;alpha2&quot;] = star_props.α₂
         HDF5.attributes(h5)[&quot;alpha4&quot;] = star_props.α₄
         HDF5.attributes(h5)[&quot;integration_method&quot;] = String(integration_method)
+        # resolution parameters: Nϕ applies to :disk, Nμ/N_az to :quadrature. All are
+        # written unconditionally so integration_method alone says which were in force.
+        HDF5.attributes(h5)[&quot;N_phi&quot;] = Nϕ
+        HDF5.attributes(h5)[&quot;N_mu&quot;] = Nμ
+        HDF5.attributes(h5)[&quot;N_az&quot;] = N_az
+        HDF5.attributes(h5)[&quot;delta_lambda&quot;] = Δλ
+        HDF5.attributes(h5)[&quot;buffer&quot;] = buffer
         HDF5.attributes(h5)[&quot;wavelength_frame&quot;] = wav_label
         HDF5.attributes(h5)[&quot;mask_r_thresh&quot;] = r_thresh
 
@@ -49,9 +56,9 @@ let chunk_idx = Ref(0)
             g[&quot;flux&quot;] = result.flux
             g[&quot;temp&quot;] = result.form_temps
             g[&quot;cfunc&quot;] = result.cont_func
-            r = _ceiling_ratio(result.cont_func)
+            r = FT.ceiling_ratio(result)
             g[&quot;ceiling_ratio&quot;] = r
-            g[&quot;mask&quot;] = UInt8.(r .&gt; r_thresh)
+            g[&quot;mask&quot;] = UInt8.(FT.boundary_mask(result))
         end
 
         FT.calc_formation_temp_chunked(star_props, linelist;
@@ -60,7 +67,7 @@ let chunk_idx = Ref(0)
                                         overlap=overlap,
                                         Δλ=Δλ, buffer=buffer,
                                         method=integration_method, Nϕ=Nϕ, quad_kwargs...,
-                                        ne_warn_thresh=Inf,
+                                        r_thresh=r_thresh, ne_warn_thresh=Inf,
                                         callback=write_chunk)
     end
 end</code></pre><p>The <code>callback</code> signature is <code>(chunk_idx::Int, result::FormTempResult, ll_chunk) -&gt; nothing</code>, where <code>ll_chunk</code> is the padded linelist view used for that chunk.</p><h2 id="Chunking-parameters"><a class="docs-heading-anchor" href="#Chunking-parameters">Chunking parameters</a><a id="Chunking-parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Chunking-parameters" title="Permalink"></a></h2><pre><code class="language-julia hljs"># chunked computation parameters
@@ -74,77 +81,113 @@ buffer = 3.0
 # disk-integration method: true → :quadrature (fast ring-by-ring μ-quadrature),
 # false → :disk (explicit tiling reference). Nμ/N_az are the quadrature node counts.
 use_quadrature = true
-Nμ = 16
+Nμ = 32
 N_az = 256
 integration_method = use_quadrature ? :quadrature : :disk
 quad_kwargs = use_quadrature ? (Nμ=Nμ, N_az=N_az) : NamedTuple()</code></pre><p>The key parameters are:</p><table><tr><th style="text-align: left">Parameter</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr><tr><td style="text-align: left"><code>chunk_width</code></td><td style="text-align: left">50.0</td><td style="text-align: left">Width of each wavelength chunk in Angstroms.</td></tr><tr><td style="text-align: left"><code>wing_padding</code></td><td style="text-align: left">30.0</td><td style="text-align: left">Extra range (Angstroms) beyond each chunk edge for linelist selection. Ensures that broad line wings (e.g., H-alpha, Ca II) contribute correctly at chunk boundaries.</td></tr><tr><td style="text-align: left"><code>overlap</code></td><td style="text-align: left">5.0</td><td style="text-align: left">Overlap width (Angstroms) between adjacent chunks. Used during post-hoc stitching to blend or cut.</td></tr><tr><td style="text-align: left"><code>Δλ</code></td><td style="text-align: left">0.001</td><td style="text-align: left">Wavelength step size in Angstroms.</td></tr><tr><td style="text-align: left"><code>buffer</code></td><td style="text-align: left">2.0</td><td style="text-align: left">Extra wavelength range (Angstroms) beyond the linelist edges.</td></tr></table><div class="admonition is-success" id="Choosing-wing_padding-a1ce87e0d770d462"><header class="admonition-header">Choosing `wing_padding`<a class="admonition-anchor" href="#Choosing-wing_padding-a1ce87e0d770d462" title="Permalink"></a></header><div class="admonition-body"><p>Too small a <code>wing_padding</code> causes lines near chunk edges to be computed without their full wings, introducing residuals at stitch boundaries. 30 Angstroms is conservative; 15 Angstroms suffices for most lines but not for very broad resonant lines (e.g., H-alpha).</p></div></div><h2 id="Stitching-chunks"><a class="docs-heading-anchor" href="#Stitching-chunks">Stitching chunks</a><a id="Stitching-chunks-1"></a><a class="docs-heading-anchor-permalink" href="#Stitching-chunks" title="Permalink"></a></h2><p><code>calc_formation_temp_chunked</code> returns raw chunks that need to be stitched together.</p><p>The below example from <code>scripts/generate_temp_spectrum.jl</code> linearly crossfades flux, formation temperatures, and contribution functions across the overlap region.</p><pre><code class="language-julia hljs">println(&quot;&gt;&gt;&gt; Splicing chunks (blend)...&quot;)
-h5open(outfile, &quot;r&quot;) do h5in
-    chunk_names = sort(filter(name -&gt; startswith(name, &quot;chunk_&quot;), collect(keys(h5in))))
+
+# one chunk&#39;s datasets; chunks are streamed rather than all held at once, so peak memory is
+# the accumulator plus a single chunk
+function read_chunk(h5in, gn)
+    g = h5in[gn]
+    return (wavs = vec(read(g[&quot;wavs&quot;])),
+            flux = vec(read(g[&quot;flux&quot;])),
+            temp = vec(read(g[&quot;temp&quot;])),
+            cfunc = read(g[&quot;cfunc&quot;]),
+            lc = vec(read(g[&quot;line_centers&quot;])))
+end
+
+# Stitch per-chunk results into one spectrum, linearly crossfading each overlap.
+#
+# The accumulator is preallocated at its final width and written in place. Growing it with
+# hcat once per chunk instead costs O(nchunks^2) bytes copied — 223 GiB at the production
+# config, against 2.9 GiB of writes here.
+function blend_chunks(h5in, chunk_names; overlap, Δλ)
     nchunks = length(chunk_names)
-    if nchunks == 0
-        error(&quot;No chunk groups found in $(outfile).&quot;)
+
+    # the width arithmetic requires every chunk to share one Nλ; calc_formation_temp_chunked
+    # rounds its upper bound up so that holds, but check before allocating rather than assume
+    Nλ_chunk = length(h5in[first(chunk_names)][&quot;wavs&quot;])
+    for gn in chunk_names
+        @assert length(h5in[gn][&quot;wavs&quot;]) == Nλ_chunk &quot;chunk $gn has non-uniform Nλ&quot;
     end
 
-    # read all chunks into memory for blending
-    raw_wavs  = Vector{Vector{Float64}}(undef, nchunks)
-    raw_flux  = Vector{Vector{Float64}}(undef, nchunks)
-    raw_temp  = Vector{Vector{Float64}}(undef, nchunks)
-    raw_cfunc = Vector{Matrix{Float64}}(undef, nchunks)
-    raw_lc    = Vector{Vector{Float64}}(undef, nchunks)
-    for (i, gn) in enumerate(chunk_names)
-        g = h5in[gn]
-        raw_wavs[i]  = vec(read(g[&quot;wavs&quot;]))
-        raw_flux[i]  = vec(read(g[&quot;flux&quot;]))
-        raw_temp[i]  = vec(read(g[&quot;temp&quot;]))
-        raw_cfunc[i] = read(g[&quot;cfunc&quot;])
-        raw_lc[i]    = vec(read(g[&quot;line_centers&quot;]))
-    end
-
-    # blend: accumulate starting from chunk 1, linearly crossfade in overlap
     N_ov = max(0, round(Int, overlap / Δλ) + 1)
+    n_tail = Nλ_chunk - N_ov
+    total = Nλ_chunk + (nchunks - 1) * n_tail
+    @assert n_tail &gt; 0 &quot;overlap must be smaller than chunk_width&quot;
 
-    all_wavs  = copy(raw_wavs[1])
-    all_flux  = copy(raw_flux[1])
-    all_temps = copy(raw_temp[1])
-    all_cfunc = copy(raw_cfunc[1])
-    all_lc    = copy(raw_lc[1])
+    c1 = read_chunk(h5in, first(chunk_names))
+    Nrows = size(c1.cfunc, 1)
+
+    all_wavs = Vector{Float64}(undef, total)
+    all_flux = Vector{Float64}(undef, total)
+    all_temps = Vector{Float64}(undef, total)
+    all_cfunc = Matrix{Float64}(undef, Nrows, total)
+    all_lc = Float64[]
+
+    all_wavs[1:Nλ_chunk] .= c1.wavs
+    all_flux[1:Nλ_chunk] .= c1.flux
+    all_temps[1:Nλ_chunk] .= c1.temp
+    all_cfunc[:, 1:Nλ_chunk] .= c1.cfunc
+    append!(all_lc, c1.lc)
+    off = Nλ_chunk
 
     for i in 2:nchunks
-        Nλ_new = length(raw_wavs[i])
-        N_ov_actual = min(N_ov, length(all_wavs), Nλ_new)
+        c = read_chunk(h5in, chunk_names[i])
 
-        # blend the overlap region
-        for k in 1:N_ov_actual
-            w_new = Float64(k) / Float64(N_ov_actual + 1)
+        # crossfade the overlap: accumulator cols (off-N_ov+1):off against chunk cols 1:N_ov
+        @inbounds for k in 1:N_ov
+            w_new = Float64(k) / Float64(N_ov + 1)
             w_old = 1.0 - w_new
-            acc_idx = length(all_wavs) - N_ov_actual + k
-            all_flux[acc_idx]  = w_old * all_flux[acc_idx]  + w_new * raw_flux[i][k]
-            all_temps[acc_idx] = w_old * all_temps[acc_idx] + w_new * raw_temp[i][k]
-            all_cfunc[:, acc_idx] .= w_old .* all_cfunc[:, acc_idx] .+ w_new .* raw_cfunc[i][:, k]
+            d = off - N_ov + k
+            all_flux[d] = w_old * all_flux[d] + w_new * c.flux[k]
+            all_temps[d] = w_old * all_temps[d] + w_new * c.temp[k]
+            @views all_cfunc[:, d] .= w_old .* all_cfunc[:, d] .+ w_new .* c.cfunc[:, k]
         end
 
-        # append the non-overlapping tail
-        if N_ov_actual &lt; Nλ_new
-            tail = (N_ov_actual + 1):Nλ_new
-            append!(all_wavs, raw_wavs[i][tail])
-            append!(all_flux, raw_flux[i][tail])
-            append!(all_temps, raw_temp[i][tail])
-            all_cfunc = hcat(all_cfunc, raw_cfunc[i][:, tail])
-            append!(all_lc, raw_lc[i][filter(j -&gt; raw_lc[i][j] &gt; all_wavs[end - length(tail)], eachindex(raw_lc[i]))])
-        end
+        # write the non-overlapping tail in place
+        dst = (off + 1):(off + n_tail)
+        src = (N_ov + 1):Nλ_chunk
+        @views all_wavs[dst] .= c.wavs[src]
+        @views all_flux[dst] .= c.flux[src]
+        @views all_temps[dst] .= c.temp[src]
+        @views all_cfunc[:, dst] .= c.cfunc[:, src]
+        # no need to filter to the new tail: line centres are bit-identical across
+        # chunks (same Line objects), so sort(unique(·)) and the trim below dedupe
+        append!(all_lc, c.lc)
+        off += n_tail
     end
-    all_lc = sort(unique(all_lc))
+    @assert off == total
+    return (wavs = all_wavs, flux = all_flux, temps = all_temps, cfunc = all_cfunc,
+            lc = sort(unique(all_lc)))
+end
 
-    # trim to actual linelist extent + buffer
+h5open(outfile, &quot;r&quot;) do h5in
+    chunk_names = sort(filter(name -&gt; startswith(name, &quot;chunk_&quot;), collect(keys(h5in))))
+    if isempty(chunk_names)
+        error(&quot;No chunk groups found in $(outfile).&quot;)
+    end
+    nchunks = length(chunk_names)
+    b = blend_chunks(h5in, chunk_names; overlap=overlap, Δλ=Δλ)
+
+    # Trim to the actual linelist extent + buffer. The grid is uniform and trim_lo coincides
+    # with the first chunk&#39;s start, so the kept region is one contiguous range — the trim only
+    # drops the overshoot from rounding the last chunk&#39;s upper bound. Taking a view of the
+    # cfunc columns rather than a slice avoids a second full-size copy.
     wls_Å = [l.wl * 1e8 for l in linelist]
     trim_lo = first(wls_Å) - buffer
     trim_hi = last(wls_Å) + buffer
-    keep = (all_wavs .&gt;= trim_lo) .&amp; (all_wavs .&lt;= trim_hi)
-    all_wavs  = all_wavs[keep]
-    all_flux  = all_flux[keep]
-    all_temps = all_temps[keep]
-    all_cfunc = all_cfunc[:, keep]
-    all_lc = all_lc[(all_lc .&gt;= trim_lo) .&amp; (all_lc .&lt;= trim_hi)]
+    lo = findfirst(&gt;=(trim_lo), b.wavs)
+    hi = findlast(&lt;=(trim_hi), b.wavs)
+    @assert lo !== nothing &amp;&amp; hi !== nothing &amp;&amp; hi &gt;= lo &quot;trim removed the whole spectrum&quot;
+    keep = lo:hi
+
+    all_wavs = b.wavs[keep]
+    all_flux = b.flux[keep]
+    all_temps = b.temps[keep]
+    all_cfunc = view(b.cfunc, :, keep)
+    all_lc = b.lc[(b.lc .&gt;= trim_lo) .&amp; (b.lc .&lt;= trim_hi)]
 
     # write blended result as a single group
     h5open(outfile_1d, &quot;w&quot;) do h5out
@@ -164,6 +207,11 @@ h5open(outfile, &quot;r&quot;) do h5in
         HDF5.attributes(h5out)[&quot;alpha2&quot;] = star_props.α₂
         HDF5.attributes(h5out)[&quot;alpha4&quot;] = star_props.α₄
         HDF5.attributes(h5out)[&quot;integration_method&quot;] = String(integration_method)
+        HDF5.attributes(h5out)[&quot;N_phi&quot;] = Nϕ
+        HDF5.attributes(h5out)[&quot;N_mu&quot;] = Nμ
+        HDF5.attributes(h5out)[&quot;N_az&quot;] = N_az
+        HDF5.attributes(h5out)[&quot;delta_lambda&quot;] = Δλ
+        HDF5.attributes(h5out)[&quot;buffer&quot;] = buffer
         HDF5.attributes(h5out)[&quot;wavelength_frame&quot;] = wav_label
         HDF5.attributes(h5out)[&quot;mask_r_thresh&quot;] = r_thresh
 
@@ -179,8 +227,8 @@ h5open(outfile, &quot;r&quot;) do h5in
         g_out[&quot;flux&quot;] = all_flux
         g_out[&quot;temp&quot;] = all_temps
         g_out[&quot;cfunc&quot;] = all_cfunc
-        r = _ceiling_ratio(all_cfunc)
+        r = FT.ceiling_ratio(all_cfunc)
         g_out[&quot;ceiling_ratio&quot;] = r
-        g_out[&quot;mask&quot;] = UInt8.(r .&gt; r_thresh)
+        g_out[&quot;mask&quot;] = UInt8.(FT.boundary_mask(all_cfunc; r_thresh=r_thresh))
     end
-end</code></pre><h2 id="Complete-example"><a class="docs-heading-anchor" href="#Complete-example">Complete example</a><a id="Complete-example-1"></a><a class="docs-heading-anchor-permalink" href="#Complete-example" title="Permalink"></a></h2><p>The full production script combining all of the above is at <code>scripts/generate_temp_spectrum.jl</code>. It:</p><ol><li>Loads a large VALD linelist and converts to air wavelengths.</li><li>Streams chunked results to HDF5.</li><li>Reads the raw chunks back and stitches them.</li><li>Trims the result to the linelist extent and writes the final spliced output.</li></ol></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../convolutions/">« Broadening &amp; Convolutions</a><a class="docs-footer-nextpage" href="../parallelization/">Parallelization »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Thursday 23 July 2026 20:00">Thursday 23 July 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre><h2 id="Complete-example"><a class="docs-heading-anchor" href="#Complete-example">Complete example</a><a id="Complete-example-1"></a><a class="docs-heading-anchor-permalink" href="#Complete-example" title="Permalink"></a></h2><p>The full production script combining all of the above is at <code>scripts/generate_temp_spectrum.jl</code>. It:</p><ol><li>Loads a large VALD linelist and converts to air wavelengths.</li><li>Streams chunked results to HDF5.</li><li>Reads the raw chunks back and stitches them.</li><li>Trims the result to the linelist extent and writes the final spliced output.</li></ol></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../convolutions/">« Broadening &amp; Convolutions</a><a class="docs-footer-nextpage" href="../parallelization/">Parallelization »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 27 July 2026 17:33">Monday 27 July 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
