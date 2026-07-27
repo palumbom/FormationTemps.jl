@@ -8,6 +8,7 @@ docs/src/index.md
 !.claude/CLAUDE.md
 .CondaPkg
 *__pycache__*
+notes/
 
 *.pdf
 *.csv
