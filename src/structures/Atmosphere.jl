@@ -52,10 +52,9 @@ get_nd(atm::Atmosphere) = Array(atm.nd)
 Extract thermodynamic fields from a Korg model atmosphere into a `NamedTuple`, on the
 atmosphere's native layer grid. Shared by both `AtmosphereCPU` and `AtmosphereGPU` constructors.
 
-The native (non-uniform log-τ) MARCS grid is used as-is: FormationTemps' τ integrators
-consume the actual per-interval spacing (matching Korg, which likewise integrates on the
-native grid). To optionally resample/upsample onto a uniform log-τ grid, call
-[`_resample_log_tau`](@ref) on `atm_korg` before constructing the atmosphere.
+The native (non-uniform log-τ) MARCS grid is used as-is; the τ integrators consume the actual
+per-interval spacing, as Korg's do. Call [`_resample_log_tau`](@ref) on `atm_korg` beforehand
+to resample onto a uniform log-τ grid.
 """
 function _extract_korg_fields(atm_korg)
     τs = try
@@ -122,10 +121,10 @@ fields allocated on the GPU. Pass `T=Float32` for single-precision GPU arrays.
 Korg always returns Float64 data; the constructor converts all fields (CPU and GPU)
 to type `T`.
 
-The atmosphere's native (non-uniform log-τ) layer grid is used as-is; the τ integrators
-consume the actual per-interval spacing (matching Korg). If the model does not supply
-`tau_ref` (e.g., some non-MARCS grids), `atm.τs` is set to an empty vector and the Bézier
-τ integrator is used automatically downstream in that case.
+The atmosphere's native (non-uniform log-τ) layer grid is used as-is; the τ integrators consume
+the actual per-interval spacing, as Korg's do. If the model does not supply `tau_ref` (e.g. some
+non-MARCS grids), `atm.τs` is set to an empty vector and the Bézier τ integrator is used
+downstream instead.
 """
 function AtmosphereGPU(atm_korg; T::Type{<:AF}=Float64)
     f = _extract_korg_fields(atm_korg)
@@ -180,10 +179,10 @@ end
 
 Construct an `AtmosphereCPU` with thermodynamic and velocity fields on the CPU.
 
-The atmosphere's native (non-uniform log-τ) layer grid is used as-is; the τ integrators
-consume the actual per-interval spacing (matching Korg). If the model does not supply
-`tau_ref` (e.g., some non-MARCS grids), `atm.τs` is set to an empty vector and the Bézier
-τ integrator is used automatically downstream in that case.
+The atmosphere's native (non-uniform log-τ) layer grid is used as-is; the τ integrators consume
+the actual per-interval spacing, as Korg's do. If the model does not supply `tau_ref` (e.g. some
+non-MARCS grids), `atm.τs` is set to an empty vector and the Bézier τ integrator is used
+downstream instead.
 """
 function AtmosphereCPU(atm_korg)
     f = _extract_korg_fields(atm_korg)
@@ -204,13 +203,12 @@ end
 Resample a Korg model atmosphere onto a uniform grid in log(τ_ref), returning a new atmosphere
 of the same type. Returns `atm_korg` unchanged if tau_ref is unavailable.
 
-`interpolate_marcs` drops layers where the interpolated grid has NaN values (via `nanmask`),
-which produces a non-uniform log-τ spacing that contaminates the anchored τ integration scheme.
-This function detects and removes that discontinuity by re-interpolating all thermodynamic
-quantities onto a uniform log-τ grid.
+Not called by the atmosphere constructors, which use the native layer grid. Available for
+callers that want uniform log-τ spacing: `interpolate_marcs` drops layers where the
+interpolated grid has NaN values (via `nanmask`), leaving a non-uniform spacing.
 
-By default `n_layers` matches the input layer count, so the function is a pure spacing fix.
-Pass an explicit value to upsample or downsample.
+By default `n_layers` matches the input layer count, making this a spacing fix only. Pass an
+explicit value to upsample or downsample.
 """
 function _resample_log_tau(atm_korg; n_layers::Int=-1)
     τ_ref = try

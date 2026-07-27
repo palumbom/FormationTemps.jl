@@ -9,8 +9,8 @@ Scalar `v_los` and `v_mic` apply the same kernel to every row; vectors specify p
 values. The GPU implementation (`convolve_wavelength_axis_gpu`) builds the same
 kernel on device, so CPU and GPU agree to floating-point precision.
 
-The convolution padding is derived from the `v_los`/`v_mic` actually passed, so a large
-Doppler shift cannot wrap the padded linear convolution.
+Padding is sized from the `v_los`/`v_mic` passed, so a large Doppler shift cannot wrap the
+padded linear convolution.
 """
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::T, v_mic::T) where {T<:AF}
     Δλ = median(diff(xs))
@@ -181,7 +181,7 @@ function extract_valid!(out, src, pad_left, Nλ)
     return nothing
 end
 
-# Build ONE kernel in DFT layout (scalar v_los, v_mic).
+# Build a single kernel in DFT layout (scalar v_los, v_mic).
 function kernel_to_dft_layout_1d_gpu!(kbuf, xs, λ0, v_los_val, v_mic_val, σ_floor, i0, Nλ, L)
     j = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     j > Nλ && return nothing
@@ -204,9 +204,8 @@ end
 function kernel_to_dft_layout_2d_gpu!(kbuf, xs, v_los, v_los_off, v_mic, σ_floor, i0, Nλ, L, Natm_v, BNatm)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
-    # guard on the ACTIVE batch height (Bcur*Natm), not size(kbuf,1): the launch
-    # ceil-rounds BNatm up to the block size, so over-spawned rows must return
-    # before reading v_los (length Ntiles*Natm) past its end on the final batch.
+    # guard on BNatm (the active batch height), not size(kbuf,1): the launch ceil-rounds to
+    # the block size, and over-spawned rows would read v_los past its end on the final batch.
     (row > BNatm || j > Nλ) && return nothing
     T = eltype(kbuf)
     xj = @inbounds xs[j]
@@ -225,9 +224,8 @@ end
 function kernel_to_dft_layout_2d_scalar_v_mic_gpu!(kbuf, xs, v_los, v_los_off, v_mic_val, σ_floor, i0, Nλ, L, BNatm)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
-    # guard on the ACTIVE batch height (Bcur*Natm), not size(kbuf,1): the launch
-    # ceil-rounds BNatm up to the block size, so over-spawned rows must return
-    # before reading v_los (length Ntiles*Natm) past its end on the final batch.
+    # guard on BNatm (the active batch height), not size(kbuf,1): the launch ceil-rounds to
+    # the block size, and over-spawned rows would read v_los past its end on the final batch.
     (row > BNatm || j > Nλ) && return nothing
     T = eltype(kbuf)
     xj = @inbounds xs[j]

@@ -137,11 +137,12 @@ end
     calc_intensity_quantities_broadened!(αs_b, atm, mem, μ_tile)
 
 Intensity contribution function and its optical-depth differential from opacities that are
-**already** microturbulence-broadened: [`calc_intensity_quantities`](@ref) without the
-convolution step.
+already microturbulence-broadened: [`calc_intensity_quantities`](@ref) without the convolution
+step.
 
-For callers whose broadened opacities do not depend on `μ_tile` — the ring quadrature applies
-its Doppler shift after the transfer solve — so that one convolution serves every μ node.
+Intended for callers whose broadened opacities do not depend on `μ_tile`, so that one
+convolution serves every μ node. The ring quadrature is one: it applies its Doppler shift
+after the transfer solve.
 
 The returned `cfunc`/`cfunc_dt` alias `mem.cfunc`/`mem.cfunc_dt`; consume them before the
 next call sharing `mem`.

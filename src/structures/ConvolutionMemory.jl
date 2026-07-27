@@ -147,9 +147,8 @@ wavelength axis: rotation displaces the microturbulent kernel by up to `vsini`, 
 radial-tangential macro kernel reaches ~3ζ, and the microturbulent Gaussian reaches ~3ξ.
 `ξ` may be a scalar or a per-layer vector.
 
-The sum rather than the max, so that a single padding geometry bounds all three kernels
-whether they are applied together or separately. Over-padding by a few hundred samples is
-cheap next to `Nλ`.
+Sums the three rather than taking the max, so one padding geometry bounds them whether they
+are applied together or separately.
 """
 conv_kernel_vmax(vsini::Real, ζ::Real, ξ::Real) =
     abs(float(vsini)) + 3 * abs(float(ζ)) + 3 * abs(float(ξ))
@@ -164,15 +163,13 @@ Minimum `Npad` for which a padded linear convolution with kernel half-support `v
 (m/s) does not wrap. `λ0` and `Δλ` are the grid center and spacing (Å).
 
 `_conv_mem_geometry` splits `Npad` evenly between the two edges, so a kernel reaching `h`
-pixels requires `Npad ≥ 2h`. With `pad_left < h` the valid-region extraction instead pulls
-samples that have wrapped from the opposite edge, producing no NaN and no warning. The
-half-width `vmax/Δv` grows as `Δλ` shrinks, so a `vsini` that is safe at `Δλ = 0.01 Å` can
-wrap at `Δλ = 0.002 Å`. Severity depends on how different the window's two ends are, since
-the padding is edge-replicated: negligible when both sit on the same continuum, tens of
-percent when one carries a line.
+pixels needs `Npad ≥ 2h`. Under-padding does not raise: with `pad_left < h` the valid-region
+extraction pulls samples that have wrapped from the opposite edge, with no NaN and no warning.
+The half-width `vmax/Δv` grows as `Δλ` shrinks, so a `vsini` that is safe on a coarse grid can
+wrap on a fine one.
 
-`minpad` sets a floor, so padding is only ever added; results are unchanged wherever the
-floor already sufficed, since extra padding only appends zeros to the kernel.
+`minpad` floors the result, so padding is only ever added. Extra padding appends zeros to the
+kernel, leaving results unchanged wherever the floor already sufficed.
 """
 function conv_npad_for_velocity(λ0::Real, Δλ::Real, vmax::Real;
                                 margin::Int=64, minpad::Int=512)

@@ -27,17 +27,16 @@ Keyword arguments:
 - `v_micro`: microturbulent velocity ξ (m/s). Scalar for uniform broadening; vector of
   length `Natm` for per-layer broadening. If scalar `NaN`, uses `vmic_fit(Teff)`.
 - `ρstar`: stellar radius scale factor for disk integration (dimensionless; default 1).
-- `istar`: stellar inclination (degrees; 90 = equator-on). Has no physical effect for rigid
-  rotation (`α₂=α₄=0`), where the velocity field reduces to `v_los = -vsini·x_sky/ρstar` and
-  the broadening is set by the projected `vsini` alone. It becomes meaningful once
-  differential rotation is enabled, since it selects which latitude bands — rotating at
-  different rates — are visible and how they are weighted. Numerically it is an exact no-op
-  for `method=:quadrature`; for `method=:disk` at finite `Nϕ` it reselects which discrete
-  tiles are visible, shifting the result at the discretization level.
+- `istar`: stellar inclination (degrees; 90 = equator-on). No physical effect for rigid
+  rotation (`α₂=α₄=0`), where `v_los = -vsini·x_sky/ρstar` and the broadening follows from the
+  projected `vsini` alone. It matters once differential rotation is on, where it selects which
+  latitude bands are visible and how they are weighted. Numerically it is an exact no-op for
+  `method=:quadrature`; for `method=:disk` at finite `Nϕ` it changes which tiles are visible,
+  shifting the result at the discretization level.
 - `α₂`, `α₄`: differential-rotation coefficients in the normalized rate law
-  `Ω(ϕ)/Ω_eq = f(ϕ) = 1 - α₂·sin²ϕ - α₄·sin⁴ϕ`. Default `0` (solid body). Positive
-  values make the equator rotate faster than the poles (solar-like). `vsini` remains
-  the equatorial projected velocity (`f(0)=1`).
+  `Ω(ϕ)/Ω_eq = f(ϕ) = 1 - α₂·sin²ϕ - α₄·sin⁴ϕ`. Default 0 (solid body); positive values make
+  the equator rotate faster than the poles. `vsini` stays the projected equatorial velocity
+  (`f(0)=1`).
 
 Struct fields:
 - `Teff`, `logg`, `Fe_H`, `A_X`: atmosphere parameters (A_X is the full abundance vector).

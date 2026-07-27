@@ -24,8 +24,7 @@ function gray_rot_kernel(vs::AA{T,1}, vsini::T, u1::T) where T<:AF
     xs = vs ./ vsini
     omx2 = abs.(one(T) .- xs .^ 2.0)
     kernel = @. ifelse(abs(xs) > one(T), zero(T), (ld1 * sqrt(omx2) + ld2 * omx2) / ld3)
-    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if the kernel
-    # underflows. Apply the ifelse(iszero(s), one(T), s) guard used in microturbulence.jl.
+    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
     return kernel ./ sum(kernel)
 end
 
@@ -139,8 +138,7 @@ function convolve_gray_rotation_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                                                 cmem.Nλ, cmem.pad_left)
 
     # normalize the kernel
-    # TODO(zero-sum-guard): unguarded normalization; can produce NaN if the kernel
-    # underflows. Apply the ifelse(iszero(s), one(T), s) guard used in microturbulence.jl.
+    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
     normval = CUDA.sum(kernel_row)
     kernel_row ./= normval
 

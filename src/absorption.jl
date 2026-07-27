@@ -307,16 +307,14 @@ Notes:
 - Not added to the 5000 Å reference opacity `α_ref`, matching Korg, which builds `α5` from
   the continuum plus a 5000 Å linelist and adds hydrogen lines only to `α`.
 - `use_MHD=nothing` (the default) enables the MHD occupation-probability formalism only for
-  `wls[end] < 13000 Å`. This differs from Korg, whose `use_MHD_for_hydrogen_lines` defaults
-  to `true` at all wavelengths and only warns above 13000 Å that `false` is recommended; we
-  apply that recommendation automatically. Pass `use_MHD=true` to reproduce Korg's default
-  when comparing in the near-IR.
+  `wls[end] < 13000 Å`. Korg's `use_MHD_for_hydrogen_lines` defaults to `true` at all
+  wavelengths and warns above 13000 Å that `false` is preferable; this default applies that
+  recommendation directly. Pass `use_MHD=true` to match Korg when comparing in the near-IR.
 """
 function _add_hydrogen_line_absorption!(αs, wls::Korg.Wavelengths, Ts, nₑs, nH_I, nHe_I,
                                         partition_funcs, window_size_Å::Float64;
                                         use_MHD::Union{Nothing,Bool}=nothing)
     window_cm = window_size_Å * ANGSTROM_TO_CM
-    # see the note above: not Korg's default, but Korg's own recommendation past 13000 Å
     use_MHD = isnothing(use_MHD) ? (wls[end] < 13000 * ANGSTROM_TO_CM) : use_MHD  # wls in cm
     H_I_pf = partition_funcs[_HI_SPECIES]
     Threads.@threads for i in eachindex(Ts)

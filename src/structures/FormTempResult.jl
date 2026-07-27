@@ -12,11 +12,11 @@ Fields:
 - `ceiling_ratio`: per-wavelength top-of-atmosphere contamination statistic; see
   [`ceiling_ratio`](@ref).
 - `r_thresh`: the contamination threshold this result was computed with. [`boundary_mask`](@ref)
-  defaults to it, so the mask reproduces exactly the wavelengths the calculation warned about.
+  defaults to it, so the mask matches the wavelengths the calculation warned about.
 - `atmosphere`: atmosphere structure used for the calculation.
 
-The five-argument form derives `ceiling_ratio` from `cont_func`, which is how the internal
-paths build results; it is the only way to guarantee the two stay consistent.
+The five-argument form derives `ceiling_ratio` from `cont_func` and is what the internal paths
+use; prefer it over the seven-argument form, which cannot enforce that the two agree.
 """
 struct FormTempResult{T<:AF}
     wavs::Vector{T}
@@ -28,8 +28,7 @@ struct FormTempResult{T<:AF}
     atmosphere::Atmosphere{T}
 end
 
-# derive ceiling_ratio from cont_func rather than accepting it separately, so a caller
-# cannot supply a statistic that disagrees with the contribution function it came from
+# ceiling_ratio is derived, not passed, so it cannot disagree with cont_func
 function FormTempResult(wavs::Vector{T}, flux, form_temps, cont_func, atmosphere;
                         r_thresh::Real=BOUNDARY_R_THRESH) where T<:AF
     return FormTempResult(wavs, flux, form_temps, cont_func, ceiling_ratio(cont_func),

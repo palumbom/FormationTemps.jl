@@ -32,10 +32,8 @@ function linear_interp_gpu(xs::AA{T,1}, ys::AA{T,1}) where T<:AF
     return f
 end
 
-# Default flag threshold for top-of-atmosphere contamination, as a fraction of the column
-# peak. The statistic is strongly bimodal — near 0 for lines whose contribution decays inside
-# the model, near 1 for cores still rising at the truncated ceiling — so the exact value
-# matters little.
+# Default contamination threshold, as a fraction of the column peak. The statistic is
+# strongly bimodal (near 0 or near 1), so the exact cut matters little.
 const BOUNDARY_R_THRESH = 0.33
 
 """
@@ -43,15 +41,15 @@ const BOUNDARY_R_THRESH = 0.33
     ceiling_ratio(result::FormTempResult) -> Vector
 
 Per-wavelength top-of-atmosphere contamination statistic: the topmost interval's flux
-contribution as a fraction of that column's peak contribution.
+contribution as a fraction of the column peak.
 
-Near 0 when a line's contribution function has decayed well inside the model atmosphere, and
-near 1 when it is still rising at the truncated ceiling — in which case the formation
-temperature is biased toward the top boundary and should be read as a lower limit. Threshold
-it with [`boundary_mask`](@ref). Returned as a field of [`FormTempResult`](@ref).
+Near 0 when the contribution function decays inside the model atmosphere, near 1 when it is
+still rising at the top layer, where the formation temperature is a lower limit set by where
+the model was truncated. Threshold with [`boundary_mask`](@ref); also stored on
+[`FormTempResult`](@ref).
 
-An all-zero column (no contribution at all) yields 0, not `NaN`; those wavelengths are
-reported separately by [`form_temps_from_cfunc`](@ref), which sets them to `NaN`.
+An all-zero column yields 0, not `NaN`. [`form_temps_from_cfunc`](@ref) reports those
+wavelengths instead.
 """
 function ceiling_ratio(cfunc_dt::AA{T,2}) where T<:AF
     peak = vec(maximum(cfunc_dt, dims=1))
@@ -68,8 +66,7 @@ Flag wavelengths whose formation temperature is contaminated by the top of the m
 atmosphere, i.e. where [`ceiling_ratio`](@ref) exceeds `r_thresh`.
 
 For a `FormTempResult` the threshold defaults to the one the calculation used, so the mask
-reproduces exactly the wavelengths it warned about. Pass `r_thresh` explicitly to re-threshold
-after the fact.
+matches the wavelengths it warned about. Pass `r_thresh` to re-threshold.
 """
 boundary_mask(cfunc_dt::AA{<:AF,2}; r_thresh::Real=BOUNDARY_R_THRESH) =
     ceiling_ratio(cfunc_dt) .> r_thresh
@@ -82,24 +79,22 @@ boundary_mask(result::FormTempResult; r_thresh::Real=result.r_thresh) =
 
 Formation temperature at 50% of the cumulative flux contribution.
 
-Uses a node-anchored cumulative: `F = 0` at the top node `Ts[1]`, and the
-contribution accumulated through interval `k` is assigned to the deep node
-`Ts[k+1]`; the 50% crossing is interpolated against the node temperatures `Ts`.
-This avoids the half-interval cool bias of pairing the cumulative (a cell-edge
-quantity) with interval-center temperatures.
+The cumulative is node-anchored: `F = 0` at the top node `Ts[1]`, and the contribution
+accumulated through interval `k` is assigned to the deep node `Ts[k+1]`, so the 50% crossing
+interpolates against node temperatures `Ts`. Interval-center temperatures (`elav(Ts)`) would
+bias the result half an interval cool.
 
 `cfunc_dt` is `(Natm-1, Nλ)` (per-interval flux contribution); `Ts` is `(Natm,)`
 node temperatures. CPU; GPU callers pass host copies.
 
-Two degenerate outcomes are warned about rather than returned silently:
+Two degenerate cases warn:
 
-- **Non-positive column total.** No median exists, so the formation temperature is `NaN`.
+- Non-positive column total: no median exists, so the formation temperature is `NaN`.
   Reachable when an upstream microturbulence kernel underflows and zeros a column.
-- **Boundary contamination.** Where [`ceiling_ratio`](@ref) exceeds `r_thresh` the flux
-  contribution is still peaking at the top of the model, so the formation temperature is
-  biased toward `Ts[1]` and should be read as a lower limit. The warning counts exactly the
-  wavelengths [`boundary_mask`](@ref) flags at the same `r_thresh`. `warn_boundary=false`
-  silences it.
+- Boundary contamination: where [`ceiling_ratio`](@ref) exceeds `r_thresh` the contribution is
+  still peaking at the top layer, so the formation temperature is a lower limit near `Ts[1]`.
+  Flags the same wavelengths as [`boundary_mask`](@ref) at that `r_thresh`;
+  `warn_boundary=false` silences it.
 """
 function form_temps_from_cfunc(cfunc_dt::AA{T,2}, Ts::AA{T,1};
                                r_thresh::Real=BOUNDARY_R_THRESH,
@@ -109,11 +104,10 @@ function form_temps_from_cfunc(cfunc_dt::AA{T,2}, Ts::AA{T,1};
     Nλ = size(cfunc_dt, 2)
     cum = cumsum(cfunc_dt, dims=1)
 
-    # normalize by the column total (definition: 50% of total contribution; == maximum only
-    # if monotonic). cum[end:end, :] is a copy, so the in-place divide reads a fixed
-    # divisor. Guard non-positive totals: zero gives 0/0, and a (roundoff-only) negative
-    # total inverts the CDF, which `linear_interp` would silently resolve to the *deepest*
-    # temperature via its x >= last(xs) branch. Both are flagged as NaN below instead.
+    # normalize by the column total, not the maximum: the two differ unless the cumulative is
+    # monotonic. cum[end:end, :] is a copy, so the in-place divide reads a fixed divisor.
+    # Non-positive totals are flagged NaN below — zero gives 0/0, and a roundoff-negative
+    # total inverts the CDF, which linear_interp resolves to the deepest temperature.
     totals = cum[end:end, :]
     empty_col = .!(totals .> zero(T))
     n_empty = count(empty_col)
@@ -136,8 +130,7 @@ function form_temps_from_cfunc(cfunc_dt::AA{T,2}, Ts::AA{T,1};
               "flux contribution; their formation temperatures are NaN. Usually an upstream " *
               "microturbulence kernel underflow (check velocity units, m/s)." maxlog=3
     end
-    # same statistic and threshold as boundary_mask, so the warning cannot flag a different
-    # set of wavelengths than the mask a caller applies downstream
+    # same statistic and threshold as boundary_mask, so warning and mask always agree
     if warn_boundary
         n_flagged = count(boundary_mask(cfunc_dt; r_thresh=r_thresh))
         if n_flagged > 0

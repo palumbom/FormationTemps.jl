@@ -31,12 +31,11 @@ Returns a `FormTempResult` with fields:
 - `atmosphere`: atmosphere structure used for the calculation.
 
 !!! warning "Formation temperatures can be contaminated by the top of the atmosphere"
-    Where the flux contribution is still peaking at the top of the model, `form_temps` is
-    biased toward the truncated ceiling and should be read as a lower limit. This happens in
-    strong saturated cores. `result.ceiling_ratio` quantifies it per wavelength, and
-    [`boundary_mask`](@ref) flags the affected wavelengths using the `r_thresh` recorded on
-    the result — the same wavelengths the calculation warns about. Set `r_thresh` to move the
-    threshold for both.
+    Where the flux contribution is still peaking at the top of the model, `form_temps` is set
+    by where the model was truncated rather than by the line, and is a lower limit. Expect this
+    in strong saturated cores. `result.ceiling_ratio` quantifies it per wavelength and
+    [`boundary_mask`](@ref) flags the affected wavelengths, using the `r_thresh` recorded on the
+    result so the mask matches what the calculation warned about. `r_thresh` moves both.
 
 # Disk-integration method
 
@@ -45,9 +44,10 @@ accuracy and speed trade-offs.
 - `:disk` (default) — explicit integration over `Nϕ` latitude bins. The reference:
   self-consistent limb darkening, inclination `istar`, differential rotation (`α₂`, `α₄`).
 - `:quadrature` — ring-by-ring Gauss–Legendre μ-quadrature (`Nμ` nodes, `N_az` azimuth
-  samples for the per-ring Doppler kernel). Same physics, much faster.
+  samples for the per-ring Doppler kernel). Reproduces the `:disk` physics at a fraction of the
+  cost, solving transfer once per μ node instead of once per tile.
 - `:hirano` — analytic Hirano et al. (2011) rotation + macroturbulence convolution using
-  quadratic limb-darkening coefficients `u1`, `u2`. Fastest, but assumes a parametric limb
+  quadratic limb-darkening coefficients `u1`, `u2`. Cheapest, but assumes a parametric limb
   darkening law and no center-to-limb line-profile variation.
 
 `convolve` is a deprecated alias: `false` ⇒ `:disk`, `true` ⇒ `:hirano`.
@@ -55,10 +55,9 @@ accuracy and speed trade-offs.
 All three methods support `use_gpu=true`. `showprogress=false` suppresses the disk
 integration progress bar.
 
-`gpu_precision=Float32` runs GPU computations at single precision, roughly halving GPU
-memory use. Absorption coefficients are always Float64 (a Korg requirement) and converted
-before upload. Prefer the `Float64` default with `:quadrature`, which is noticeably less
-accurate at Float32.
+`gpu_precision=Float32` runs GPU computations at single precision, roughly halving GPU memory
+use. Absorption coefficients are always Float64 (a Korg requirement) and converted before
+upload. Keep the `Float64` default for `:quadrature`, which loses accuracy at Float32.
 
 The CPU `:disk` path is parallelized across tiles with `Threads.@threads`; launch Julia with
 multiple threads (`julia -t auto`) to benefit. See [Parallelization](parallelization.md).
@@ -75,7 +74,7 @@ linelist = Korg.read_linelist(joinpath(FT.datdir, "Sun_VALD.lin"))[1:500]
 # explicit disk integration (default)
 result = calc_formation_temp(star, linelist; Δλ=0.01)
 
-# fast μ-quadrature (same physics, much faster)
+# ring-by-ring μ-quadrature
 result_q = calc_formation_temp(star, linelist; Δλ=0.01, method=:quadrature)
 
 # analytic Hirano convolution (needs limb-darkening coefficients)
@@ -103,7 +102,7 @@ function calc_formation_temp(star::StellarProps, linelist; use_gpu::Bool=GPU_DEF
                           "`convolve=false`)." maxlog=1
         convolve ? :hirano : :disk
     else
-        # both given: `method` wins, but say so rather than dropping `convolve` silently
+        # both given: `method` wins, and warn so the ignored `convolve` isn't a surprise
         convolve && @warn "`convolve=true` ignored because `method=:$method` was also " *
                           "given; `method` takes precedence. Drop `convolve` " *
                           "(deprecated)." maxlog=1
@@ -499,8 +498,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             @cuda threads=ts_kc blocks=bs_kc compute_rt_macro_dft_layout_2d!(
                 kbuf_mac, gpu_mem.λs, v_losals_gpu, Int32(i0_mac), G(star.ζ),
                 Int32(Nλ), Int32(L_mac))
-            # TODO(zero-sum-guard): unguarded normalization; can produce NaN if the kernel
-            # underflows. Apply the ifelse(iszero(s), one(T), s) guard used in microturbulence.jl.
+            # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
             kbuf_mac ./= sum(kbuf_mac, dims=2)
             CUDA.unsafe_free!(v_losals_gpu)
 

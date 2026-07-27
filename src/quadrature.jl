@@ -1,14 +1,15 @@
-# Ring-by-ring μ-quadrature disk integration: a CPU/GPU alternative to the explicit
-# tile-based disk integration (method=:disk, which remains the reference). The disk integral
-# is evaluated as a Gauss-Legendre quadrature in μ, so the radiative transfer — which depends
-# on a surface element only through μ — is solved once per μ node rather than once per tile,
-# and rotation enters as a per-ring azimuthal Doppler convolution.
+# Ring-by-ring μ-quadrature disk integration (method=:quadrature), a CPU/GPU alternative to
+# the explicit tiling of method=:disk, which remains the reference. The disk integral is a
+# Gauss-Legendre quadrature in μ: radiative transfer depends on a surface element only
+# through μ, so it is solved once per μ node rather than once per tile, and rotation enters
+# as a per-ring azimuthal Doppler convolution.
 #
-# Applying rotation after the RT solve is exact rather than an approximation: the transfer is
-# wavelength-local (nothing couples wavelengths), so Doppler-shifting the input opacity
-# α(λ) → α(λ(1-v/c)) shifts the emergent intensity identically. The azimuthal average over a
-# ring is then a convolution of the ring's zero-Doppler spectrum with the ring's LOS velocity
-# distribution. The macro and ring-Doppler kernels are both linear, so their order is free.
+# Rotation is applied after the transfer solve, which requires that transfer be
+# wavelength-local. Nothing here couples wavelengths, so Doppler-shifting the input opacity
+# α(λ) → α(λ(1-v/c)) shifts the emergent intensity identically, and the azimuthal average
+# over a ring is a convolution of the ring's zero-Doppler spectrum with its LOS velocity
+# distribution. Introducing anything that couples wavelengths (scattering) invalidates the
+# method. The macro and ring-Doppler kernels are both linear, so their order is free.
 
 # Truncated weight below this fraction is roundoff, not a real window problem.
 const _RING_TRUNC_WARN = 1e-6
@@ -16,7 +17,7 @@ const _RING_TRUNC_WARN = 1e-6
 """
     _ring_kernel_rigid!(K, v_max, Δv, i0, Nλ) -> dropped
 
-Exact bin-integrated ring Doppler kernel for solid-body rotation, written into `K`.
+Bin-integrated ring Doppler kernel for solid-body rotation, written into `K`.
 Returns the weight falling outside the grid.
 
 For `α₂ = α₄ = 0` the LOS velocity is `v(az) = -v_max·cos(az)`, `v_max = vsini·r_k`,
@@ -24,10 +25,9 @@ independent of inclination. With azimuth uniform on `[0, 2π)`, `u = v/v_max` fo
 arcsine distribution on `[-1, 1]`, with CDF `G(u) = asin(u)/π + 1/2`. Bin `n` spans
 `(n - i0 ± 1/2)·Δv`, so its weight is the CDF difference across its edges.
 
-Evaluating the CDF analytically rather than sampling makes the bin weights exact, keeps the
-kernel exactly symmetric (`asin` is odd, so no radial-velocity shift is representable), and
-costs `O(support)` arcsin evaluations. The integrable `1/√(1-u²)` singularity at `±v_max`
-needs no special handling, since the CDF is finite there.
+`asin` is odd, so the bin weights come out exactly symmetric and the kernel cannot represent a
+radial-velocity shift; sampling the distribution instead would lose that. The integrable
+`1/√(1-u²)` singularity at `±v_max` needs no special handling because the CDF is finite there.
 """
 function _ring_kernel_rigid!(K::AA{T,1}, v_max::T, Δv::T, i0::Int, Nλ::Int) where T<:AF
     G(u) = asin(clamp(u, -one(T), one(T))) / T(π) + T(0.5)
@@ -55,10 +55,9 @@ closed form, so azimuth is sampled. Each arc `[az_k, az_{k+1}]` carries weight `
 and maps to the velocity interval spanned by its endpoints; that weight is distributed
 across the bins that interval overlaps.
 
-This is not a linear/CIC deposit, which treats each sample as a point and splits it between
-neighbouring bins by linear weights — that converges to the true kernel convolved with a
-spurious ~`Δv` triangle and over-broadens narrow kernels. Integrating each arc's actual
-velocity extent is exact bin integration, second-order in the arc width rather than first.
+Each arc's velocity extent is integrated, not deposited at a point. A linear/CIC deposit,
+splitting each sample between neighboring bins by linear weights, converges to the true kernel
+convolved with a spurious ~`Δv` triangle and over-broadens narrow kernels.
 
 `N_fine` is forced even. The `v ↔ -v` symmetry of the exact distribution comes from
 `az → π - az`, which flips `x_sky` while leaving the latitude (hence `f`) fixed; on the
@@ -123,18 +122,17 @@ The kernel is the area-exact bin-integrated LOS velocity distribution, computed 
 depending on the rotation law:
 
 - `α₂ = α₄ = 0` (solid body, the default): analytically via the arcsine CDF,
-  [`_ring_kernel_rigid!`](@ref). Exact, symmetric, and inclination-independent.
-- otherwise: by arc-overlap deposition over an even number of azimuthal arcs,
+  [`_ring_kernel_rigid!`](@ref). Inclination-independent.
+- otherwise: by arc-overlap integration over an even number of azimuthal arcs,
   [`_ring_kernel_diffrot!`](@ref). `N_az` floors the arc count and only matters here.
 
 Both are symmetric in velocity, so the kernel carries no spurious radial-velocity shift.
-Weight Doppler-shifted outside the wavelength window is discarded and the kernel
-renormalized, which narrows the broadening; that is warned about rather than left silent,
-since it means the synthesis window is too narrow for `vsini`.
+Weight shifted outside the wavelength window is discarded and the kernel renormalized, which
+narrows the broadening; a warning fires, since it means the synthesis window is too narrow
+for `vsini`.
 
-Accuracy is limited by the kernel living on the wavelength pixel grid: the bin weights are
-exact, but their positions are quantized to `Δv`, which matters most at low `vsini` where
-the kernel spans only a few pixels. See the "Integration Methods" guide for the resulting
+The bin weights are exact but their positions are quantized to `Δv`, which bounds accuracy at
+low `vsini` where the kernel spans only a few pixels. See the "Integration Methods" guide for
 tolerances against `method=:disk`.
 """
 function _ring_doppler_kernel(μ_k::T, vsini::T, iₛ::T, α₂::T, α₄::T,
@@ -168,10 +166,9 @@ function _ring_doppler_kernel(μ_k::T, vsini::T, iₛ::T, α₂::T, α₄::T,
         _ring_kernel_diffrot!(K, μ_k, r_k, vsini, iₛ, α₂, α₄, Δv, i0, Nλ, N_az)
     end
 
-    # Truncated weight is renormalized away below, silently narrowing the rotational
-    # broadening. Reachable when the kernel support exceeds the window: 2·v_max/Δv > Nλ.
-    # Surface it so a too-narrow window (or a cm/s vs m/s unit error in vsini) is visible
-    # rather than showing up as an unexplained shallow line profile.
+    # Truncated weight is renormalized away below, narrowing the rotational broadening.
+    # Reachable when the kernel support exceeds the window: 2·v_max/Δv > Nλ. Warn, since the
+    # only symptom is a shallow line profile (often a cm/s vs m/s unit error in vsini).
     if dropped > T(_RING_TRUNC_WARN)
         @warn "ring Doppler kernel truncated by the wavelength window: $(round(100*dropped, digits=2))% " *
               "of the azimuthal weight fell outside the grid (kernel support " *
@@ -192,10 +189,9 @@ end
     _calc_formation_temp_quadrature_cpu(star, linelist; Δλ, minλ, maxλ, buffer,
                                         Nμ=32, N_az=256, kwargs...)
 
-Ring-by-ring μ-quadrature evaluation of the disk-integrated flux formation
-temperatures (CPU). Produces the same `FormTempResult` as the explicit tiling path
-(`method=:disk`); intended as a fast, validated supplement. `Nμ` sets the number of
-Gauss–Legendre μ nodes; `N_az` the azimuthal sampling of the per-ring Doppler kernel.
+Ring-by-ring μ-quadrature evaluation of the disk-integrated flux formation temperatures (CPU).
+Produces the same `FormTempResult` as the explicit tiling path (`method=:disk`). `Nμ` sets the
+number of Gauss–Legendre μ nodes; `N_az` the azimuthal sampling of the per-ring Doppler kernel.
 """
 function _calc_formation_temp_quadrature_cpu(star::StellarProps, linelist; Δλ::T=0.01,
                                              minλ::T=NaN, maxλ::T=NaN, buffer::T=2.0,

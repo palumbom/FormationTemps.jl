@@ -27,15 +27,13 @@ let
         @test issorted(reverse(zs))
         @test issorted(Ts)
 
-        # the native MARCS grid is used as-is (constructor no longer resamples):
-        # fields match the source atmosphere exactly
+        # the native MARCS grid is used as-is: fields match the source atmosphere exactly
         @test τs == τs_orig
         @test zs == zs_orig
         @test Ts == Ts_orig
 
-        # regression guard: the native solar grid is genuinely non-uniform in log τ.
-        # (We deliberately stopped resampling to a uniform grid — the τ integrators are
-        # spacing-aware, matching Korg, which also integrates on the native grid.)
+        # regression guard: the native solar grid really is non-uniform in log τ. The τ
+        # integrators are spacing-aware, as Korg's are, so the grid is not resampled.
         log_τ = log.(τs)
         @test maximum(diff(log_τ)) / minimum(diff(log_τ)) > 1.05
 
