@@ -12,6 +12,8 @@ notes/
 
 *.pdf
 *.csv
+# curated mask input, not generated data
+!data/bad_lines.csv
 *.moog
 *.lin
 *.dat

@@ -24,9 +24,14 @@ plt.rc("text", usetex=true)
 plt.rc("text.latex", preamble="\\usepackage{amsmath}
                                \\usepackage{mathrsfs}")
 
-# vacuum or air wavelengths
-vacuum_wavs = true
+# Frame of the *stored* wavelength axis. Korg computes in vacuum unconditionally — air is a
+# labelling of the sample points, not a frame the physics runs in — so synthesis always uses
+# the vacuum grid `read_linelist` returns and this flag only relabels the output.
+vacuum_wavs = false
 wav_label = vacuum_wavs ? "vacuum" : "air"
+
+# Relabel synthesis-frame (vacuum) wavelengths for output. Accepts a scalar or an array.
+to_output_frame(λ_Å) = vacuum_wavs ? λ_Å : Korg.vacuum_to_air.(λ_Å)
 
 # set directory
 cephdir = abspath("/mnt/home/mpalumbo/ceph/")
@@ -43,10 +48,10 @@ linelist = Korg.read_linelist("/mnt/home/mpalumbo/ceph/formation_temps/Sun_VALD_
 # idx2 = findfirst(wls .>= 4000.0)
 # linelist = linelist[idx1:idx2]
 
-# convert to air wavelengths
-if !vacuum_wavs
-    linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
-end
+# The linelist stays in the vacuum frame read_linelist returns it in. Rewriting it to air
+# would tell Korg each metal line's *vacuum* wavelength is its air value, displacing the
+# metals while Korg's internally-tabulated hydrogen lines stay put — leaving the two frames
+# ~1.8 Å apart at Hα. The frame is applied to the output axis instead, via to_output_frame.
 # [doc:linelist-end]
 
 # parse values values
@@ -92,6 +97,52 @@ Ts = atm_cpu.Ts
 # into the calculation, which warns on it and records it on each result, so FT.boundary_mask
 # below reproduces exactly the pixels that were warned about.
 r_thresh = FT.BOUNDARY_R_THRESH
+
+# curated model-validity mask: flag lines whose formation temperature is not trustworthy
+# under LTE in a 1D static atmosphere, which no cont_func statistic can detect. Read once
+# here rather than per chunk, so a mid-run edit cannot produce an inconsistent output file.
+include(joinpath(FT.moddir, "scripts", "bad_lines_mask.jl"))
+
+bad_lines_file = joinpath(FT.datdir, "bad_lines.csv")
+# vacuum=true regardless of vacuum_wavs: seeds are matched against the synthesis grid and the
+# linelist, both of which are vacuum. Only the stored axis carries the output frame.
+bad_lines_all = read_bad_lines(bad_lines_file; vacuum=true,
+                               max_extent_default=MAX_EXTENT_DEFAULT)
+v_broad = sqrt(vsini^2 + ζ_RT^2 + ξ^2)
+
+# Drop entries whose species the linelist lacks near the tabulated wavelength. `wls` and
+# `species` are in the frame the synthesis uses, so the comparison needs no conversion.
+bad_lines_vac = verify_species_present(bad_lines_all, wls, species;
+                                       n_sigma_halo=N_SIGMA_HALO, v_broad=v_broad)
+@printf(">>> Bad-lines mask: %d of %d curated entries have their species in the linelist\n",
+        length(bad_lines_vac), length(bad_lines_all))
+
+# Past this point everything runs in the output frame: the seeds, the grids handed to
+# build_line_mask, and the stored axis. Relabelling is monotonic and preserves pixels, so the
+# growth is unchanged; only the halo's λ scale shifts, by the 0.03% between frames.
+bad_lines = [(; e..., λ=to_output_frame(e.λ)) for e in bad_lines_vac]
+
+# Assemble both masks for one output group and record which lines produced the curated bits.
+# boundary_mask is taken from the cfunc with an explicit r_thresh, which matches what the
+# calculation was passed, so the flagged set equals the set it warned about.
+# `wavs` must be in the output frame, matching `bad_lines` and the stored axis.
+function write_mask!(g, wavs, flux, cfunc)
+    # τs_ref is required: the statistic compares the topmost interval against the column
+    # peak, and the native MARCS grid makes those intervals unequal in width
+    bnd = ifelse.(FT.boundary_mask(cfunc, τs_ref; r_thresh=r_thresh), MASK_BOUNDARY, 0x00)
+    lm = build_line_mask(wavs, flux, bad_lines; n_sigma_halo=N_SIGMA_HALO,
+                         depth_thresh=DEPTH_THRESH, min_core_depth=MIN_CORE_DEPTH,
+                         v_broad=v_broad, core_frac=CORE_FRAC)
+    g["mask"] = lm.mask .| bnd
+    if !isempty(lm.regions)
+        gl = create_group(g, "line_mask")
+        gl["lambda_lo"] = [r.λ_lo for r in lm.regions]
+        gl["lambda_hi"] = [r.λ_hi for r in lm.regions]
+        gl["flag"] = [r.flag for r in lm.regions]
+        gl["label"] = [r.label for r in lm.regions]
+    end
+    return lm
+end
 
 # [doc:chunked-start]
 # chunked computation parameters
@@ -141,6 +192,8 @@ let chunk_idx = Ref(0)
         HDF5.attributes(h5)["buffer"] = buffer
         HDF5.attributes(h5)["wavelength_frame"] = wav_label
         HDF5.attributes(h5)["mask_r_thresh"] = r_thresh
+        HDF5.attributes(h5)["mask_bit_meanings"] = MASK_BIT_MEANINGS
+        HDF5.attributes(h5)["line_mask_source"] = basename(bad_lines_file)
 
         # include atmosphere data in the same output file
         g_atm = create_group(h5, "model_atmosphere")
@@ -152,8 +205,9 @@ let chunk_idx = Ref(0)
         # callback writes each chunk to HDF5 as it completes
         function write_chunk(ci, result, ll_chunk)
             chunk_idx[] = ci
-            wavs = collect(result.wavs)
-            line_centers = [l.wl * 1e8 for l in ll_chunk]
+            # relabel once, then store and mask against the same axis
+            wavs = to_output_frame(collect(result.wavs))
+            line_centers = to_output_frame([l.wl * 1e8 for l in ll_chunk])
             g = create_group(h5, @sprintf("chunk_%04d", ci))
             g["line_centers"] = line_centers
             g["wavs"] = wavs
@@ -162,7 +216,9 @@ let chunk_idx = Ref(0)
             g["cfunc"] = result.cont_func
             r = FT.ceiling_ratio(result)
             g["ceiling_ratio"] = r
-            g["mask"] = UInt8.(FT.boundary_mask(result))
+            # growth truncates at chunk edges — Ha's extent exceeds chunk_width — so the
+            # blended 1D output below is the authoritative mask
+            write_mask!(g, wavs, result.flux, result.cont_func)
         end
 
         FT.calc_formation_temp_chunked(star_props, linelist;
@@ -279,8 +335,10 @@ h5open(outfile, "r") do h5in
     # Trim to the actual linelist extent + buffer. The grid is uniform and trim_lo coincides
     # with the first chunk's start, so the kept region is one contiguous range — the trim only
     # drops the overshoot from rounding the last chunk's upper bound. Taking a view of the
-    # cfunc columns rather than a slice avoids a second full-size copy.
-    wls_Å = [l.wl * 1e8 for l in linelist]
+    # cfunc columns rather than a slice avoids a second full-size copy. The bounds are
+    # relabelled because b.wavs comes from the chunk file's stored (output-frame) axis, while
+    # the linelist stays in the vacuum synthesis frame.
+    wls_Å = to_output_frame([l.wl * 1e8 for l in linelist])
     trim_lo = first(wls_Å) - buffer
     trim_hi = last(wls_Å) + buffer
     lo = findfirst(>=(trim_lo), b.wavs)
@@ -319,6 +377,8 @@ h5open(outfile, "r") do h5in
         HDF5.attributes(h5out)["buffer"] = buffer
         HDF5.attributes(h5out)["wavelength_frame"] = wav_label
         HDF5.attributes(h5out)["mask_r_thresh"] = r_thresh
+        HDF5.attributes(h5out)["mask_bit_meanings"] = MASK_BIT_MEANINGS
+        HDF5.attributes(h5out)["line_mask_source"] = basename(bad_lines_file)
 
         g_atm = create_group(h5out, "model_atmosphere")
         g_atm["zs"] = zs
@@ -332,9 +392,10 @@ h5open(outfile, "r") do h5in
         g_out["flux"] = all_flux
         g_out["temp"] = all_temps
         g_out["cfunc"] = all_cfunc
-        r = FT.ceiling_ratio(all_cfunc)
+        r = FT.ceiling_ratio(all_cfunc, τs_ref)
         g_out["ceiling_ratio"] = r
-        g_out["mask"] = UInt8.(FT.boundary_mask(all_cfunc; r_thresh=r_thresh))
+        lm_1d = write_mask!(g_out, all_wavs, all_flux, all_cfunc)
+        report_line_mask(lm_1d.regions; n_read=length(bad_lines_all))
     end
 end
 # [doc:blend-end]

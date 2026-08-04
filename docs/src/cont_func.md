@@ -14,6 +14,34 @@ Markdown.parse("```julia\n" * code * "\n```")
 ```
 ![formation_temps](static/cont_func_simple_example.png)
 
+## Integrals or densities?
+
+`cont_func` holds **per-interval integrals**: element `[k, j]` is the contribution of the
+atmosphere interval between layers `k` and `k+1` to the flux at wavelength `j`, so
+
+```julia
+sum(result.cont_func, dims=1)   # ∝ the emergent flux
+```
+
+Each element therefore already carries the width of its own layer interval. That has a
+consequence worth stating plainly, because it points in opposite directions for two different
+uses:
+
+- **Sums over depth use `cont_func` directly.** Weighted means, cumulative distributions, and
+  the 50% crossing behind [`form_temps_from_cfunc`](@ref) are all sums, in which the interval
+  width cancels. These are independent of the model's layer grid. Dividing by the interval
+  width first would drop that weighting and bias the result.
+- **Comparisons across depth need a density.** Plotting against depth, or taking a ratio of
+  one interval to another, reads the interval widths as if they were signal. MARCS samples
+  depth at Δlog τ_ref = 0.1 dex for log τ_ref ∈ [-3, +1] and 0.2 dex outside it, so a raw
+  plot of `cont_func` carries a factor-of-two step at those two depths that is an artifact of
+  the grid, not of the physics. [`cfunc_per_dex`](@ref) divides the width out, giving
+  `dF/dlog₁₀τ_ref`.
+
+The examples on this page plot `cfunc_per_dex(result)` for that reason.
+[`ceiling_ratio`](@ref) is a ratio of two intervals, so it requires the reference grid for the
+same reason and applies the conversion internally.
+
 We can also add axis values. The x-axis is wavelength, and y-axis is a coordinate in the model atmosphere. Let's first parse out and view the model atmosphere structure from the ```FormTempResult``` composite type instance. 
 
 ```@eval

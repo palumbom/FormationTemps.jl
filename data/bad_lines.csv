@@ -1,0 +1,41 @@
+# Lines whose formation temperature is not trustworthy under LTE in a 1D static
+# atmosphere. This mask is a claim about model validity only: telluric contamination,
+# ISM absorption, and pipeline artifacts are out of scope.
+#
+# Calibrated for the Sun / FGK dwarfs. Not valid for M dwarfs or giants.
+#
+# lambda_air : line center, AIR wavelengths in Angstrom, strictly ascending
+# species    : Korg species code ("Mg I", "Ca II"). Checked against the linelist before
+#              masking: an entry whose species is absent near lambda_air is dropped, since
+#              the seed search would otherwise mask whichever unrelated line is deepest
+#              there. H I is exempt — Korg synthesizes hydrogen from its own data.
+# label      : short unique name, used in plots and the HDF5 provenance table
+# flag       : chromo | nlte | linedata
+# max_extent : half-width cap in Angstrom; blank inherits MAX_EXTENT_DEFAULT
+# citation   : optional provenance for the claim
+lambda_air,species,label,flag,max_extent,citation
+3933.663,Ca II,Ca II K,chromo,10.0,
+3968.469,Ca II,Ca II H,chromo,10.0,
+4101.740,H I,Hd,nlte,15.0,
+4226.728,Ca I,Ca I 4226,nlte,,
+4340.470,H I,Hg,nlte,15.0,
+4554.029,Ba II,Ba II 4554,linedata,,
+4861.350,H I,Hb,nlte,20.0,
+4934.076,Ba II,Ba II 4934,linedata,,
+5167.321,Mg I,Mg I 5167,nlte,,
+5172.684,Mg I,Mg I 5173,nlte,,
+5183.604,Mg I,Mg I 5184,nlte,,
+5875.621,He I,He I 5876,chromo,,
+5889.951,Na I,Na I D2,nlte,,
+5895.924,Na I,Na I D1,nlte,,
+6141.713,Ba II,Ba II 6142,linedata,,
+6496.897,Ba II,Ba II 6497,linedata,,
+6562.797,H I,Ha,nlte,25.0,
+6707.800,Li I,Li I 6708,nlte,,
+7698.965,K I,K I 7699,nlte,,
+7771.944,O I,O I 7772,nlte,,
+7774.166,O I,O I 7774,nlte,,
+7775.388,O I,O I 7775,nlte,,
+8498.020,Ca II,Ca II 8498,chromo,,
+8542.090,Ca II,Ca II 8542,chromo,,
+8662.140,Ca II,Ca II 8662,chromo,,

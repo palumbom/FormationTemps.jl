@@ -27,9 +27,14 @@ flux = form_temp_result.flux
 temp = form_temp_result.form_temps
 cont_func = form_temp_result.cont_func
 
+# cont_func holds per-interval integrals, so its magnitude follows the layer spacing of the
+# model atmosphere. Convert to a density per dex of reference optical depth before plotting
+# against depth; see the note below on integrals vs densities.
+cont_dens = cfunc_per_dex(form_temp_result)
+
 # plot the output
 fig, ax1 = plt.subplots(figsize=(9.6,4.8))
-img = ax1.pcolormesh(cont_func ./ maximum(cont_func), cmap="viridis")
+img = ax1.pcolormesh(cont_dens ./ maximum(cont_dens), cmap="viridis")
 ax1.set_xticklabels([])
 ax1.set_yticklabels([])
 fname = joinpath(FT.moddir, "docs", "src", "static", "cont_func_simple_example.png")
@@ -75,7 +80,7 @@ idx2 = findfirst(x -> x .>= maximum(rest_wls) + buffer, wavs)
 xedges = view(wavs, idx1:idx2)
 yedges = log10.(elav(τs))
 yedges2 = elav(zs ./ 1e7)
-cfuncp = view(cont_func, :, idx1:idx2)
+cfuncp = view(cont_dens, :, idx1:idx2)
 
 # plot the contribution function
 fig, ax1 = plt.subplots(figsize=(9.6,4.8))

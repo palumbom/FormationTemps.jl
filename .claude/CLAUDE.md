@@ -49,6 +49,28 @@ julia --startup-file=no --project=docs docs/make.jl
 
 Returns `FormTempResult` with fields `wavs`, `flux`, `form_temps`, `cont_func`, `atmosphere`.
 
+#### `cont_func` is a per-interval integral, not a density
+
+`cont_func[k, j]` is `cfunc * Δτ_λ`: the contribution of the atmosphere interval between layers
+`k` and `k+1`, such that `sum(cont_func, dims=1)` is the emergent flux. The layer width is
+already inside each element, which splits its consumers in two:
+
+- **Sums over depth take it as-is.** Weighted means, cumulative distributions, and the 50%
+  crossing in `form_temps_from_cfunc` are sums in which the interval width cancels, so they are
+  independent of the layer grid. Dividing by the width first drops that weighting.
+- **Comparisons across depth must divide the width out first**, via `cfunc_per_dex(cfunc_dt,
+  τ_ref)` → `dF/dlog₁₀τ_ref`. The atmosphere constructors use the native MARCS grid, which
+  samples at Δlog τ_ref = 0.1 dex for log τ_ref ∈ [-3, +1] and 0.2 dex outside, so any
+  across-layer comparison of raw `cont_func` carries a factor-of-two step at those two depths
+  (T ≈ 4500 K and ≈ 8900 K for the Sun). This is why `ceiling_ratio` and `boundary_mask`
+  require `τ_ref` — as a ratio of two intervals, a bare reduction over-flags by ~2×.
+
+Plot `dF/dlog₁₀τ_ref`, not `dF/dτ_ref`: both remove the step, but the linear-τ density varies
+by only ~1.5× between log τ_ref = -3 and the peak against ~1300× for the per-dex density, so it
+flattens the real depth structure. `test/test_cfunc_measure.jl` pins both the conversion and the
+grid-invariance of `ceiling_ratio`, and asserts that the bare reduction is *not* invariant so
+the conversion cannot be dropped as redundant.
+
 ### GPU vs CPU
 
 The module sets `GPU_DEFAULT = CUDA.functional()` at load time. Both `_calc_formation_temp_cpu` and `_calc_formation_temp_gpu` exist; the GPU path uses `AtmosphereGPU`, `GPUMemory`, `ConvolutionMemory`, and `BatchedMicroConvMem` structs that pre-allocate CuArrays and CUFFT plans. Pass `use_gpu=false` to force CPU. Pass `gpu_precision=Float32` to run GPU computations at single precision (absorption is always Float64 via Korg; conversion happens before GPU upload).

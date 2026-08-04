@@ -21,7 +21,11 @@ chunks = calc_formation_temp_chunked(star, linelist;
 
 Each element is a full [`FormTempResult`](@ref) (`wavs`, `flux`, `form_temps`, `cont_func`, `ceiling_ratio`, `r_thresh`, `atmosphere`). Adjacent chunks overlap by `overlap` Angstroms, so you can blend or cut at the midpoint.
 
-`ceiling_ratio` is a per-chunk reduction over `cont_func`. When stitching, recompute it from the stitched contribution function ([`ceiling_ratio`](@ref) accepts a bare matrix) instead of concatenating the per-chunk vectors.
+`ceiling_ratio` is a per-chunk reduction over `cont_func`. When stitching, recompute it from the stitched contribution function instead of concatenating the per-chunk vectors: [`ceiling_ratio`](@ref) accepts a bare matrix alongside the atmosphere's reference optical depth grid, which it needs because the statistic compares two layer intervals of unequal width.
+
+```julia
+r = ceiling_ratio(stitched_cont_func, get_τs(results[1].atmosphere))
+```
 
 ## Choosing a method
 

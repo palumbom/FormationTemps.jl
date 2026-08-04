@@ -268,8 +268,10 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
 
     flux_norm = vec(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1))
 
-    # formation temperature at 50% cumulative flux contribution (node-anchored CDF)
-    form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts; r_thresh=r_thresh)
+    # formation temperature at 50% cumulative flux contribution (node-anchored CDF).
+    # τ_ref only feeds the boundary warning, which compares intervals of unequal width.
+    form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts; τ_ref=atm_cpu.τs,
+                                       r_thresh=r_thresh)
 
     cont_func = cfunc_dt_flux
     return FormTempResult(collect(λs_korg), flux_norm, form_temps, cont_func, atm_cpu;
@@ -648,8 +650,9 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     flux_norm = G.(vec(Array(sum(cfunc_dt_flux, dims=1) ./ sum(cfunc_dt_flux_cont, dims=1))))
 
     # formation temperature at 50% cumulative flux contribution (node-anchored CDF);
-    # extraction is host-side, so pass host copies
-    form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts); r_thresh=r_thresh)
+    # extraction is host-side, so pass host copies. τ_ref only feeds the boundary warning.
+    form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts);
+                                       τ_ref=atm_gpu.τs, r_thresh=r_thresh)
 
     cont_func = Array(cfunc_dt_flux)
     return FormTempResult(G.(collect(λs_korg)), flux_norm, form_temps, cont_func, atm_gpu;

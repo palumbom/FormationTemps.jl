@@ -80,34 +80,39 @@ end
     # fraction of the column peak) and `boundary_mask` thresholds it. Both are core outputs so
     # callers do not each reinvent the criterion.
     Ts = [4000.0, 5000.0, 6000.0, 7000.0]
+    # Δlog₁₀τ_ref = 1 exactly, so the per-dex density equals the per-interval integrals and
+    # these ratios are read directly off the numbers below. See test_cfunc_measure.jl for the
+    # non-uniform case, which is where the measure matters.
+    τ_unif = 10.0 .^ [-3.0, -2.0, -1.0, 0.0]
 
     @testset "ceiling_ratio" begin
-        @test ceiling_ratio(reshape([0.2, 0.6, 0.2], 3, 1)) ≈ [0.2 / 0.6]
-        @test ceiling_ratio(reshape([0.9, 0.05, 0.05], 3, 1)) ≈ [1.0]      # peak IS the top
-        @test ceiling_ratio(reshape([0.05, 0.9, 0.05], 3, 1)) ≈ [0.05 / 0.9]
+        @test ceiling_ratio(reshape([0.2, 0.6, 0.2], 3, 1), τ_unif) ≈ [0.2 / 0.6]
+        @test ceiling_ratio(reshape([0.9, 0.05, 0.05], 3, 1), τ_unif) ≈ [1.0]  # peak IS the top
+        @test ceiling_ratio(reshape([0.05, 0.9, 0.05], 3, 1), τ_unif) ≈ [0.05 / 0.9]
 
         # columns are independent
-        @test ceiling_ratio(hcat([0.9, 0.05, 0.05], [0.05, 0.9, 0.05])) ≈ [1.0, 0.05 / 0.9]
+        @test ceiling_ratio(hcat([0.9, 0.05, 0.05], [0.05, 0.9, 0.05]), τ_unif) ≈
+            [1.0, 0.05 / 0.9]
 
         # scale-invariant, so it is comparable across lines of different depth
         c = reshape([0.2, 0.6, 0.2], 3, 1)
-        @test ceiling_ratio(1e-8 .* c) ≈ ceiling_ratio(c)
+        @test ceiling_ratio(1e-8 .* c, τ_unif) ≈ ceiling_ratio(c, τ_unif)
 
         # an all-zero column is 0, not NaN; those are reported separately as NaN form_temps
-        @test ceiling_ratio(reshape(zeros(3), 3, 1)) == [0.0]
+        @test ceiling_ratio(reshape(zeros(3), 3, 1), τ_unif) == [0.0]
 
-        @test eltype(ceiling_ratio(Float32.(c))) == Float32
+        @test eltype(ceiling_ratio(Float32.(c), Float32.(τ_unif))) == Float32
     end
 
     @testset "boundary_mask thresholds it" begin
         just_over  = reshape([0.34, 1.0, 0.1], 3, 1)     # ratio 0.34
         just_under = reshape([0.32, 1.0, 0.1], 3, 1)     # ratio 0.32
         @test FT.BOUNDARY_R_THRESH == 0.33
-        @test boundary_mask(just_over)  == [true]
-        @test boundary_mask(just_under) == [false]
+        @test boundary_mask(just_over, τ_unif)  == [true]
+        @test boundary_mask(just_under, τ_unif) == [false]
         # threshold is honoured in both directions
-        @test boundary_mask(just_over;  r_thresh=0.5) == [false]
-        @test boundary_mask(just_under; r_thresh=0.2) == [true]
+        @test boundary_mask(just_over, τ_unif;  r_thresh=0.5) == [false]
+        @test boundary_mask(just_under, τ_unif; r_thresh=0.2) == [true]
     end
 
     @testset "the warning fires iff any(boundary_mask)" begin
@@ -119,10 +124,10 @@ end
                   reshape([0.05, 0.9, 0.05], 3, 1))     # not flagged, well resolved
             logger = Test.TestLogger(respect_maxlog=false)
             Base.CoreLogging.with_logger(logger) do
-                form_temps_from_cfunc(c, Ts)
+                form_temps_from_cfunc(c, Ts; τ_ref=τ_unif)
             end
             warned = any(l -> occursin("peaking at the top", string(l.message)), logger.logs)
-            @test warned == any(boundary_mask(c))
+            @test warned == any(boundary_mask(c, τ_unif))
         end
     end
 
@@ -130,25 +135,25 @@ end
         c = hcat([0.9, 0.05, 0.05], [0.05, 0.9, 0.05], [0.34, 1.0, 0.1], [0.32, 1.0, 0.1])
         logger = Test.TestLogger(respect_maxlog=false)
         Base.CoreLogging.with_logger(logger) do
-            form_temps_from_cfunc(c, Ts)
+            form_temps_from_cfunc(c, Ts; τ_ref=τ_unif)
         end
         msg = only(filter(m -> occursin("peaking at the top", m),
                           [string(l.message) for l in logger.logs]))
         n_reported = parse(Int, match(r"(\d+) of \d+ wavelengths", msg).captures[1])
-        @test n_reported == count(boundary_mask(c)) == 2
+        @test n_reported == count(boundary_mask(c, τ_unif)) == 2
     end
 
     @testset "warn_boundary=false silences it without changing the value" begin
         pinned = reshape([0.9, 0.05, 0.05], 3, 1)
         ft = @test_logs (:warn, r"peaking at the top") match_mode=:any begin
-            form_temps_from_cfunc(pinned, Ts)
+            form_temps_from_cfunc(pinned, Ts; τ_ref=τ_unif)
         end
         # crossing at F=0.5 within a first interval holding 0.9 → 4000 + 1000*(0.5/0.9)
         @test isapprox(ft[1], 4000.0 + 1000.0 * (0.5 / 0.9); atol=1e-9)
         @test Ts[1] <= ft[1] <= Ts[2]
 
         quiet = @test_logs min_level=Base.CoreLogging.Warn begin
-            form_temps_from_cfunc(pinned, Ts; warn_boundary=false)
+            form_temps_from_cfunc(pinned, Ts; τ_ref=τ_unif, warn_boundary=false)
         end
         @test quiet == ft
     end
@@ -158,22 +163,28 @@ end
     # the five-argument constructor derives ceiling_ratio, so it cannot disagree with
     # cont_func, and records the threshold so boundary_mask reproduces the warned set
     cf = hcat([0.9, 0.05, 0.05], [0.05, 0.9, 0.05], [0.4, 1.0, 0.1])
-    atm = FT.AtmosphereCPU(Korg.interpolate_marcs(5777.0, 4.44, Korg.format_A_X(0.0)))
+    # 4-layer stand-in whose τ_ref matches cf's row count, with Δlog₁₀τ_ref = 1 so the
+    # asserted ratios are read straight off cf. A real MARCS atmosphere has 56 layers and
+    # would not pair with a 3-row contribution function.
+    n = size(cf, 1) + 1
+    atm = FT.AtmosphereCPU(n, 10.0 .^ collect(range(-(n - 1.0), 0.0, length=n)),
+                           zeros(n), [4e3, 5e3, 6e3, 7e3], zeros(n), zeros(n), 5e-5,
+                           zeros(n), zeros(n), zeros(n), zeros(n), zeros(n))
     mk(; kw...) = FormTempResult([1.0, 2.0, 3.0], ones(3), [5e3, 6e3, 7e3], cf, atm; kw...)
 
     res = mk()
-    @test res.ceiling_ratio == ceiling_ratio(cf)
-    @test ceiling_ratio(res) == ceiling_ratio(cf)
+    @test res.ceiling_ratio == ceiling_ratio(cf, atm.τs)
+    @test ceiling_ratio(res) == ceiling_ratio(cf, atm.τs)
     @test res.r_thresh == FT.BOUNDARY_R_THRESH
-    @test boundary_mask(res) == boundary_mask(cf)
+    @test boundary_mask(res) == boundary_mask(cf, atm.τs)
 
     # the recorded threshold is what boundary_mask defaults to
     res_hi = mk(r_thresh=0.5)
     @test res_hi.r_thresh == 0.5
-    @test boundary_mask(res_hi) == (ceiling_ratio(cf) .> 0.5)
+    @test boundary_mask(res_hi) == (ceiling_ratio(cf, atm.τs) .> 0.5)
     @test boundary_mask(res_hi) != boundary_mask(res)      # 0.4 column flips
     # and an explicit threshold still overrides it
-    @test boundary_mask(res_hi; r_thresh=0.9) == (ceiling_ratio(cf) .> 0.9)
+    @test boundary_mask(res_hi; r_thresh=0.9) == (ceiling_ratio(cf, atm.τs) .> 0.9)
 end
 
 @testset "r_thresh reaches calc_formation_temp's warning and result" begin

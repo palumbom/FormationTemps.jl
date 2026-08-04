@@ -62,6 +62,7 @@ if show_spliced
     temp_spliced = Float64[]
     cfunc_cols   = Matrix{Float64}[]
     _Ts_atm      = Ref{Vector{Float64}}()
+    _τs_ref      = Ref{Vector{Float64}}()
 
     h5open(h5path_splice, "r") do h5
         group_names = sort(filter(name -> startswith(name, "chunk_"), collect(keys(h5))))
@@ -70,6 +71,7 @@ if show_spliced
         end
 
         _Ts_atm[] = vec(read(h5["model_atmosphere"]["Ts"]))
+        _τs_ref[] = vec(read(h5["model_atmosphere"]["τs_ref"]))
 
         # spliced file is already reconciled: reconstruct by simple concatenation
         for (idx, group_name) in enumerate(group_names)
@@ -86,7 +88,10 @@ if show_spliced
     ax2.plot(wavs_spliced, temp_spliced, lw=1.0, c="k", ls=":", label="Spliced")
 
     # --- flux + contribution function heatmap ---
-    cfunc_spliced = hcat(cfunc_cols...)
+    # The stored cfunc holds per-interval integrals, so on the native MARCS grid its
+    # magnitude jumps with the layer spacing (2x at log τ_ref = -3 and +1). Plot the density
+    # per dex instead, which is what varies smoothly with depth.
+    cfunc_spliced = FT.cfunc_per_dex(hcat(cfunc_cols...), _τs_ref[])
     Ts_atm = _Ts_atm[]
     nrows  = size(cfunc_spliced, 1)
     T_mids = 0.5 .* (Ts_atm[1:nrows] .+ Ts_atm[2:nrows+1])
@@ -120,7 +125,8 @@ if show_spliced
 
     divider_b = axes_grid1.make_axes_locatable(ax3b)
     cax = divider_b.append_axes("right", size="2%", pad=0.05)
-    cbar = fig3.colorbar(im, cax=cax, label="Cont. Fn. (log scale)")
+    cbar = fig3.colorbar(im, cax=cax,
+                         label="\$dF/d\\log_{10}\\tau_{\\rm ref}\$ (log scale)")
     cbar.ax.tick_params(length=0)
     cbar.ax.grid(false)
 

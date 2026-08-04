@@ -76,9 +76,15 @@ wavelength is, and `boundary_mask` thresholds it. `calc_formation_temp` warns on
 statistic at the `BOUNDARY_R_THRESH` default, so its count matches `boundary_mask(result)`
 unless you pass a different `r_thresh`.
 
+Both compare the topmost layer interval against the column peak, so both need the reference
+optical depth grid to divide out the interval width; see
+[Integrals or densities?](@ref "Integrals or densities?") for why `cont_func` cannot be
+reduced across depth as it stands.
+
 ```@docs
 ceiling_ratio
 boundary_mask
+cfunc_per_dex
 form_temps_from_cfunc
 ```
 

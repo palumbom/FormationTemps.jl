@@ -8,15 +8,20 @@ Fields:
 - `wavs`: wavelength grid (Angstrom).
 - `flux`: normalized flux across the grid.
 - `form_temps`: formation temperature (K) at cumulative flux contribution of 0.5.
-- `cont_func`: differential contribution function (C × Δτ), size `(Natm - 1, Nλ)`.
+- `cont_func`: contribution function as per-interval **integrals** (`C × Δτ_λ`), size
+  `(Natm - 1, Nλ)`. `sum(cont_func, dims=1)` is the emergent flux, so each element carries
+  its own layer width. Sums over depth (weights, cumulative distributions) use it directly
+  and are independent of the layer grid; plotting it against depth, or comparing one interval
+  against another, requires [`cfunc_per_dex`](@ref) first.
 - `ceiling_ratio`: per-wavelength top-of-atmosphere contamination statistic; see
   [`ceiling_ratio`](@ref).
 - `r_thresh`: the contamination threshold this result was computed with. [`boundary_mask`](@ref)
   defaults to it, so the mask matches the wavelengths the calculation warned about.
 - `atmosphere`: atmosphere structure used for the calculation.
 
-The five-argument form derives `ceiling_ratio` from `cont_func` and is what the internal paths
-use; prefer it over the seven-argument form, which cannot enforce that the two agree.
+The five-argument form derives `ceiling_ratio` from `cont_func` and the atmosphere's `τ_ref`,
+and is what the internal paths use; prefer it over the seven-argument form, which cannot
+enforce that the two agree.
 """
 struct FormTempResult{T<:AF}
     wavs::Vector{T}
@@ -28,9 +33,12 @@ struct FormTempResult{T<:AF}
     atmosphere::Atmosphere{T}
 end
 
-# ceiling_ratio is derived, not passed, so it cannot disagree with cont_func
+# ceiling_ratio is derived, not passed, so it cannot disagree with cont_func. The
+# atmosphere supplies τ_ref, without which the statistic would compare per-interval
+# integrals of unequal width.
 function FormTempResult(wavs::Vector{T}, flux, form_temps, cont_func, atmosphere;
                         r_thresh::Real=BOUNDARY_R_THRESH) where T<:AF
-    return FormTempResult(wavs, flux, form_temps, cont_func, ceiling_ratio(cont_func),
+    return FormTempResult(wavs, flux, form_temps, cont_func,
+                          ceiling_ratio(cont_func, atmosphere.τs),
                           T(r_thresh), atmosphere)
 end
