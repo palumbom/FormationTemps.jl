@@ -10,8 +10,8 @@ the `method` keyword:
 | `method` | description | accuracy | speed |
 |----------|-------------|----------|-------|
 | `:disk` (default) | explicit disk integration over `Nϕ` latitude bins; self-consistent limb darkening | reference | slowest |
-| `:quadrature` | Gauss–Legendre μ-quadrature; reproduces the `:disk` physics | within ~2 K of `:disk` | 18–29× faster than `:disk` on CPU; 9–37× on GPU |
-| `:hirano` | analytic rotation + macroturbulence convolution (needs `u1`, `u2`) | tens of K at moderate `vsini` | fastest, but only ~1.3× over `:quadrature` |
+| `:quadrature` | Gauss–Legendre μ-quadrature; reproduces the `:disk` physics | within ~2 K of `:disk` | 20–35× faster than `:disk` on CPU; 9–34× on GPU |
+| `:hirano` | analytic rotation + macroturbulence convolution (needs `u1`, `u2`) | tens of K at moderate `vsini` | fastest, but only ~1.25× over `:quadrature` on CPU (up to ~2.7× on GPU) |
 
 ```julia
 calc_formation_temp(star, linelist; method=:disk)                      # reference
@@ -38,9 +38,10 @@ All three run on the GPU with `use_gpu=true`.
 - **`:quadrature`** is the one to reach for when `:disk` is too slow: it reproduces the
   `:disk` result — including inclination and differential rotation (set via
   [`StellarProps`](@ref)) — to within about 2 K of worst-pixel formation temperature over
-  `vsini = 0–40` km/s, while running 18–29× faster on CPU. On GPU the margin grows with `Nλ`,
-  from ~9× on the smallest grid tested to ~37× on the largest, since `:disk` has far more work
-  to keep the device busy with. Use Float64; at
+  `vsini = 0–40` km/s, while running 20–35× faster on CPU, the margin widening with `Nλ`. On
+  GPU the speedup runs from ~9× on the smallest grid tested to ~34× on the largest; it trends
+  upward with `Nλ` but not monotonically, since at these sizes both methods are partly launch-
+  and transfer-bound rather than purely compute-bound. Use Float64; at
   `gpu_precision=Float32` it is noticeably less accurate. The reformulation itself is exact
   rather than approximate: radiative transfer is wavelength-local, so a Doppler shift of the
   input opacity shifts the emergent intensity identically, and rotation can therefore be

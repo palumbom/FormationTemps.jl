@@ -83,7 +83,7 @@ The μ loop is serial and short, so unlike the tile loop there is no batch sizin
 
 ## Benchmarks
 
-The results below were obtained on an Intel Xeon w5-3435X (16 cores / 32 threads) with an NVIDIA RTX 6000 Ada (48 GB). Unless a figure states otherwise, benchmarks use the same configuration — a two-line Fe I test spectrum near 6300 Å with `Δλ = 0.005` Å, solar stellar parameters (`vsini = 2100` m/s, `ζ_RT = 3500` m/s, `ξ = 850` m/s), and `Nϕ = 128` — with whichever quantity is being swept varied about it.
+The results below were obtained on an Intel Xeon w5-3435X (16 cores / 32 threads) with an NVIDIA RTX 6000 Ada (48 GB). They all use a two-line Fe I test spectrum near 6300 Å with solar stellar parameters (`vsini = 2100` m/s, `ζ_RT = 3500` m/s, `ξ = 850` m/s) and `Nϕ = 128`, with whichever quantity is being swept varied about that. The wavelength step differs between benchmarks — each script picks a grid appropriate to what it measures, and `Δλ` is itself the swept quantity in the ``N_\lambda`` figure below — so read each script for its own value rather than assuming a shared one.
 
 To reproduce, run `julia --project=. -t auto benchmarks/run_all.jl`. This regenerates every figure on this page as well as the accuracy and timing figures on the [Integration Methods](@ref) page; see the [`benchmarks/`](https://github.com/palumbom/FormationTemps.jl/tree/main/benchmarks) directory for the individual scripts.
 
@@ -114,7 +114,7 @@ Individual broadening kernel timings for each convolution type (CPU vs GPU Float
 ## Performance tips
 
 - **GPU memory**: the first call to `calc_formation_temp` with `use_gpu=true` allocates GPU buffers and cuFFT plans. Subsequent calls with different parameters re-allocate. If GPU memory is tight, use `gpu_precision=Float32` to roughly halve usage.
-- **CPU threads**: CPU disk integration (`method=:disk`) scales well to ~16 threads. Beyond that, FFTW plan contention and memory bandwidth limit gains. FFTW internal threading is disabled during the tile loop — parallelism comes from distributing tiles across Julia threads. `method=:quadrature` and `method=:hirano` thread only inside `compute_alpha!`, so they scale much more weakly with thread count.
+- **CPU threads**: CPU disk integration (`method=:disk`) scales well to ~16 threads — near-linear out to 8 (92% efficiency), reaching 12.5× at 16 (78%). The sweep stops at 16, which is `Sys.CPU_THREADS ÷ 2` on the benchmark machine, so nothing here speaks to the hyperthreaded range above that. FFTW internal threading is disabled during the tile loop — parallelism comes from distributing tiles across Julia threads. `method=:quadrature` and `method=:hirano` thread only inside `compute_alpha!`, so they scale much more weakly with thread count.
 - **Absorption cost**: the `compute_alpha!` call (Korg chemical equilibrium + line absorption) runs on CPU for both paths and scales with the number of spectral lines × `Nλ`. For large linelists, this can dominate total time regardless of GPU acceleration.
 
 ## CPU vs. GPU numerical differences
