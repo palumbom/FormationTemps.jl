@@ -17,6 +17,17 @@ The high-level convenience function ```calc_formation_temp``` provides a few opt
 
 Rotation geometry is set by `istar` (inclination in degrees; `90` = equator-on) and the differential-rotation coefficients `α₂`, `α₄` in the normalized rate law `Ω(ϕ)/Ω_eq = 1 - α₂·sin²ϕ - α₄·sin⁴ϕ` (default `0`, i.e. solid-body). For rigid rotation the broadening depends only on `vsini`, so `istar` has no effect; with differential rotation (`α ≠ 0`) `istar` selects which latitude bands are visible and therefore matters. See [Integration Methods](@ref).
 
+## Air and vacuum wavelengths
+
+Korg computes in vacuum, always, and ```Korg.read_linelist``` converts an air-wavelength file to vacuum as it reads it. FormationTemps.jl builds its wavelength grid from the linelist, so the ```wavs``` we get back are vacuum Angstroms. If we want to present air wavelengths, we convert the output axis:
+
+```julia
+wavs_air = Korg.vacuum_to_air.(result.wavs)
+```
+
+!!! warning "Do not convert by rewriting the linelist"
+    It is tempting to shift the linelist itself, e.g. `Korg.Line(l, wl=Korg.vacuum_to_air(l.wl))`. Doing so tells Korg that each metal line's *vacuum* wavelength is its air value, so the metals move — but the hydrogen lines do not, because Korg builds those from its own tabulated data rather than from the linelist. The result is a spectrum whose metal and hydrogen lines sit roughly 1.8 Angstroms apart at H-alpha, with no error or warning to indicate it. Air is a labelling of the sample points, not a frame the physics runs in.
+
 ## Convolution vs. Integration
 
 At low spectral resolving power, convolutions can be used to approximate the effects of macroturbulent and rotational broadening. As shown in Section 2.1.4 of the [paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), this approximation can fail at higher resolution. By default, ```calc_formation_temp``` performs an explicit disk integration (```method=:disk```) to evaluate model spectra and formation temperatures. Though more accurate, this approach is slower. To use the convolution approximation, pass ```method=:hirano``` (equivalently the legacy ```convolve=true```) to ```calc_formation_temp```. A faster middle ground, ```method=:quadrature```, keeps most of the disk-integration accuracy; see [Integration Methods](@ref). A plot comparing the convolution and integration fluxes and temperatures is shown below for a solar-like model star. As shown in the [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), the error incurred by the convolution approximation grows with $v \sin i$.

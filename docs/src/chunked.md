@@ -133,4 +133,4 @@ end
 `scripts/generate_temp_spectrum.jl` puts all of the above together. It streams chunked results to HDF5, reads the raw chunks back and stitches them, trims to the linelist extent, and writes the spliced spectrum alongside the model atmosphere and a per-pixel quality mask.
 
 !!! note "Air and vacuum wavelengths"
-    Korg computes in vacuum, so the synthesis runs on the vacuum grid that `read_linelist` returns and an air axis is applied only as a relabeling of the stored output. Rewriting the linelist to air instead would move the metal lines while leaving Korg's internally tabulated hydrogen lines where they were, putting the two roughly 1.8 Angstroms apart at H-alpha.
+    The synthesis runs on the vacuum grid that `read_linelist` returns, and the script applies an air axis only as a relabeling of the stored output. When stitching, relabel *after* blending — the crossfade indexing assumes a uniform grid, and an air axis is very slightly non-uniform. See [Air and vacuum wavelengths](@ref) in the Basic Tutorial for why the linelist itself must not be rewritten.
