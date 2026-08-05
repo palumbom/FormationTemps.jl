@@ -16,31 +16,19 @@ Markdown.parse("```julia\n" * code * "\n```")
 
 ## Integrals or densities?
 
-`cont_func` holds **per-interval integrals**: element `[k, j]` is the contribution of the
-atmosphere interval between layers `k` and `k+1` to the flux at wavelength `j`, so
+It is worth being careful about what ```cont_func``` actually holds. Element `[k, j]` is the contribution of the atmosphere interval between layers `k` and `k+1` to the flux at wavelength `j`, so summing down a column recovers the emergent flux:
 
 ```julia
 sum(result.cont_func, dims=1)   # ∝ the emergent flux
 ```
 
-Each element therefore already carries the width of its own layer interval. That has a
-consequence worth stating plainly, because it points in opposite directions for two different
-uses:
+These are integrals, not densities, which means each element already carries the width of its own layer interval. Whether we want to divide that width out depends on what we are doing with it.
 
-- **Sums over depth use `cont_func` directly.** Weighted means, cumulative distributions, and
-  the 50% crossing behind [`form_temps_from_cfunc`](@ref) are all sums, in which the interval
-  width cancels. These are independent of the model's layer grid. Dividing by the interval
-  width first would drop that weighting and bias the result.
-- **Comparisons across depth need a density.** Plotting against depth, or taking a ratio of
-  one interval to another, reads the interval widths as if they were signal. MARCS samples
-  depth at Δlog τ_ref = 0.1 dex for log τ_ref ∈ [-3, +1] and 0.2 dex outside it, so a raw
-  plot of `cont_func` carries a factor-of-two step at those two depths that is an artifact of
-  the grid, not of the physics. [`cfunc_per_dex`](@ref) divides the width out, giving
-  `dF/dlog₁₀τ_ref`.
+If we are summing over depth, we should use ```cont_func``` as it comes. Weighted means, cumulative distributions, and the 50% crossing behind ```form_temps_from_cfunc``` are all sums in which the interval width cancels, so they do not care about the layer grid at all. Dividing by the width first would throw away that weighting and bias the answer.
 
-The examples on this page plot `cfunc_per_dex(result)` for that reason.
-[`ceiling_ratio`](@ref) is a ratio of two intervals, so it requires the reference grid for the
-same reason and applies the conversion internally.
+If instead we are comparing one depth against another, we need a density. Plotting ```cont_func``` against depth, or taking a ratio of one interval to another, reads the interval widths as though they were signal. MARCS samples depth at Δlog τ_ref = 0.1 dex for log τ_ref between -3 and +1, and 0.2 dex outside that range, so a raw plot carries a factor-of-two step at those two depths which has nothing to do with the physics. ```cfunc_per_dex``` divides the width out and gives us `dF/dlog₁₀τ_ref` instead. That is what the examples on this page plot.
+
+```ceiling_ratio``` is a ratio of two intervals, so it needs the reference grid for the same reason. It applies the conversion internally, which is why it asks for `τ_ref`.
 
 We can also add axis values. The x-axis is wavelength, and y-axis is a coordinate in the model atmosphere. Let's first parse out and view the model atmosphere structure from the ```FormTempResult``` composite type instance. 
 
@@ -80,6 +68,8 @@ Markdown.parse("```julia\n" * code * "\n```")
 ![formation_temps](static/cont_func_example.png)
 
 ## Formation temperatures can lie to you!
+
+This is discussed at greater length in Sections 4.2 and 4.3 of the [paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), which we would encourage anyone using formation temperatures to read.
 
 We can also slice through the contribution functions of individual pixels in lines. Doing so, we can demonstrate that wavelength elements which share a formation temperature need not have the same (or even similar) contribution functions! In each frame of the below animations, the contribution functions for the black pixel in each absorption line are shown. These pixels share the same formation temperature (within a tolerance of a couple Kelvin), yet their contribution functions look very different in the cores of the lines! Of course, the contribution functions tend to each other toward the continuum, but the bulk of the radial velocity information is found where the derivative of the spectrum is highest. 
 

@@ -10,7 +10,7 @@ end
 """
     calc_formation_temp(star, linelist; use_gpu=GPU_DEFAULT, Δλ=0.01,
                         gpu_precision=Float64, method=:disk,
-                        minλ=NaN, maxλ=NaN, u1=NaN, u2=NaN,
+                        minλ=NaN, maxλ=NaN, buffer=2.0, u1=NaN, u2=NaN,
                         Nϕ=128, Nμ=32, N_az=256,
                         r_thresh=BOUNDARY_R_THRESH,
                         showprogress=true, kwargs...)

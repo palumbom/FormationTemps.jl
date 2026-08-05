@@ -163,7 +163,6 @@ quad_kwargs = use_quadrature ? (Nμ=Nμ, N_az=N_az) : NamedTuple()
 
 # [doc:chunked-end]
 
-# [doc:callback-start]
 println(">>> Synthesizing chunks...")
 let chunk_idx = Ref(0)
     h5open(outfile, "w") do h5
@@ -202,6 +201,7 @@ let chunk_idx = Ref(0)
         g_atm["Ts"] = Ts
         g_atm["τs_ref"] = τs_ref
 
+        # [doc:writechunk-start]
         # callback writes each chunk to HDF5 as it completes
         function write_chunk(ci, result, ll_chunk)
             chunk_idx[] = ci
@@ -220,6 +220,7 @@ let chunk_idx = Ref(0)
             # blended 1D output below is the authoritative mask
             write_mask!(g, wavs, result.flux, result.cont_func)
         end
+        # [doc:writechunk-end]
 
         FT.calc_formation_temp_chunked(star_props, linelist;
                                         chunk_width=chunk_width,
@@ -232,7 +233,6 @@ let chunk_idx = Ref(0)
     end
 end
 
-# [doc:callback-end]
 
 # repack output file
 if isfile(outfile)
@@ -244,7 +244,6 @@ if isfile(outfile)
     end
 end
 
-# [doc:blend-start]
 println(">>> Splicing chunks (blend)...")
 
 # one chunk's datasets; chunks are streamed rather than all held at once, so peak memory is
@@ -263,6 +262,7 @@ end
 # The accumulator is preallocated at its final width and written in place. Growing it with
 # hcat once per chunk instead costs O(nchunks^2) bytes copied — 223 GiB at the production
 # config, against 2.9 GiB of writes here.
+# [doc:crossfade-start]
 function blend_chunks(h5in, chunk_names; overlap, Δλ)
     nchunks = length(chunk_names)
 
@@ -323,6 +323,7 @@ function blend_chunks(h5in, chunk_names; overlap, Δλ)
     return (wavs = all_wavs, flux = all_flux, temps = all_temps, cfunc = all_cfunc,
             lc = sort(unique(all_lc)))
 end
+# [doc:crossfade-end]
 
 h5open(outfile, "r") do h5in
     chunk_names = sort(filter(name -> startswith(name, "chunk_"), collect(keys(h5in))))
@@ -398,7 +399,6 @@ h5open(outfile, "r") do h5in
         report_line_mask(lm_1d.regions; n_read=length(bad_lines_all))
     end
 end
-# [doc:blend-end]
 
 # repack output file
 if isfile(outfile_1d)
