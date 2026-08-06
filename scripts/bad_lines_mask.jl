@@ -26,8 +26,13 @@ const FLAG_CODES = Dict("chromo"   => MASK_CHROMO,
 # Growth knobs. These tune the algorithm and stay in code; the data file records which
 # transitions are suspect, which is scientific judgement.
 const N_SIGMA_HALO       = 5.0    # broadening widths covered by the minimum halo
-const DEPTH_THRESH       = 0.4    # absolute depth floor for growth
-const CORE_FRAC          = 0.5    # growth stops below this fraction of the line's core depth
+# CORE_FRAC is the operative criterion: growth stops at half the line's own core depth, so the
+# masked region is the line's full width at half maximum whatever its strength. DEPTH_THRESH is
+# only a floor against runaway growth on a very shallow seed, and must stay well below the core
+# depth of every curated line — raise it near those depths and it silently becomes the governing
+# rule for the weaker half of the list, which is neither scale-free nor reproducible across stars.
+const DEPTH_THRESH       = 0.02   # absolute depth floor; guards pathological seeds only
+const CORE_FRAC          = 0.5    # growth stops at this fraction of the core depth (0.5 = FWHM)
 const MIN_CORE_DEPTH     = 0.05   # below this the seed is not a detected line
 const MAX_EXTENT_DEFAULT = 5.0    # Angstrom half-width cap, overridable per row
 
@@ -189,7 +194,7 @@ function grow_line_region(wavs::AbstractVector{<:Real}, flux::AbstractVector{<:R
     i_lo = max(i_lo, cap_lo)
     i_hi = min(i_hi, cap_hi)
 
-    return (i_lo=i_lo, i_hi=i_hi, i0=i0, core_depth=core_depth, capped=capped)
+    return (i_lo=i_lo, i_hi=i_hi, i0=i0, core_depth=core_depth, thresh=thresh, capped=capped)
 end
 
 """
@@ -214,8 +219,10 @@ function build_line_mask(wavs::AbstractVector{<:Real}, flux::AbstractVector{<:Re
                          entries; n_sigma_halo::Real, depth_thresh::Real,
                          min_core_depth::Real, v_broad::Real, core_frac::Real=0.0)
     mask = zeros(UInt8, length(wavs))
-    regions = Vector{NamedTuple{(:label, :λ_lo, :λ_hi, :flag, :n_pix, :core_depth, :capped),
-                                Tuple{String, Float64, Float64, UInt8, Int, Float64, Bool}}}()
+    regions = Vector{NamedTuple{(:label, :λ_lo, :λ_hi, :flag, :n_pix, :core_depth, :thresh,
+                                 :capped),
+                                Tuple{String, Float64, Float64, UInt8, Int, Float64, Float64,
+                                      Bool}}}()
 
     for e in entries
         halo = e.λ * n_sigma_halo * v_broad / c_ms
@@ -240,7 +247,7 @@ function build_line_mask(wavs::AbstractVector{<:Real}, flux::AbstractVector{<:Re
         push!(regions, (label=e.label, λ_lo=Float64(wavs[g.i_lo]),
                         λ_hi=Float64(wavs[g.i_hi]), flag=e.flag,
                         n_pix=g.i_hi - g.i_lo + 1, core_depth=g.core_depth,
-                        capped=g.capped))
+                        thresh=g.thresh, capped=g.capped))
     end
     return (mask=mask, regions=regions)
 end
@@ -251,17 +258,22 @@ end
 Print the applied mask regions, one row per entry, and flag the ones whose extent was set
 by `max_extent` rather than by the depth walk.
 
+`thresh` is the depth the growth actually stopped at, `max(depth_thresh, core_frac·core_depth)`.
+Reporting it makes the governing criterion auditable per line: it should track `core_frac ×
+core depth` for every entry, and any row sitting flat at `depth_thresh` means the absolute floor
+took over, so the region is no longer the line's half-depth width.
+
 `io` is a parameter rather than a bare `stdout` write so the output is capturable:
 `redirect_stdout` cannot target an `IOBuffer`.
 """
 function report_line_mask(regions; n_read::Int, io::IO=stdout)
     @printf(io, ">>> Bad-lines mask: %d of %d curated entries applied\n",
             length(regions), n_read)
-    @printf(io, "%-14s %10s %10s %8s %8s %11s %7s\n",
-            "label", "lam_lo", "lam_hi", "width", "n_pix", "core depth", "capped")
+    @printf(io, "%-14s %10s %10s %8s %8s %11s %9s %7s\n",
+            "label", "lam_lo", "lam_hi", "width", "n_pix", "core depth", "thresh", "capped")
     for r in regions
-        @printf(io, "%-14s %10.3f %10.3f %8.3f %8d %11.3f %7s\n",
-                r.label, r.λ_lo, r.λ_hi, r.λ_hi - r.λ_lo, r.n_pix, r.core_depth,
+        @printf(io, "%-14s %10.3f %10.3f %8.3f %8d %11.3f %9.3f %7s\n",
+                r.label, r.λ_lo, r.λ_hi, r.λ_hi - r.λ_lo, r.n_pix, r.core_depth, r.thresh,
                 r.capped ? "yes" : "no")
     end
     n_capped = count(r -> r.capped, regions)

@@ -278,7 +278,7 @@ else
 
         @testset "report_line_mask prints one row per region" begin
             regions = [(label="A", λ_lo=5001.5, λ_hi=5002.5, flag=MASK_NLTE,
-                        n_pix=101, core_depth=0.8, capped=false)]
+                        n_pix=101, core_depth=0.8, thresh=0.4, capped=false)]
             out = sprint(io -> report_line_mask(regions; n_read=3, io=io))
             @test occursin("A", out)
             @test occursin("1 of 3", out)   # applied count reported against rows read

@@ -67,8 +67,16 @@
 
             r_native = ceiling_ratio(c_native, τ_native)
             r_uniform = ceiling_ratio(c_uniform, τ_uniform)
-            # differences are second-order sampling of a smooth density, not measure error
-            @test isapprox(r_native[1], r_uniform[1]; rtol=0.05)
+            # Residual differences are interval-averaging of the density, not measure error, so
+            # they are bounded in absolute terms rather than relative ones. The deep-peaked case
+            # puts the top node ~4σ out on a Gaussian tail, where the density drops by orders of
+            # magnitude across one interval and the native top interval is 1.6x the uniform
+            # width; the interval average then exceeds the midpoint value by a width-dependent
+            # amount, and the ratio of two such tails differs by tens of percent while both are
+            # ~1e-7. atol is the criterion that matches how the statistic is used — thresholded
+            # against r_thresh — and the contaminated case below still pins the relative bound
+            # where the statistic is O(0.1) and actually decides something.
+            @test isapprox(r_native[1], r_uniform[1]; rtol=0.05, atol=1e-3)
 
             # the raw reduction is NOT invariant -- this is the artifact, asserted so the
             # conversion cannot be quietly dropped as redundant
