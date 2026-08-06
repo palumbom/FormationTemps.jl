@@ -26,7 +26,9 @@ star = FT.StellarProps(Teff=5777.0, logg=4.44, Fe_H=0.0,
                        vsini=2100.0, v_macro=3400.0, v_micro=850.0)
 
 # compute formation temperatures (use_gpu=False for portability)
-result = FT.calc_formation_temp(star, linelist, use_gpu=False, convolve=True, u1=0.43, u2=0.31)
+# `method` takes a Julia Symbol, which a Python str does not convert to
+result = FT.calc_formation_temp(star, linelist, use_gpu=False,
+                                method=jl.Symbol("hirano"), u1=0.43, u2=0.31)
 
 # extract results into numpy arrays
 wavs = np.asarray(result.wavs)
