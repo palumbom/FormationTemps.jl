@@ -27,7 +27,7 @@ plt.rc("text.latex", preamble="\\usepackage{amsmath}
 # Frame of the *stored* wavelength axis. Korg computes in vacuum unconditionally — air is a
 # labelling of the sample points, not a frame the physics runs in — so synthesis always uses
 # the vacuum grid `read_linelist` returns and this flag only relabels the output.
-vacuum_wavs = false
+vacuum_wavs = true
 wav_label = vacuum_wavs ? "vacuum" : "air"
 
 # Relabel synthesis-frame (vacuum) wavelengths for output. Accepts a scalar or an array.

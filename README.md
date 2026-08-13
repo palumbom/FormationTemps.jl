@@ -103,7 +103,7 @@ In brief:
 
 * Formation temperatures are *modeled* and not measured quantities
 * The definition/concept of a formation temperature can belie some realities of radiative transfer (see the contribution function comparison in the [relevant tutorial](https://michaelpalumbo.me/FormationTemps.jl/stable/cont_func/#Formation-temperatures-can-lie-to-you!))
-* Korg.jl only assumes LTE, and the MARCS model atmospheres used by default do not have chromospheres
+* Korg.jl only assumes LTE, and the MARCS model atmospheres used by default do not have chromospheres — a curated list of lines this renders untrustworthy ships in `data/bad_lines.csv` (see the [relevant tutorial](https://michaelpalumbo.me/FormationTemps.jl/stable/cont_func/#Lines-the-model-cannot-get-right))
 * The model atmospheres are 1D, and do not handle the effects of convection (limb shift, line asymmetry, etc.) or magnetism
 
 ## Citation

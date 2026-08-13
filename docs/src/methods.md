@@ -149,6 +149,10 @@ then selects which latitude bands — rotating at different rates — are visibl
   good = .!boundary_mask(result)          # or boundary_mask(result; r_thresh=…)
   ```
 
+  This covers only the failure that shows up in the contribution function. A line can decay
+  well inside the model and still be untrustworthy, because LTE or the atomic data was wrong
+  where it formed — see [Lines the model cannot get right](@ref "Lines the model cannot get right").
+
   Note that Balmer lines are *not* the usual cause. Their lower level (n=2) sits ~10.2 eV
   up, so its population — and hence the line opacity — is negligible in the cool upper
   photosphere and rises steeply with depth. In LTE on a MARCS grid, Hα is a shallow feature

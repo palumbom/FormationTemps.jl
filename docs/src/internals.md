@@ -81,6 +81,10 @@ optical depth grid to divide out the interval width; see
 [Integrals or densities?](@ref "Integrals or densities?") for why `cont_func` cannot be
 reduced across depth as it stands.
 
+These diagnose the integration domain only. For lines that are untrustworthy on physical
+grounds despite a well-behaved contribution function, the repo carries a curated list outside
+the package API; see [Lines the model cannot get right](@ref "Lines the model cannot get right").
+
 ```@docs
 ceiling_ratio
 boundary_mask

@@ -75,3 +75,42 @@ We can also slice through the contribution functions of individual pixels in lin
 
 ![line_animation](static/line_lineup.gif)
 ![cont_func_animation](static/cont_comparison.gif)
+
+## Lines the model cannot get right
+
+```boundary_mask``` tells us that the contribution function had not decayed before the model atmosphere was truncated. That is a statement about the integration domain: it catches the case where the answer depends on where MARCS stops. It tells us nothing about whether the physics was right everywhere the contribution function *did* decay.
+
+Some lines are untrustworthy for reasons no contribution-function statistic can see. Korg assumes LTE and MARCS models have no chromosphere, so a line formed in the chromosphere, one whose level populations depart from LTE, or one whose atomic data is simply poor will produce a perfectly well-behaved contribution function and a formation temperature that means nothing.
+
+Which transitions those are is a judgement call rather than something we can measure from the output, so the repo carries a curated list in `data/bad_lines.csv`, with the code that applies it in `scripts/bad_lines_mask.jl`. Each row names a wavelength, a species, and a reason — `chromo`, `nlte`, or `linedata`:
+
+```julia
+using FormationTemps; FT = FormationTemps
+include(joinpath(FT.moddir, "scripts", "bad_lines_mask.jl"))
+
+entries = read_bad_lines(joinpath(FT.datdir, "bad_lines.csv");
+                         vacuum=true, max_extent_default=MAX_EXTENT_DEFAULT)
+entries = verify_species_present(entries, line_wavs, line_species;
+                                 n_sigma_halo=N_SIGMA_HALO, v_broad=v_broad)
+
+lm = build_line_mask(result.wavs, result.flux, entries;
+                     n_sigma_halo=N_SIGMA_HALO, depth_thresh=DEPTH_THRESH,
+                     min_core_depth=MIN_CORE_DEPTH, v_broad=v_broad,
+                     core_frac=CORE_FRAC)
+```
+
+Here `line_wavs` and `line_species` come from the linelist the synthesis used, and `v_broad` is the quadrature sum of the broadening velocities, `sqrt(vsini^2 + ζ^2 + ξ^2)`.
+
+The two masks are built to compose. ```build_line_mask``` returns one `UInt8` per pixel using bits `0x02`, `0x04` and `0x08` for the three reasons, leaving `0x01` free for the boundary flag, so we can carry both in a single array:
+
+```julia
+bnd = ifelse.(boundary_mask(result), MASK_BOUNDARY, 0x00)
+mask = lm.mask .| bnd
+good = mask .== 0x00
+```
+
+A curated entry is not applied as a fixed window. ```build_line_mask``` seeds on the flux minimum near the tabulated wavelength and walks outward until the line climbs back above `max(DEPTH_THRESH, CORE_FRAC · core_depth)`, so the masked region takes the sense of the line's own width at half depth whether the line is strong or weak. ```report_line_mask``` prints the region each entry settled on, together with the threshold that governed it and whether the per-row `max_extent` cap clipped it.
+
+Two things are worth knowing before editing the list. The wavelength column is `lambda_air`, so entries are tabulated in air and converted on read; the column name is there so the frame cannot be mistaken. And ```verify_species_present``` drops, with a warning, any entry whose species the linelist has no line for nearby. That check earns its place: the seed is a flux minimum, and in a dense spectrum that minimum is nearly always *some* deep line, so an entry naming a transition the linelist lacks would not quietly mask nothing — it would mask whichever unrelated neighbour is deepest, under the curated label.
+
+This is script-level rather than part of the package API. The list is data we can inspect and amend, and nothing in ```src/``` depends on it.
