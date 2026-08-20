@@ -1,3 +1,12 @@
+# Lower bound on the microturbulent Gaussian width: the larger of the representable
+# resolution at this wavelength and a quarter pixel. A function of the grid alone, so it is
+# constant for the lifetime of a convolution-memory struct. The two-argument form is for
+# callers that already hold Δλ for their padding calculation.
+_sigma_floor(xs::AA{T,1}, Δλ::T) where {T<:AF} =
+    T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+
+_sigma_floor(xs::AA{T,1}) where {T<:AF} = _sigma_floor(xs, median(diff(xs)))
+
 """
     convolve_wavelength_axis(xs, ys, v_los, v_mic)
 
@@ -13,8 +22,11 @@ Padding is sized from the `v_los`/`v_mic` passed, so a large Doppler shift canno
 padded linear convolution.
 """
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::T, v_mic::T) where {T<:AF}
+    # one Δλ, two consumers: the σ_floor below and conv_npad_for_velocity further down.
+    # Both need the median, not step(xs) — on a non-uniform grid those differ, and
+    # substituting one moves the kernel width and the derived padding together.
     Δλ = median(diff(xs))
-    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(xs, Δλ)
 
     σ(x) = max(x * (v_mic / c_ms), σ_floor)
     g(x, n) = exp(-((x - n) / σ(x))^2.0)
@@ -35,8 +47,11 @@ end
 
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::AA{T,1}, v_mic::AA{T,1}) where {T<:AF}
     Nλ = length(xs)
+    # one Δλ, two consumers: the σ_floor below and conv_npad_for_velocity further down.
+    # Both need the median, not step(xs) — on a non-uniform grid those differ, and
+    # substituting one moves the kernel width and the derived padding together.
     Δλ = median(diff(xs))
-    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(xs, Δλ)
     i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
 
@@ -94,8 +109,7 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
                                   ws::CPUTileWorkspace) where T<:AF
     Nλ = ws.Nλ
     Natm = size(ys, 1)
-    Δλ = median(diff(xs))
-    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(xs)
     i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
     λc = (v_los / c_ms) * λ0 + λ0
@@ -120,8 +134,7 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
                                   ws::CPUTileWorkspace) where T<:AF
     Nλ = ws.Nλ
     Natm = size(ys, 1)
-    Δλ = median(diff(xs))
-    σ_floor = T(max(eps(T) * mean(xs), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(xs)
     i0 = Nλ ÷ 2 + 1
     λ0 = xs[i0]
     kvec = Vector{T}(undef, Nλ)
@@ -295,8 +308,7 @@ function _build_kernel_ft_1d!(cmem, xs_h::AbstractVector{T}, v_los_val::T, v_mic
     Nλ = cmem.Nλ; L = cmem.L
     i0 = Nλ ÷ 2 + 1
     λ0 = xs_h[i0]
-    Δλ = median(diff(xs_h))
-    σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(xs_h)
     fill!(cmem.kr_1d, zero(T))
     ts = (256,); bs = (cld(Nλ, ts[1]),)
     @cuda threads=ts blocks=bs kernel_to_dft_layout_1d_gpu!(
@@ -313,8 +325,7 @@ end
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
                                   v_los::CA{T,1}, v_mic::T) where T<:AF
     i0 = cmem.Nλ ÷ 2 + 1
-    Δλ = median(diff(xs_h))
-    σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(xs_h)
     Nrows = size(cmem.conv_gpu, 1)
 
     fill!(cmem.conv_gpu, zero(T))
@@ -333,8 +344,7 @@ end
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
                                   v_los::CA{T,1}, v_mic::CA{T,1}) where T<:AF
     i0 = cmem.Nλ ÷ 2 + 1
-    Δλ = median(diff(xs_h))
-    σ_floor = T(max(eps(T) * mean(xs_h), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(xs_h)
     Nrows = size(cmem.conv_gpu, 1)
 
     fill!(cmem.conv_gpu, zero(T))
@@ -477,8 +487,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     # per-row kernels with scalar v_mic
     i0 = bcmem.Nλ ÷ 2 + 1
-    Δλ = median(diff(bcmem.xs_cpu))
-    σ_floor = T(max(eps(T) * mean(bcmem.xs_cpu), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(bcmem.xs_cpu)
     ts2 = (32, 32)
 
     fill!(bcmem.conv_gpu, zero(T))
@@ -529,8 +538,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     # per-row kernels with vector v_mic (modular indexing wraps across tiles)
     i0 = bcmem.Nλ ÷ 2 + 1
-    Δλ = median(diff(bcmem.xs_cpu))
-    σ_floor = T(max(eps(T) * mean(bcmem.xs_cpu), T(0.25) * Δλ))
+    σ_floor = _sigma_floor(bcmem.xs_cpu)
     ts2 = (32, 32)
 
     fill!(bcmem.conv_gpu, zero(T))
