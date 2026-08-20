@@ -50,6 +50,10 @@ mutable struct ConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
     plan_fwd_1d::CUDA.CUFFT.CuFFTPlan     # 1D R2C plan on kr_1d
+    # Read nowhere in src/ today; retained deliberately as the invalidation flag for reusing
+    # the Doppler filter across renders (applies when v_los and v_mic are fixed for a sweep,
+    # i.e. the free_atm=true T/nd sweeps). test_convmem_types.jl asserts it exists — do not
+    # sweep it as dead code.
     kernel_cached::Bool                     # base kernel FT is valid
     n_kernel_builds::Int                    # per-row kernel builds so far; paces the underflow readback
 end

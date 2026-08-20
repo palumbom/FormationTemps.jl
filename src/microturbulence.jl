@@ -381,6 +381,11 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
         cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows))
+    # Do not "optimise" this into a preallocated reduction. No preallocated form is
+    # bit-identical to sum(A, dims=2): sum!, sum!(init=true), and both Base.mapreducedim!
+    # forms all land ~1 ULP away (measured, Float32, at two padded lengths). It allocates,
+    # which makes a captured CUDA graph single-use — a known, accepted cost, not an oversight.
+    # Anything faster here moves the log-likelihood, which the RT-exactness policy forbids.
     row_sums = sum(cmem.conv_gpu, dims=2)
     cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
     _maybe_report_underflow!(cmem, row_sums)
@@ -399,6 +404,11 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_gpu!(
         cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows), Int32(Nrows))
+    # Do not "optimise" this into a preallocated reduction. No preallocated form is
+    # bit-identical to sum(A, dims=2): sum!, sum!(init=true), and both Base.mapreducedim!
+    # forms all land ~1 ULP away (measured, Float32, at two padded lengths). It allocates,
+    # which makes a captured CUDA graph single-use — a known, accepted cost, not an oversight.
+    # Anything faster here moves the log-likelihood, which the RT-exactness policy forbids.
     row_sums = sum(cmem.conv_gpu, dims=2)
     cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
     _maybe_report_underflow!(cmem, row_sums)
