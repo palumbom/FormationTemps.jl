@@ -121,6 +121,8 @@ v_los_rot = CUDA.zeros(Float64, Natm) .+ 1200.0
         @test !hasproperty(cmem, :σ_fac_gpu)
         @test !hasproperty(cmem, :v_mic_cpu)
         @test !hasproperty(cmem, :v_los_cpu)
+        @test !hasproperty(cmem, :doppler_scale)
+        @test hasproperty(cmem, :σ_floor)
 
         @test !hasproperty(gpu_mem, :flux)
     end

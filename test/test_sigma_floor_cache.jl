@@ -11,6 +11,11 @@ using FormationTemps
 using Test
 using Statistics
 
+# guarded at top level, as runtests.jl does: the struct constructors allocate CuArrays
+if FormationTemps.GPU_DEFAULT
+    using CUDA
+end
+
 let
     FT = FormationTemps
 
@@ -44,6 +49,20 @@ let
             @test median(diff(xs_nu)) != xs_nu[2] - xs_nu[1]          # guard on the fixture
             @test FT._sigma_floor(xs_nu) === FT._sigma_floor(xs_nu, median(diff(xs_nu)))
             @test FT._sigma_floor(xs_nu) !== FT._sigma_floor(xs_nu, xs_nu[2] - xs_nu[1])
+        end
+
+        if FT.GPU_DEFAULT
+            @testset "_init_micro_params! caches σ_floor on the struct" begin
+                Nλ, Natm, Npad = 1321, 12, 512
+                xs = collect(Float64, range(6172.0 - 0.0005 * 660, step=0.0005, length=Nλ))
+                for cmem in (FT.ConvolutionMemory(Nλ, Natm, Npad),
+                             FT.MacroConvolutionMemory(Nλ, Natm, Npad),
+                             FT.BatchedMicroConvMem(Nλ, Natm, 2, Npad))
+                    FT._init_micro_params!(cmem, xs)
+                    @test cmem.σ_floor === inline_sigma_floor(xs)
+                    @test cmem.doppler_ready
+                end
+            end
         end
     end
 end

@@ -19,7 +19,7 @@ mutable struct BatchedMicroConvMem{T<:AF} <: AbstractConvolutionMemory{T}
     L::Int
     pad_left::Int
     pad_right::Int
-    doppler_scale::T
+    σ_floor::T                 # Gaussian width floor for this grid; set in _init_micro_params!
     doppler_ready::Bool
     signal_cached::Bool
 

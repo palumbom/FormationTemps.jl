@@ -271,6 +271,9 @@ end
 function _init_micro_params!(cmem, xs_h::AbstractVector{T}) where T<:AF
     copyto!(cmem.xs_gpu, xs_h)
     cmem.xs_cpu = collect(T, xs_h)
+    # from xs_cpu, not xs_h, so the cached value is by construction what
+    # _sigma_floor(cmem.xs_cpu) returns at every later call site
+    cmem.σ_floor = _sigma_floor(cmem.xs_cpu)
     cmem.doppler_ready = true
     return nothing
 end
