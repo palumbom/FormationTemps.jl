@@ -7,6 +7,17 @@ _sigma_floor(xs::AA{T,1}, Δλ::T) where {T<:AF} =
 
 _sigma_floor(xs::AA{T,1}) where {T<:AF} = _sigma_floor(xs, median(diff(xs)))
 
+# σ_floor for a caller-supplied grid: the cached value when the caller passed the grid the
+# struct was initialised with, recomputed otherwise. Identity, not equality — the host-`xs`
+# convolution overloads pass a fresh `collect` and must keep recomputing, which is what makes
+# the cache bit-identical for every caller. The assertion matters because σ_floor is zero
+# until _init_micro_params! runs, and a zero floor divides by zero in the Gaussian rather
+# than erroring in median(diff(...)) the way an empty xs_cpu used to.
+function _sigma_floor_cached(cmem, xs_h::AA{T,1}) where {T<:AF}
+    @assert cmem.doppler_ready "σ_floor is only valid after _init_micro_params!"
+    return xs_h === cmem.xs_cpu ? T(cmem.σ_floor) : _sigma_floor(xs_h)
+end
+
 """
     convolve_wavelength_axis(xs, ys, v_los, v_mic)
 
@@ -311,7 +322,7 @@ function _build_kernel_ft_1d!(cmem, xs_h::AbstractVector{T}, v_los_val::T, v_mic
     Nλ = cmem.Nλ; L = cmem.L
     i0 = Nλ ÷ 2 + 1
     λ0 = xs_h[i0]
-    σ_floor = _sigma_floor(xs_h)
+    σ_floor = _sigma_floor_cached(cmem, xs_h)
     fill!(cmem.kr_1d, zero(T))
     ts = (256,); bs = (cld(Nλ, ts[1]),)
     @cuda threads=ts blocks=bs kernel_to_dft_layout_1d_gpu!(
@@ -328,7 +339,7 @@ end
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
                                   v_los::CA{T,1}, v_mic::T) where T<:AF
     i0 = cmem.Nλ ÷ 2 + 1
-    σ_floor = _sigma_floor(xs_h)
+    σ_floor = _sigma_floor_cached(cmem, xs_h)
     Nrows = size(cmem.conv_gpu, 1)
 
     fill!(cmem.conv_gpu, zero(T))
@@ -347,7 +358,7 @@ end
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
                                   v_los::CA{T,1}, v_mic::CA{T,1}) where T<:AF
     i0 = cmem.Nλ ÷ 2 + 1
-    σ_floor = _sigma_floor(xs_h)
+    σ_floor = _sigma_floor_cached(cmem, xs_h)
     Nrows = size(cmem.conv_gpu, 1)
 
     fill!(cmem.conv_gpu, zero(T))
@@ -490,7 +501,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     # per-row kernels with scalar v_mic
     i0 = bcmem.Nλ ÷ 2 + 1
-    σ_floor = _sigma_floor(bcmem.xs_cpu)
+    σ_floor = bcmem.σ_floor
     ts2 = (32, 32)
 
     fill!(bcmem.conv_gpu, zero(T))
@@ -541,7 +552,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     # per-row kernels with vector v_mic (modular indexing wraps across tiles)
     i0 = bcmem.Nλ ÷ 2 + 1
-    σ_floor = _sigma_floor(bcmem.xs_cpu)
+    σ_floor = bcmem.σ_floor
     ts2 = (32, 32)
 
     fill!(bcmem.conv_gpu, zero(T))

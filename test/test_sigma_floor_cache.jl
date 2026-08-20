@@ -63,6 +63,112 @@ let
                     @test cmem.doppler_ready
                 end
             end
+
+            @testset "_sigma_floor_cached selects on identity, not equality" begin
+                Nλ, Natm, Npad = 501, 8, 512
+                xs = collect(Float64, range(5000.0, 5010.0, length=Nλ))
+                cmem = FT.ConvolutionMemory(Nλ, Natm, Npad)
+                FT._init_micro_params!(cmem, xs)
+
+                # the grid the cmem holds → cached value, same object
+                @test FT._sigma_floor_cached(cmem, cmem.xs_cpu) === cmem.σ_floor
+
+                # an equal but distinct array → recomputed, and equal
+                xs_copy = copy(cmem.xs_cpu)
+                @test xs_copy !== cmem.xs_cpu
+                @test xs_copy == cmem.xs_cpu
+                @test FT._sigma_floor_cached(cmem, xs_copy) === inline_sigma_floor(xs_copy)
+
+                # a genuinely different grid → the caller's grid wins, cache is not consulted
+                xs_other = collect(Float64, range(5000.0, 5100.0, length=Nλ))
+                @test FT._sigma_floor_cached(cmem, xs_other) === inline_sigma_floor(xs_other)
+                @test FT._sigma_floor_cached(cmem, xs_other) != cmem.σ_floor
+            end
+
+            # A line profile, not a ramp: convolving a function that is linear in wavelength
+            # with any symmetric unit-sum kernel returns it unchanged in the interior, so a
+            # ramp would make every kernel-width test below sensitive only to edge effects.
+            line_alphas(Natm, Nλ) = [1.0 + 0.01 * i + 0.5 * exp(-((j - Nλ ÷ 2) / 5.0)^2)
+                                     for i in 1:Natm, j in 1:Nλ]
+
+            @testset "cached σ_floor leaves the GPU convolution bit-identical" begin
+                Nλ, Natm, Npad = 501, 8, 512
+                xs = collect(Float64, range(5000.0, 5010.0, length=Nλ))
+                αs = line_alphas(Natm, Nλ)
+                v_los = CuArray(collect(range(-800.0, 800.0, length=Natm)))
+                v_mic = CuArray(collect(range(800.0, 1600.0, length=Natm)))
+
+                # device-xs overload (cache hit) vs host-xs overload (recompute) on the same
+                # grid must agree exactly — the two paths differ only in where σ_floor came from
+                cmem_d = FT.ConvolutionMemory(Nλ, Natm, Npad)
+                out_d = Array(FT.convolve_wavelength_axis_gpu(cmem_d, CuArray(xs), CuArray(αs),
+                                                              v_los, v_mic))
+                cmem_h = FT.ConvolutionMemory(Nλ, Natm, Npad)
+                out_h = Array(FT.convolve_wavelength_axis_gpu(cmem_h, xs, αs, v_los, v_mic))
+                @test out_d == out_h
+            end
+
+            @testset "host-xs overload sources σ_floor from the caller's grid" begin
+                # The three single-tile sites must go through _sigma_floor_cached. Reading
+                # cmem.σ_floor directly — "for symmetry with the two batched sites" — changes
+                # the kernel width whenever the caller's grid differs from the cmem's, and the
+                # direct _sigma_floor_cached asserts above keep passing after the call sites
+                # stop using it. v_mic = 0 pins σ to σ_floor, the only regime it is visible in.
+                Nλ, Natm, Npad = 501, 4, 512
+                xs_fine   = collect(Float64, range(5000.0, 5010.0, length=Nλ))   # Δλ = 0.02
+                xs_coarse = collect(Float64, range(5000.0, 5100.0, length=Nλ))   # Δλ = 0.2
+                αs_h  = line_alphas(Natm, Nλ)
+                v_los = CUDA.zeros(Float64, Natm)
+                v_mic = CUDA.zeros(Float64, Natm)
+
+                # both cmems hold the FINE grid on the device, so only σ_floor can differ
+                cmem_a = FT.ConvolutionMemory(Nλ, Natm, Npad)
+                FT._init_micro_params!(cmem_a, xs_fine)
+                out_a = Array(FT.convolve_wavelength_axis_gpu(cmem_a, xs_coarse, αs_h, v_los, v_mic))
+
+                cmem_b = FT.ConvolutionMemory(Nλ, Natm, Npad)
+                FT._init_micro_params!(cmem_b, xs_fine)
+                out_b = Array(FT.convolve_wavelength_axis_gpu(cmem_b, xs_fine, αs_h, v_los, v_mic))
+
+                @test all(isfinite, out_a)
+                @test all(isfinite, out_b)
+                @test out_a != out_b
+            end
+
+            @testset "σ_floor governs the kernel at v_mic = 0: CPU == GPU" begin
+                # The consumption side of the cache. Population is pinned above by comparing
+                # cmem.σ_floor to the inline expression; nothing there proves the kernel build
+                # actually reads it. A zero floor here does not merely shift the result — it
+                # divides by zero in the Gaussian — so this fails loudly, not subtly.
+                Nλ, Natm, Npad = 501, 4, 512
+                xs_z = collect(Float64, range(5000.0, 5010.0, length=Nλ))
+                αs_z = line_alphas(Natm, Nλ)
+                ref = FT.convolve_wavelength_axis(xs_z, αs_z, zeros(Natm), zeros(Natm))
+                cmem_z = FT.ConvolutionMemory(Nλ, Natm, Npad)
+                got = Array(FT.convolve_wavelength_axis_gpu(cmem_z, CuArray(xs_z), CuArray(αs_z),
+                                                            CUDA.zeros(Float64, Natm),
+                                                            CUDA.zeros(Float64, Natm)))
+                @test all(isfinite, got)
+                @test maximum(abs.(got .- ref)) < 1e-12
+            end
+
+            @testset "σ_floor tracks xs_cpu across re-initialisation" begin
+                # σ_floor and xs_cpu are co-dependent, and _init_micro_params! is their only
+                # writer. Anything that assigns cmem.xs_cpu on its own path — a re-gridding
+                # fast path, an "avoid reallocating when the grid is unchanged" tweak — leaves
+                # a stale floor that _sigma_floor_cached will happily return, because
+                # xs_h === cmem.xs_cpu still holds.
+                Nλ, Natm, Npad = 501, 4, 512
+                xs_1 = collect(Float64, range(5000.0, 5010.0, length=Nλ))
+                xs_2 = collect(Float64, range(5000.0, 5100.0, length=Nλ))
+                cmem_r = FT.ConvolutionMemory(Nλ, Natm, Npad)
+                FT._init_micro_params!(cmem_r, xs_1)
+                @test cmem_r.σ_floor == FT._sigma_floor(cmem_r.xs_cpu)
+                FT._init_micro_params!(cmem_r, xs_2)
+                @test cmem_r.xs_cpu == xs_2
+                @test cmem_r.σ_floor == FT._sigma_floor(cmem_r.xs_cpu)
+                @test cmem_r.σ_floor != FT._sigma_floor(xs_1)
+            end
         end
     end
 end
