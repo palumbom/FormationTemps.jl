@@ -129,6 +129,81 @@ let
             @test all(out_D_gpu_h[3, :] .== 0.0)
             # uniform v_mic vector should match the scalar v_mic path bit-tight
             @test maximum(abs.(out_D_gpu_h .- out_A_gpu_h)) < 1e-12
+
+            # ── Pacing: the guard is unconditional, the diagnostic is sampled ──────
+            # Base.CoreLogging, not the Logging stdlib: identical values, no test-target
+            # dependency (same reasoning as test_ring_kernel.jl).
+            @testset "underflow readback pacing" begin
+                # the policy itself, independent of any GPU state
+                @test FT._should_check_underflow(1)
+                @test FT._should_check_underflow(FT._UNDERFLOW_EAGER_BUILDS)
+                @test !FT._should_check_underflow(FT._UNDERFLOW_EAGER_BUILDS + 1)
+                @test !FT._should_check_underflow(FT._UNDERFLOW_CHECK_STRIDE - 1)
+                @test FT._should_check_underflow(FT._UNDERFLOW_CHECK_STRIDE)
+                @test !FT._should_check_underflow(FT._UNDERFLOW_CHECK_STRIDE + 1)
+                @test FT._should_check_underflow(2 * FT._UNDERFLOW_CHECK_STRIDE)
+
+                cmem_P = FT.ConvolutionMemory(Nλ, Natm, Npad)
+                xs_d_P = CuArray(xs)
+                αs_d_P = CuArray(αs)
+                v_mic_P_d = CuArray(v_mic_A)
+                @test cmem_P.n_kernel_builds == 0
+
+                # build 1 is inside the eager window: same warning as before
+                @test_logs (:warn, r"Doppler kernel underflowed") match_mode=:any begin
+                    FT.convolve_wavelength_axis_gpu(cmem_P, xs_d_P, αs_d_P, v_los_A_d, v_mic_P_d)
+                end
+                @test cmem_P.n_kernel_builds == 1
+
+                # walk to the end of the eager window; these builds still check, and their
+                # warnings would reach the ambient logger, so silence them
+                Base.CoreLogging.with_logger(Base.CoreLogging.NullLogger()) do
+                    for _ in 2:FT._UNDERFLOW_EAGER_BUILDS
+                        FT.convolve_wavelength_axis_gpu(cmem_P, xs_d_P, αs_d_P, v_los_A_d, v_mic_P_d)
+                    end
+                end
+                @test cmem_P.n_kernel_builds == FT._UNDERFLOW_EAGER_BUILDS
+
+                # the next build is past it: identical underflow, no log at all
+                out_P = @test_logs min_level=Base.CoreLogging.Warn match_mode=:all begin
+                    FT.convolve_wavelength_axis_gpu(cmem_P, xs_d_P, αs_d_P, v_los_A_d, v_mic_P_d)
+                end
+                @test cmem_P.n_kernel_builds == FT._UNDERFLOW_EAGER_BUILDS + 1
+
+                # ...and the guard still fired: row 3 is zero, nothing is NaN. Read out_P
+                # before the next convolution — it is a view into cmem_P.conv_gpu, which every
+                # subsequent build overwrites (CLAUDE.md, "results alias workspace scratch").
+                out_P_h = Array(out_P)
+                @test all(isfinite, out_P_h)
+                @test all(out_P_h[3, :] .== 0.0)
+
+                # The stride half of the policy, without doing thousands of builds: seed the
+                # counter so the next build lands exactly on a checkpoint. The
+                # _should_check_underflow asserts above test the predicate in isolation; this
+                # tests that the call site consults it. Inlining the eager term at the site
+                # leaves the predicate correct, unused, and the diagnostic dark forever after.
+                cmem_P.n_kernel_builds = FT._UNDERFLOW_CHECK_STRIDE - 1
+                @test_logs (:warn, r"Doppler kernel underflowed") match_mode=:any begin
+                    FT.convolve_wavelength_axis_gpu(cmem_P, xs_d_P, αs_d_P, v_los_A_d, v_mic_P_d)
+                end
+                @test cmem_P.n_kernel_builds == FT._UNDERFLOW_CHECK_STRIDE
+
+                # The batched path is deliberately NOT paced — per-tile v_los varies, so a
+                # late batch can be the first to underflow. Pin that, or a future "unify the
+                # two paths" edit silently drops the diagnostic for disk integration.
+                bcmem_P = FT.BatchedMicroConvMem(Nλ, Natm, 1, Npad)
+                @test !hasproperty(bcmem_P, :n_kernel_builds)
+                v_los_b = CuArray(v_los_A)
+                Base.CoreLogging.with_logger(Base.CoreLogging.NullLogger()) do
+                    for _ in 1:FT._UNDERFLOW_EAGER_BUILDS
+                        FT.convolve_wavelength_axis_batched!(bcmem_P, xs, αs, v_los_b, 1200.0, 1)
+                    end
+                end
+                # well past where the single-tile policy would have gone quiet
+                @test_logs (:warn, r"Doppler kernel underflowed") match_mode=:any begin
+                    FT.convolve_wavelength_axis_batched!(bcmem_P, xs, αs, v_los_b, 1200.0, 1)
+                end
+            end
         end
     end
 end

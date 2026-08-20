@@ -51,6 +51,7 @@ mutable struct ConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
     plan_fwd_1d::CUDA.CUFFT.CuFFTPlan     # 1D R2C plan on kr_1d
     kernel_cached::Bool                     # base kernel FT is valid
+    n_kernel_builds::Int                    # per-row kernel builds so far; paces the underflow readback
 end
 
 """
@@ -101,6 +102,7 @@ mutable struct MacroConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     # 1D C2C infrastructure for Hirano kernel
     kc_1d::CuVector{Complex{T}}            # complex buffer (Nλ)
     plan_bwd_1d::AbstractFFTs.ScaledPlan
+    n_kernel_builds::Int                   # per-row kernel builds so far; paces the underflow readback
 end
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -310,7 +312,7 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                                 kernel_ft_gpu, signal_ft_gpu, conv_ft_gpu, conv_gpu,
                                 plan_fwd, plan_bwd,
                                 xs_gpu, Vector{T}(undef, 0),
-                                kr_1d, kernel_row_ft_1d, plan_fwd_1d, false)
+                                kr_1d, kernel_row_ft_1d, plan_fwd_1d, false, 0)
 end
 
 """
@@ -357,5 +359,5 @@ function MacroConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                                      xs_gpu, Vector{T}(undef, 0),
                                      padded_kernel_gpu, shift_kernel_gpu, out_gpu,
                                      kr_1d, kernel_row_ft_1d, plan_fwd_1d, false,
-                                     kc_1d, plan_bwd_1d)
+                                     kc_1d, plan_bwd_1d, 0)
 end

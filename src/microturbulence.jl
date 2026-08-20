@@ -335,6 +335,39 @@ function _build_kernel_ft_1d!(cmem, xs_h::AbstractVector{T}, v_los_val::T, v_mic
     return nothing
 end
 
+# Doppler-kernel underflow is a configuration error — v_los in cm/s instead of m/s, or a
+# velocity past the padded window — not a transient: it fires on the first renders or never.
+# Counting the zero-sum rows needs a device→host read that drains the pipeline, so the read is
+# paced: every build for the first `_UNDERFLOW_EAGER_BUILDS` on a given memory object, then one
+# build in every `_UNDERFLOW_CHECK_STRIDE`. The guard itself (`ifelse(iszero(s), one(T), s)`)
+# is unconditional; only the diagnostic is sampled. The batched path is not paced — per-tile
+# v_los varies, so a late batch can be the first to underflow.
+const _UNDERFLOW_EAGER_BUILDS = 64
+const _UNDERFLOW_CHECK_STRIDE = 4096
+
+_should_check_underflow(n::Int) =
+    n <= _UNDERFLOW_EAGER_BUILDS || iszero(n % _UNDERFLOW_CHECK_STRIDE)
+
+# Paced underflow diagnostic; increments the build counter as a side effect.
+# The readback must stay INSIDE the branch. It is a blocking device→host copy, it is the
+# entire cost this pacing exists to remove, and it is what makes the render impossible to
+# capture into a CUDA graph. "Flattening" this by computing n_underflow unconditionally and
+# gating only the @warn restores ~23 μs per render, breaks capture, and still passes every
+# pacing test — test/test_graph_capture.jl is the only gate that catches it.
+# The capture query is second so it is reached only on a build the policy says is due.
+# A caller whose v_los is data-dependent per call rather than fixed for the run (a cube column
+# sweep, not an MCMC) can force a check on any call by zeroing n_kernel_builds first.
+# Not thread-safe: n_kernel_builds is a plain read-modify-write, and a cmem is owned by one
+# task in every current caller.
+function _maybe_report_underflow!(cmem, row_sums)
+    cmem.n_kernel_builds += 1
+    _should_check_underflow(cmem.n_kernel_builds) || return nothing
+    CUDA.is_capturing() && return nothing
+    n_underflow = Int(CUDA.sum(iszero.(row_sums)))
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
+    return nothing
+end
+
 # build per-row kernels into conv_gpu, normalize, batch-FFT into kernel_ft_gpu
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
                                   v_los::CA{T,1}, v_mic::T) where T<:AF
@@ -350,8 +383,7 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows))
     row_sums = sum(cmem.conv_gpu, dims=2)
     cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
-    n_underflow = Int(CUDA.sum(iszero.(row_sums)))
-    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
+    _maybe_report_underflow!(cmem, row_sums)
     return nothing
 end
 
@@ -369,8 +401,7 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows), Int32(Nrows))
     row_sums = sum(cmem.conv_gpu, dims=2)
     cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
-    n_underflow = Int(CUDA.sum(iszero.(row_sums)))
-    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
+    _maybe_report_underflow!(cmem, row_sums)
     return nothing
 end
 

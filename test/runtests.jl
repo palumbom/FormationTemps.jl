@@ -59,4 +59,5 @@ if use_gpu
     include("test_tau_integrators.jl")
     include("test_varying_sigma.jl")
     include("test_gpu_precision.jl")
+    include("test_graph_capture.jl")
 end
