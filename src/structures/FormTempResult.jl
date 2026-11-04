@@ -9,10 +9,11 @@ Fields:
 - `flux`: normalized flux across the grid.
 - `form_temps`: formation temperature (K) at cumulative flux contribution of 0.5.
 - `cont_func`: contribution function as per-interval **integrals** (`C × Δτ_λ`), size
-  `(Natm - 1, Nλ)`. `sum(cont_func, dims=1)` is the emergent flux, so each element carries
-  its own layer width. Sums over depth (weights, cumulative distributions) use it directly
-  and are independent of the layer grid; plotting it against depth, or comparing one interval
-  against another, requires [`cfunc_per_dex`](@ref) first.
+  `(Natm - 1, Nλ)`. `sum(cont_func, dims=1)` is the emergent surface flux `F = 2π∫Iμdμ`, so
+  each element carries its own layer width. Units are those of `Korg.synthesize`'s `flux`, on
+  the same scale for every `method`. Sums over depth (weights, cumulative distributions) use
+  it directly and are independent of the layer grid; plotting it against depth, or comparing
+  one interval against another, requires [`cfunc_per_dex`](@ref) first.
 - `ceiling_ratio`: per-wavelength top-of-atmosphere contamination statistic; see
   [`ceiling_ratio`](@ref).
 - `r_thresh`: the contamination threshold this result was computed with. [`boundary_mask`](@ref)

@@ -26,7 +26,9 @@ Keyword arguments:
 - `v_macro`: macroturbulent velocity scale ζ (m/s); if `NaN`, uses `vmac_fit(Teff, logg)`.
 - `v_micro`: microturbulent velocity ξ (m/s). Scalar for uniform broadening; vector of
   length `Natm` for per-layer broadening. If scalar `NaN`, uses `vmic_fit(Teff)`.
-- `ρstar`: stellar radius scale factor for disk integration (dimensionless; default 1).
+- `ρstar`: stellar radius scale factor for disk integration (dimensionless; default 1). No
+  effect on any output: `cont_func` is a flux per unit surface area, and the rotation field
+  depends only on `x_sky/ρstar`.
 - `istar`: stellar inclination (degrees; 90 = equator-on). No physical effect for rigid
   rotation (`α₂=α₄=0`), where `v_los = -vsini·x_sky/ρstar` and the broadening follows from the
   projected `vsini` alone. It matters once differential rotation is on, where it selects which

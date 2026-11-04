@@ -50,7 +50,8 @@ def _find_repo_root():
 repo, uuid = _find_repo_root()
 
 # --- configure juliapkg ---
-# FormationTemps.jl requires Julia 1.12+; override juliacall's default (^1.10.3)
+# Pin juliacall to Julia 1.12.x, overriding its ^1.10.3 default. The Julia package allows 1.12+,
+# but this Python route is tested only on 1.12; widen the pin once newer releases are tested.
 juliapkg.require_julia("~1.12")
 
 if repo is not None:

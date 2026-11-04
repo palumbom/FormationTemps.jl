@@ -294,7 +294,9 @@ function _calc_formation_temp_quadrature_cpu(star::StellarProps, linelist; Δλ:
     form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts; τ_ref=atm_cpu.τs,
                                        r_thresh=r_thresh)
 
-    cont_func = cfunc_dt_flux
+    # Σ w_k·μ_k·I_k is ∫Iμdμ; report the surface flux F = 2π∫Iμdμ, as every method does.
+    # Scaled after flux and form_temps, which are ratios and use the unscaled array.
+    cont_func = T(2π) .* cfunc_dt_flux
     return FormTempResult(collect(λs_korg), flux_norm, form_temps, cont_func, atm_cpu;
                           r_thresh=r_thresh)
 end
@@ -433,7 +435,8 @@ function _calc_formation_temp_quadrature_gpu(star::StellarProps, linelist; Δλ:
     form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts);
                                        τ_ref=atm_gpu.τs, r_thresh=r_thresh)
 
-    cont_func = Array(cfunc_dt_flux)
+    # surface flux F = 2π∫Iμdμ, as in the CPU path
+    cont_func = G(2π) .* Array(cfunc_dt_flux)
     return FormTempResult(G.(collect(λs_korg)), flux_norm, form_temps, cont_func, atm_gpu;
                           r_thresh=r_thresh)
 end

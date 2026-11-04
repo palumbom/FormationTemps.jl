@@ -24,7 +24,9 @@ Returns a `FormTempResult` with fields:
 - `wavs`: wavelength grid (Angstrom).
 - `flux`: normalized flux (`sum(cfunc_dt_flux) / sum(cfunc_dt_flux_cont)`).
 - `form_temps`: formation temperature defined at 50% of the cumulative flux contribution.
-- `cont_func`: contribution function, shape `(Natm - 1, Nλ)`.
+- `cont_func`: contribution function, shape `(Natm - 1, Nλ)`: each interval's contribution to
+  the emergent surface flux `F = 2π∫Iμdμ`, in the units of `Korg.synthesize`'s `flux` and on
+  the same scale for every `method`.
 - `ceiling_ratio`: per-wavelength top-of-atmosphere contamination statistic; see
   [`ceiling_ratio`](@ref).
 - `r_thresh`: the contamination threshold used, echoing the `r_thresh` keyword.
@@ -273,7 +275,11 @@ function _calc_formation_temp_cpu(star::StellarProps, linelist; Δλ::T=0.01,
     form_temps = form_temps_from_cfunc(cfunc_dt_flux, Ts; τ_ref=atm_cpu.τs,
                                        r_thresh=r_thresh)
 
-    cont_func = cfunc_dt_flux
+    # cont_func is the per-interval surface flux F = 2π∫Iμdμ (Korg's flux units) for every
+    # method: the tile sum over projected area is ρstar²·F, the Hirano E₂ integral is F/2π.
+    # Scaled after flux and form_temps, which are ratios and use the unscaled array.
+    flux_scale = convolve ? T(2π) : inv(T(star.ρstar)^2)
+    cont_func = flux_scale .* cfunc_dt_flux
     return FormTempResult(collect(λs_korg), flux_norm, form_temps, cont_func, atm_cpu;
                           r_thresh=r_thresh)
 end
@@ -654,7 +660,9 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
     form_temps = form_temps_from_cfunc(Array(cfunc_dt_flux), Array(atm_gpu.Ts);
                                        τ_ref=atm_gpu.τs, r_thresh=r_thresh)
 
-    cont_func = Array(cfunc_dt_flux)
+    # per-interval surface flux F = 2π∫Iμdμ for every method; see _calc_formation_temp_cpu
+    flux_scale = convolve ? G(2π) : inv(G(star.ρstar)^2)
+    cont_func = flux_scale .* Array(cfunc_dt_flux)
     return FormTempResult(G.(collect(λs_korg)), flux_norm, form_temps, cont_func, atm_gpu;
                           r_thresh=r_thresh)
 end

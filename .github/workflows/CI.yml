@@ -24,6 +24,7 @@ jobs:
       matrix:
         version:
           - '1.12'
+          - '1'
         python: [3.12]
         os:
           - ubuntu-latest

@@ -9,6 +9,7 @@ docs/src/index.md
 .CondaPkg
 *__pycache__*
 notes/
+scratch/
 
 *.pdf
 *.csv

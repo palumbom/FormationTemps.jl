@@ -26,7 +26,7 @@ julia --project=. -e 'using Test; include("test/test_convenience.jl")'
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-CI runs on Julia 1.12 / ubuntu / x64. The Aqua.jl test suite is included in the test directory but commented out in `runtests.jl`.
+CI runs on Julia 1.12 and the latest 1.x release (`'1'`) / ubuntu / x64. The runners have no GPU, so CI covers only the CPU tests; the GPU files in `runtests.jl` run only in local passes, which are the pre-release gate. The Aqua.jl test suite is included in the test directory but commented out in `runtests.jl`.
 
 ### Building Docs Locally
 
@@ -74,6 +74,15 @@ by only ~1.5× between log τ_ref = -3 and the peak against ~1300× for the per-
 flattens the real depth structure. `test/test_cfunc_measure.jl` pins both the conversion and the
 grid-invariance of `ceiling_ratio`, and asserts that the bare reduction is *not* invariant so
 the conversion cannot be dropped as redundant.
+
+The absolute scale is the emergent surface flux `F = 2π∫Iμdμ` in `Korg.synthesize`'s flux
+units, identical for every `method`. The methods' internal sums are not: the `:disk` tile sum
+over projected area is `ρstar²·F`, while the `:quadrature` weights `w_k·μ_k` and the `:hirano`
+E₂ integral give `F/2π`. Each assembly site (`_calc_formation_temp_cpu`/`_gpu`, the two
+quadrature drivers) multiplies `cont_func` by its factor *after* `flux` and `form_temps` are
+computed from the unscaled array, so those stay bit-identical, and `:disk` at `ρstar = 1`
+multiplies by exactly 1. Every other consumer is a ratio and cannot see the scale, so
+`test/test_cont_func_scale.jl`, which compares the continuum level against Korg, is its only gate.
 
 ### GPU vs CPU
 
@@ -156,6 +165,46 @@ Two DFT layout conventions coexist. The microturbulence kernels (`kernel_to_dft_
 #### Kernel normalization underflow guard
 
 All FFT convolution kernels in `src/microturbulence.jl` are normalized via `./= sum(...)`. When Doppler `v_los` shifts the kernel center more than ~half a wavelength window outside the grid (≳ 38 km/s at λ ≈ 6000 Å with `σ_floor = 0.25·Δλ`), every Gaussian sample underflows to zero and the divide produces NaN. That NaN propagates through αs → τ → cfunc and yields all-NaN intensity for the affected atmosphere layer; in the scalar-v_los case it wipes the entire column. The guard `./= ifelse(iszero(s), one(T), s)` (used at all 9 microturbulence sites) falls back to a zero kernel — αs_conv row → 0, the discrete-convolution limit "shifted out of window contributes nothing." For all non-degenerate rows the divide is bit-identical to the prior implementation. A `@warn ... maxlog=3` surfaces the underflow so upstream callers can detect e.g. cm/s vs m/s unit bugs rather than seeing silent NaN. Counting the zero-sum rows needs a blocking `Int(CUDA.sum(iszero.(row_sums)))`, so on the two single-tile paths (`_build_per_row_kernels!`) that count is **paced** by `_maybe_report_underflow!`: every build for the first `_UNDERFLOW_EAGER_BUILDS` on a given memory object, then one in every `_UNDERFLOW_CHECK_STRIDE`, tracked by `cmem.n_kernel_builds`. Underflow is a configuration error, not a transient, so sampling the diagnostic is enough; the *guard* is unconditional. The readback must stay inside that branch — computing it unconditionally and gating only the `@warn` restores the full per-render cost and passes every assertion in `test_underflow_guard.jl`, because the warning stays paced; `test/test_graph_capture.jl` is the only gate that catches it. The check is additionally skipped while `CUDA.is_capturing()`: a readback inside a CUDA graph capture invalidates it, and `CUDA.@captured` re-executes its body under capture on every invocation, so an unguarded due build would break capture periodically and force a from-scratch graph re-instantiation. `_build_per_row_kernels!` is the only capture blocker in the GPU render path, so that guard is what keeps the path capturable at all. Two consequences to expect: once a caller captures the render into a graph the paced check stops firing inside it, so detection reduces to the builds before capture; and the "fires on the first renders or never" premise holds for a fixed-configuration run, not for a long-lived cmem driven by per-call data velocities (a cube column sweep reusing one cmem across columns can first underflow at column 5000, and the guard turns that into zeros rather than the NaNs such a sweep's own checks look for) — such a caller should zero `cmem.n_kernel_builds` before each call to force a check. The counter is per-struct, so each parallel-tempering chain gets its own eager window; that is why a cold chain can warn while a hot one stays quiet. The batched path (`convolve_wavelength_axis_batched!`) is deliberately **not** paced — it runs ~165 times per disk integration rather than per render, and per-tile `v_los` varies, so a late batch can be the first to underflow; `BatchedMicroConvMem` therefore has no counter field and the test asserts its absence. The 1D scalar path (`_build_kernel_ft_1d!`) also reads back every call: its `normval` is already a host scalar because it is used as a scalar divisor. The 15 macro/instrumental/convenience normalization sites (`rad_tan.jl`, `iso_rad_tan.jl`, `gray_rot.jl`, `rad_tan_two.jl`, `hirano.jl`, `instrumental.jl`, `convenience.jl`) carry `# TODO(zero-sum-guard)` markers; they short-circuit for ζ=0 / vsini=0 upstream so underflow shouldn't trigger in practice, but the same guard should be added if/when one is touched.
+
+#### CUDA graph capture vs repeat replay
+
+Consumers that drive the GPU render in a tight loop (an MCMC sampler, e.g. Anemoi) may want to
+capture it into a CUDA graph and replay it. Two separate properties gate that, and they fail
+for different reasons:
+
+- **Capture** requires no blocking device→host operation in the region. `_build_per_row_kernels!`
+  is the only place in the render that has one; its underflow readback is paced *and* skipped
+  under `CUDA.is_capturing()`, which is what makes the render capturable at all. See the
+  underflow-guard section above — the readback must stay inside that branch.
+- **Repeat replay** additionally requires no *allocation* in the region. A stream-ordered
+  allocation becomes a graph node that cannot be replayed, so the graph is single-use: the
+  first launch succeeds and the next fails with `ERROR_INVALID_VALUE`.
+
+`row_sums = sum(cmem.conv_gpu, dims=2)` in `_build_per_row_kernels!` is the sole allocation in
+the render path — the τ integration, the cfunc kernel and `reduce_intensity!` allocate nothing.
+Two traps for anyone trying to remove it:
+
+- **Preallocating the output is not enough.** `sum!(buf, A)` still allocates reduction scratch
+  inside CUDA.jl's `mapreducedim!`, so replay still fails. Only a hand-written kernel reaches
+  zero bytes. Verify with `CUDA.@allocated`, not by reading the call.
+- **A hand-written reduction is easy to make slower than the library one.** One block per row
+  over the column-major `(Natm, L)` array is uncoalesced striding at low occupancy. Since
+  FormationTemps is the library and only a capturing consumer benefits, a slower reduction
+  taxes every other caller of the single-tile vector-`v_los` path (the `convolve_wavelength_axis_gpu`
+  sites in `contribution.jl`, reached from `convenience.jl`'s `convolve=true` path and the
+  `:quadrature` drivers; the `convolve=false` disk integration is unaffected, as it uses
+  `convolve_wavelength_axis_batched!`). The bar for such a change is allocation-free *and* no
+  slower than `sum(A, dims=2)` when ungraphed.
+
+Removing the allocation is also value-changing at the ULP level: no preallocated or hand-written
+reduction reproduces `sum(A, dims=2)`'s `mapreduce` tree order, so the log-likelihood moves.
+That is why the allocation is still there.
+
+Capture freezes control flow as well as launches. `calc_intensity_cfunc!` branches on
+`cmem.signal_cached`, so a graph captured with the cache warm has the `copyto!(mem.αs, αs_init)`
+permanently elided and cannot serve the cold state — a capturing consumer needs one graph per
+cache state. The paced underflow diagnostic also stops firing inside a graph, so detection
+reduces to the renders taken before capture.
 
 ### Velocity and Unit Conventions
 

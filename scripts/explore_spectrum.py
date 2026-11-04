@@ -81,6 +81,8 @@ def read_group(g, Ts, tau_ref, mask_bits):
     wavs = g["wavs"][:].ravel()
     flux = g["flux"][:].ravel()
     temp = g["temp"][:].ravel()
+    # formation height [cm], optional; files without it get no height panel
+    height = g["height"][:].ravel() if "height" in g else None
     # mask is a UInt8 bitflag; nonzero means flagged for at least one reason
     mask_raw = g["mask"][:].ravel()
     mask = mask_raw.astype(bool)
@@ -102,7 +104,7 @@ def read_group(g, Ts, tau_ref, mask_bits):
     # varies by only ~1.5x between log τ_ref = -3 and the peak, against ~1300x for the per-dex
     # density, so it flattens three decades of real depth structure into one colour.
     dlogtau_ref = np.diff(np.log10(tau_ref))   # length n_rows
-    return dict(wavs=wavs, flux=flux, temp=temp, mask=mask, reasons=reasons,
+    return dict(wavs=wavs, flux=flux, temp=temp, height=height, mask=mask, reasons=reasons,
                 line_mask=read_line_mask(g), line_centers=line_centers,
                 cfunc=cfunc, t_mids=t_mids, dlogtau_ref=dlogtau_ref)
 
@@ -171,6 +173,8 @@ def window_1d(d, lo, hi):
     out = dict(d)
     for key in ("wavs", "flux", "temp", "mask"):
         out[key] = d[key][keep]
+    if d["height"] is not None:
+        out["height"] = d["height"][keep]
     out["reasons"] = {name: m[keep] for name, m in d["reasons"].items()}
     out["cfunc"] = d["cfunc"][:, keep]
     lc = d["line_centers"]
@@ -275,22 +279,31 @@ def line_marker_trace(line_centers, y_lo, y_hi):
 
 
 def build_1d_figure(d, max_cols, stitched=None):
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.03, row_heights=[0.25, 0.25, 0.5],
-                        subplot_titles=("", "", ""))
+    # a formation-height panel goes between temperature and the heatmap when the file has one
+    has_height = d["height"] is not None
+    row_heights = [0.2, 0.2, 0.2, 0.4] if has_height else [0.25, 0.25, 0.5]
+    n_rows = len(row_heights)
+    heat_row = n_rows
+    fig = make_subplots(rows=n_rows, cols=1, shared_xaxes=True,
+                        vertical_spacing=0.03, row_heights=row_heights,
+                        subplot_titles=("",) * n_rows)
 
     # Panel y-ranges, needed before the shading since the bands span them.
     f_lo, f_hi = float(np.nanmin(d["flux"])), float(np.nanmax(d["flux"]))
     t_lo, t_hi = float(np.nanmin(d["temp"])), float(np.nanmax(d["temp"]))
+    band_rows = [(1, (f_lo, f_hi)), (2, (t_lo, t_hi))]
+    if has_height:
+        h_km = d["height"] / 1e5
+        band_rows.append((3, (float(np.nanmin(h_km)), float(np.nanmax(h_km)))))
 
     # Mask shading goes in first so the data lines draw on top of it. One legend entry per
-    # reason toggles both panels through the shared legendgroup.
+    # reason toggles every panel through the shared legendgroup.
     for name, m in d["reasons"].items():
         if not m.any():
             continue
         fill = reason_fills.get(name, "rgba(214,39,40,0.18)")
         label = f"Flagged ({name})"
-        for row, (y0, y1) in ((1, (f_lo, f_hi)), (2, (t_lo, t_hi))):
+        for row, (y0, y1) in band_rows:
             band = mask_band_trace(d["wavs"], m, y0, y1, fill, label, row == 1)
             if band is not None:
                 fig.add_trace(band, row=row, col=1)
@@ -304,6 +317,12 @@ def build_1d_figure(d, max_cols, stitched=None):
     fig.add_trace(go.Scattergl(x=d["wavs"], y=d["temp"], mode="lines",
                                line=dict(color="#1f77b4", width=0.8),
                                name="Formation temp"), row=2, col=1)
+
+    # panel 3 (optional): formation height
+    if has_height:
+        fig.add_trace(go.Scattergl(x=d["wavs"], y=h_km, mode="lines",
+                                   line=dict(color="#17becf", width=0.8),
+                                   name="Formation height"), row=3, col=1)
 
     # optional overlay: the stitched/spliced model, windowed to this chunk. One legend
     # entry ("Stitched model") toggles both panels via the shared legendgroup; hidden by
@@ -322,7 +341,7 @@ def build_1d_figure(d, max_cols, stitched=None):
                                        name="Stitched model", legendgroup="stitched",
                                        showlegend=False, visible="legendonly"), row=2, col=1)
 
-    # panel 3: contribution-function heatmap, log-scaled like plot_chunk_flux.jl.
+    # last panel: contribution-function heatmap, log-scaled like plot_chunk_flux.jl.
     # Divide the per-interval integral by Δlog τ_ref → contribution density dF/dlog τ_ref,
     # which is smooth in depth (removes the grid-driven horizontal step on the native grid).
     wavs_h, cfunc_h = block_max_decimate(d["wavs"], d["cfunc"], max_cols)
@@ -336,11 +355,11 @@ def build_1d_figure(d, max_cols, stitched=None):
     fig.add_trace(go.Heatmap(x=wavs_h, y=d["t_mids"], z=z,
                              colorscale="Inferno",
                              colorbar=dict(title=dict(text="dF/dlog τ_ref<br>(log scale)"),
-                                           len=0.5, y=0.0, yanchor="bottom",
+                                           len=row_heights[-1], y=0.0, yanchor="bottom",
                                            tickvals=tickvals,
                                            ticktext=[f"1e{t}" for t in tickvals]),
                              name="cfunc", hoverinfo="skip"),
-                  row=3, col=1)
+                  row=heat_row, col=1)
 
     # line-center markers span the flux panel's y-range
     fig.add_trace(line_marker_trace(d["line_centers"], f_lo, f_hi), row=1, col=1)
@@ -352,8 +371,10 @@ def build_1d_figure(d, max_cols, stitched=None):
 
     fig.update_yaxes(title_text="Normalized Flux", row=1, col=1)
     fig.update_yaxes(title_text="Formation Temp [K]", row=2, col=1)
-    fig.update_yaxes(title_text="Temperature [K]", autorange="reversed", row=3, col=1)
-    fig.update_xaxes(title_text="Wavelength [Å]", row=3, col=1)
+    if has_height:
+        fig.update_yaxes(title_text="Formation Height [km]", row=3, col=1)
+    fig.update_yaxes(title_text="Temperature [K]", autorange="reversed", row=heat_row, col=1)
+    fig.update_xaxes(title_text="Wavelength [Å]", row=heat_row, col=1)
     fig.update_layout(hovermode="x unified", template="plotly_white",
                       legend=dict(orientation="h", y=1.06),
                       margin=dict(t=40, r=90))
