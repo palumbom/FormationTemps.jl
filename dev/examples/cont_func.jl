@@ -59,6 +59,7 @@ if isempty(τs)
     ax1.set_xlabel("{\\rm Height [km]}")
 else
     ax1.plot(τs, Ts, c="k")
+    ax1.set_xscale("log")
     ax1.set_xlabel("{\\rm Optical Depth at 5000 \\AA}")
 end
 ax1.set_ylabel("{\\rm Atmosphere Temperature [K]}")
@@ -76,17 +77,17 @@ buffer = 0.5
 idx1 = findfirst(x -> x .>= minimum(rest_wls) - buffer, wavs)
 idx2 = findfirst(x -> x .>= maximum(rest_wls) + buffer, wavs)
 
-# get the bounding values for pcolormesh
-xedges = view(wavs, idx1:idx2)
-yedges = log10.(elav(τs))
-yedges2 = elav(zs ./ 1e7)
+# pixel centers for pcolormesh: one per wavelength bin, and the log-τ midpoint of each
+# layer interval (cont_dens is a density per dex, so its rows are centered in log τ)
+xcenters = view(wavs, idx1:idx2)
+ycenters = elav(log10.(τs))
 cfuncp = view(cont_dens, :, idx1:idx2)
 
 # plot the contribution function
 fig, ax1 = plt.subplots(figsize=(9.6,4.8))
-img = ax1.pcolormesh(xedges, yedges, cfuncp ./ maximum(cfuncp), cmap="viridis")
+img = ax1.pcolormesh(xcenters, ycenters, cfuncp ./ maximum(cfuncp), cmap="viridis")
 ax1.set_xlabel("{\\rm Vacuum Wavelength [\\AA]}")
-ax1.set_ylabel("{\\rm Optical Depth at 5000 \\AA}")
+ax1.set_ylabel("\$\\log_{10}\\,\\tau\$ {\\rm at 5000 \\AA}")
 cbar = fig.colorbar(img, ax=ax1)
 cbar.set_label("{\\rm Normalized Flux Contribution Fn.}")
 fname = joinpath(FT.moddir, "docs", "src", "static", "cont_func_example.png")
