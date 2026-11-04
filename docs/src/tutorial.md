@@ -28,6 +28,12 @@ wavs_air = Korg.vacuum_to_air.(result.wavs)
 !!! warning "Do not convert by rewriting the linelist"
     It is tempting to shift the linelist itself, e.g. `Korg.Line(l, wl=Korg.vacuum_to_air(l.wl))`. Doing so tells Korg that each metal line's *vacuum* wavelength is its air value, so the metals move — but the hydrogen lines do not, because Korg builds those from its own tabulated data rather than from the linelist. The result is a spectrum whose metal and hydrogen lines sit roughly 1.8 Angstroms apart at H-alpha, with no error or warning to indicate it. Air is a labelling of the sample points, not a frame the physics runs in.
 
+## Hydrogen lines
+
+Hydrogen lines are included by default. Korg computes them from dedicated Stark-broadening physics rather than from the linelist, so they appear whether or not the linelist contains any hydrogen transitions. Pass `hydrogen_lines=false` to `calc_formation_temp` to leave them out. `hydrogen_line_window_size_Å` (default 150 Å, as in Korg) sets how far from each line center their opacity is computed.
+
+One default differs from Korg's. The MHD occupation-probability formalism (`use_MHD`) is switched on only when the whole wavelength range lies below 13000 Å, following Korg's own advice for the near-infrared. Pass `use_MHD=true` to match `Korg.synthesize` there.
+
 ## Convolution vs. Integration
 
 At low spectral resolving power, convolutions can be used to approximate the effects of macroturbulent and rotational broadening. As shown in Section 2.1.4 of the [paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), this approximation can fail at higher resolution. By default, ```calc_formation_temp``` performs an explicit disk integration (```method=:disk```) to evaluate model spectra and formation temperatures. Though more accurate, this approach is slower. To use the convolution approximation, pass ```method=:hirano``` (equivalently the legacy ```convolve=true```) to ```calc_formation_temp```. A faster middle ground, ```method=:quadrature```, keeps most of the disk-integration accuracy; see [Integration Methods](@ref). A plot comparing the convolution and integration fluxes and temperatures is shown below for a solar-like model star. As shown in the [paper](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), the error incurred by the convolution approximation grows with $v \sin i$.

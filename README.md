@@ -14,20 +14,23 @@ To install FormationTemps.jl from the Julia REPL:
 
 ```julia
 using Pkg
-Pkg.add("FormationTemps")
+Pkg.add(["FormationTemps", "Korg"])
 using FormationTemps
 ```
 
-Alternatively, if you'd like to tinker with the source of FormationTemps.jl, you can clone the repo from GitHub and add it in develop mode:
+Korg.jl is added alongside because linelists and abundances are read with Korg's own functions. FormationTemps depends on Korg, but Julia only loads packages that are direct dependencies of your active environment, so `using Korg` fails unless you add it yourself.
+
+Alternatively, if you'd like to tinker with the source of FormationTemps.jl, you can clone the repo from GitHub and add it in develop mode (adding Korg as above):
 
 ```julia
 using Pkg
 Pkg.develop(path="/path/to/FormationTemps.jl")
+Pkg.add("Korg")
 ```
 
 ### Basic Julia Example
 
-To compute a basic formation temperature spectrum:
+To compute a basic formation temperature spectrum (the plotting lines use PythonPlot.jl, so run `Pkg.add("PythonPlot")` first if you want them as written):
 
 ```julia
 using Korg

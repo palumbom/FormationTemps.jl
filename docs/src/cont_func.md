@@ -19,8 +19,10 @@ Markdown.parse("```julia\n" * code * "\n```")
 It is worth being careful about what ```cont_func``` actually holds. Element `[k, j]` is the contribution of the atmosphere interval between layers `k` and `k+1` to the flux at wavelength `j`, so summing down a column recovers the emergent flux:
 
 ```julia
-sum(result.cont_func, dims=1)   # ∝ the emergent flux
+sum(result.cont_func, dims=1)   # the emergent flux
 ```
+
+That sum is the emergent surface flux itself, in the same units as the `flux` returned by `Korg.synthesize`, and on the same scale whichever `method` produced the result. The normalized `result.flux` is this sum divided by the corresponding continuum sum.
 
 These are integrals, not densities, which means each element already carries the width of its own layer interval. Whether we want to divide that width out depends on what we are doing with it.
 
@@ -100,6 +102,13 @@ lm = build_line_mask(result.wavs, result.flux, entries;
 ```
 
 Here `line_wavs` and `line_species` come from the linelist the synthesis used, and `v_broad` is the quadrature sum of the broadening velocities, `sqrt(vsini^2 + ζ^2 + ξ^2)`.
+
+!!! note "Packages the script loads"
+    The script loads CSV, DataFrames, and Korg. FormationTemps depends on all three, but Julia only loads packages that are direct dependencies of the active environment. Unless you are running inside the FormationTemps project itself, add them to your environment first:
+
+    ```julia
+    using Pkg; Pkg.add(["CSV", "DataFrames", "Korg"])
+    ```
 
 The two masks are built to compose. ```build_line_mask``` returns one `UInt8` per pixel using bits `0x02`, `0x04` and `0x08` for the three reasons, leaving `0x01` free for the boundary flag, so we can carry both in a single array:
 

@@ -42,16 +42,19 @@ julia --startup-file=no --project=docs docs/make.jl
 
 `calc_formation_temp(star::StellarProps, linelist; ...)` is the top-level API. Internally:
 
-1. **Absorption** (`absorption.jl`): `compute_alpha!` wraps `Korg.line_absorption!` to fill `αs` (total) and `αs_cont` (continuum-only) arrays of shape `(Natm, Nλ)`.
+1. **Absorption** (`absorption.jl`): `compute_alpha!` wraps `Korg.line_absorption!` to fill `αs` (total) and `αs_cont` (continuum-only) arrays of shape `(Natm, Nλ)`. Hydrogen lines, which Korg builds from its own Stark/MHD physics rather than the linelist, are added by `_add_hydrogen_line_absorption!` (`hydrogen_lines=true` by default) to `αs` only, never `αs_cont`, and with `ξ = 0` because microturbulence is applied downstream.
 2. **Microturbulence** (`microturbulence.jl`): FFT-based Gaussian convolution along the wavelength axis applied per atmosphere layer.
 3. **Optical depth** (`tau.jl`): `calc_tau_anchored_cpu!` / GPU Bezier integration to build `τs` arrays of shape `(Natm, Nλ)`. On the single-tile GPU Bézier path (`calc_intensity_direct!`), τ is kept in registers and never written to global memory (see fused kernel below).
 4. **Contribution functions** (`contribution.jl`): `calc_flux_cfunc_cpu!` / GPU kernels yield `cfunc` of shape `(Natm-1, Nλ)`. On the single-tile GPU Bézier path, cfunc is also register-resident (fused with τ and intensity reduction in `calc_tau_cfunc_reduce_bezier!`).
-5. **Broadening** (two modes):
-   - `convolve=true`: analytical Hirano et al. (2011) rotation+macroturbulence kernel in Fourier space (fast, requires limb-darkening `u1`, `u2`).
-   - `convolve=false` (default): numerical disk integration over a `Nϕ × 2Nϕ` stellar surface grid, looping over visible tiles.
-6. **Formation temperature**: cumulative contribution function interpolated at 50% to yield `form_temps` per wavelength.
+5. **Disk integration**, selected by `method` (three modes):
+   - `:disk` (default): numerical disk integration over a `Nϕ × 2Nϕ` stellar surface grid, looping over visible tiles.
+   - `:quadrature` (`quadrature.jl`): ring-by-ring Gauss–Legendre μ-quadrature (`Nμ` nodes, `N_az` azimuth samples for the per-ring Doppler kernel), dispatched to `_calc_formation_temp_quadrature_cpu`/`_gpu`. Solves transfer once per μ node rather than once per tile.
+   - `:hirano`: analytical Hirano et al. (2011) rotation+macroturbulence kernel in Fourier space (requires limb-darkening `u1`, `u2`; rigid rotation only).
 
-Returns `FormTempResult` with fields `wavs`, `flux`, `form_temps`, `cont_func`, `atmosphere`.
+   `convolve::Bool` is a deprecated public alias (`true` ⇒ `:hirano`, `false` ⇒ `:disk`). `_calc_formation_temp_cpu`/`_gpu` still take `convolve::Bool` internally, so "the `convolve=true` path" elsewhere in this file means `method=:hirano` and "the `convolve=false` path" means `method=:disk`.
+6. **Formation temperature** (`form_temps_from_cfunc` in `interpolations.jl`): node-anchored cumulative contribution (`F = 0` at `Ts[1]`, interval `k` assigned to the deep node `Ts[k+1]`) interpolated at 50% against node temperatures. Interpolating against interval centers (`elav(Ts)`) biases the result half an interval cool. Also warns where `ceiling_ratio > r_thresh` (contribution still peaking at the top of the atmosphere).
+
+Returns `FormTempResult` with fields `wavs`, `flux`, `form_temps`, `cont_func`, `ceiling_ratio`, `r_thresh`, `atmosphere`.
 
 #### `cont_func` is a per-interval integral, not a density
 
@@ -101,7 +104,7 @@ The GPU disk integration path (`convolve=false`) uses several optimizations:
 
 | Struct | Purpose |
 |---|---|
-| `StellarProps` | Input: Teff, logg, Fe_H, vsini, ζ (macro), ξ (micro; scalar `T` or per-layer `AbstractVector{T}`), ρstar, istar. Parametric: `StellarProps{T, V}` where `V <: Union{T, AbstractVector{T}}` |
+| `StellarProps` | Input: Teff, logg, Fe_H, vsini, ζ (macro), ξ (micro; scalar `T` or per-layer `AbstractVector{T}`), ρstar, istar, α₂, α₄ (differential rotation). Parametric: `StellarProps{T, V}` where `V <: Union{T, AbstractVector{T}}` |
 | `AtmosphereCPU` / `AtmosphereGPU` | Wrap Korg MARCS atmosphere; GPU variant holds `CuArray` fields including `nd_gpu` (number densities) |
 | `GPUMemory` | Pre-allocated GPU working arrays (αs, τs, cfunc, cfunc_dt, flux); Bezier work arrays (tau_ds, tau_alphaC); anchored-τ constants (log_τ_ref, ifactor_base, use_anchored); `v_los_zeros` for stationary-frame flux path |
 | `ConvolutionMemory` | Pre-allocated buffers + CUFFT plans for single-tile Doppler convolution; 1D FFT infrastructure for broadening kernels (kr_1d, kernel_row_ft_1d, plan_fwd_1d); `signal_cached` flag skips redundant FFTs; `xs_cpu` caches the CPU-side wavelength grid (set once in `_init_micro_params!`) to avoid redundant GPU→CPU syncs; `σ_floor` caches the grid-invariant Gaussian width floor, written with `xs_cpu` in `_init_micro_params!`; `n_kernel_builds` paces the underflow readback; used by `convolve=true` (Hirano) path and standalone GPU broadening functions |
@@ -109,7 +112,7 @@ The GPU disk integration path (`convolve=false`) uses several optimizations:
 | `BatchedMicroConvMem` | Pre-allocated GPU buffers + cuFFT plans for batched Doppler convolution of B tiles simultaneously; shared signal FFT (Natm rows) + per-tile batched buffers (B*Natm rows); `signal_cached` flag skips redundant signal FFTs across batches; `xs_cpu` caches wavelength grid to avoid per-call GPU→CPU copies; `σ_floor` as above. **No** `n_kernel_builds`: the batched underflow readback is deliberately not paced |
 | `AlphaCache` | Caches electron density guesses and abundance normalization across atmosphere columns to warm-start the chemical equilibrium solver in repeated `compute_alpha!` calls |
 | `CPUTileWorkspace` | Per-thread pre-allocated working arrays for the CPU disk integration tile loop; includes radiative transfer buffers (τs, cfunc), convolution output buffers (αs_broad, macro_out), FFT work buffers (row_buf, kernel_ft, kernel_real), per-tile velocity buffer (v_los_buf), and in-place FFTW plans; eliminates per-tile heap allocations so threading scales without GC contention |
-| `FormTempResult` | Output: wavs, flux, form_temps, cont_func, atmosphere |
+| `FormTempResult` | Output: wavs, flux, form_temps, cont_func, ceiling_ratio, r_thresh, atmosphere. The five-argument constructor derives `ceiling_ratio` from `cont_func` and `atmosphere.τs`; internal paths use it so the two cannot disagree |
 
 ### Broadening Kernels (`src/macroturbulence/`)
 
