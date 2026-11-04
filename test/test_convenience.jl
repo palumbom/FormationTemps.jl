@@ -148,11 +148,12 @@ let
         star_sc = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
                                vsini=0.0, v_macro=0.0, v_micro=ξ)
 
+        # an equivalence check between two inputs, so a coarse grid suffices
         minλ = first(wls) - 2.0
         maxλ = last(wls) + 2.0
-        result_vec = calc_formation_temp(star_vec, linelist; use_gpu=false,
+        result_vec = calc_formation_temp(star_vec, linelist; use_gpu=false, Nϕ=16,
                                           minλ=minλ, maxλ=maxλ, ne_warn_thresh=Inf)
-        result_sc = calc_formation_temp(star_sc, linelist; use_gpu=false,
+        result_sc = calc_formation_temp(star_sc, linelist; use_gpu=false, Nϕ=16,
                                          minλ=minλ, maxλ=maxλ, ne_warn_thresh=Inf)
 
         @test result_vec.flux ≈ result_sc.flux atol=1e-10

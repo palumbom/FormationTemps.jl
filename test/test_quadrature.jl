@@ -20,12 +20,23 @@ Teff, logg, Fe_H = 5777.0, 4.44, 0.0
 Δλ = 0.01
 Nϕ = 64          # tiling ground-truth resolution
 
+# tiling ground truth, memoized per star: it is the expensive half of every comparison,
+# and several testsets compare against the same star
+disk_refs = Dict{NTuple{5,Float64}, FormTempResult{Float64}}()
+function disk_reference(; vsini, istar, α₂=0.0, α₄=0.0, ζ=ζ_RT)
+    return get!(disk_refs, (vsini, istar, α₂, α₄, ζ)) do
+        star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ,
+                            v_micro=ξ, istar=istar, α₂=α₂, α₄=α₄)
+        calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:disk,
+                            Nϕ=Nϕ, showprogress=false, ne_warn_thresh=Inf)
+    end
+end
+
 # tiling (ground truth) vs quadrature for one star; returns (tiling, quad, interior)
 function run_pair(; vsini, istar, α₂=0.0, α₄=0.0, ζ=ζ_RT, Nμ=32, N_az=256)
     star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=vsini, v_macro=ζ,
                         v_micro=ξ, istar=istar, α₂=α₂, α₄=α₄)
-    rt = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:disk,
-                             Nϕ=Nϕ, showprogress=false, ne_warn_thresh=Inf)
+    rt = disk_reference(; vsini, istar, α₂, α₄, ζ)
     rq = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:quadrature,
                              Nμ=Nμ, N_az=N_az, ne_warn_thresh=Inf)
     λ0 = mean(rt.wavs)
@@ -96,8 +107,7 @@ end
         # anchors the accuracy claim the Integration Methods guide makes for the default.
         star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=0.0, v_macro=ζ_RT,
                             v_micro=ξ, istar=90.0)
-        rt = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:disk,
-                                 Nϕ=Nϕ, showprogress=false, ne_warn_thresh=Inf)
+        rt = disk_reference(vsini=0.0, istar=90.0)
         err(Nμ) = begin
             rq = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false,
                                      method=:quadrature, Nμ=Nμ, ne_warn_thresh=Inf)
@@ -116,11 +126,12 @@ end
     end
 
     @testset "convolve deprecated alias still selects tiling/hirano" begin
+        # an identity check between two spellings, so a coarse grid suffices
         star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=0.0, v_macro=0.0, v_micro=ξ)
         r_alias = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, convolve=false,
-                                      showprogress=false, ne_warn_thresh=Inf)
+                                      Nϕ=8, showprogress=false, ne_warn_thresh=Inf)
         r_method = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:disk,
-                                       showprogress=false, ne_warn_thresh=Inf)
+                                       Nϕ=8, showprogress=false, ne_warn_thresh=Inf)
         @test r_alias.form_temps == r_method.form_temps
     end
 
