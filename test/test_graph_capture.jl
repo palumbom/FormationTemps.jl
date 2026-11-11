@@ -34,8 +34,7 @@ if FormationTemps.GPU_DEFAULT
             FT.convolve_wavelength_axis_gpu(cmem, xs_d, αs_d, v_los, v_mic)
 
             # (a) a build the pacing policy SKIPS. Captures with or without the capture guard,
-            # so this rung isolates "nothing else in this path blocks capture" — including
-            # row_sums, whose allocation is capturable and only breaks repeat launch.
+            # so this rung isolates "nothing else in this path blocks capture".
             cmem.n_kernel_builds = FT._UNDERFLOW_EAGER_BUILDS
             @test !FT._should_check_underflow(cmem.n_kernel_builds + 1)
             graph_skipped = CUDA.capture(throw_error=false) do

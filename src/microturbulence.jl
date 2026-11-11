@@ -359,16 +359,112 @@ _should_check_underflow(n::Int) =
 # sweep, not an MCMC) can force a check on any call by zeroing n_kernel_builds first.
 # Not thread-safe: n_kernel_builds is a plain read-modify-write, and a cmem is owned by one
 # task in every current caller.
-function _maybe_report_underflow!(cmem, row_sums)
+function _maybe_report_underflow!(cmem)
     cmem.n_kernel_builds += 1
     _should_check_underflow(cmem.n_kernel_builds) || return nothing
     CUDA.is_capturing() && return nothing
-    n_underflow = Int(CUDA.sum(iszero.(row_sums)))
+    n_underflow = _count_zero_rows(cmem.conv_gpu, size(cmem.conv_gpu, 1))
     n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     return nothing
 end
 
-# build per-row kernels into conv_gpu, normalize, batch-FFT into kernel_ft_gpu
+# Rows among the first `nrows` of the per-row kernels in `A` that are all zeros. The kernels are
+# non-negative, so a row is zero exactly when its maximum is, and a maximum is exact in any
+# reduction order. Allocates and blocks on a device→host read: call it only where the underflow
+# diagnostic is due.
+_count_zero_rows(A::CuMatrix, nrows::Int) =
+    Int(CUDA.sum(iszero.(view(maximum(A, dims=2), 1:nrows, :))))
+
+# Lanes per row of `normalize_rows_kernel!`; a power of two. Part of the summation order, so
+# changing it moves the last bit of every per-row kernel.
+const _ROW_NORM_LANES = 64
+# Rows per block of `normalize_rows_kernel!`. Not part of the summation order: it only sets how
+# many adjacent rows a warp reads together and how many blocks the work spreads over.
+const _ROW_NORM_ROWS = 8
+
+# elements j, j + nl, j + 2nl, j + 3nl of a row, read together so that several loads are in flight
+@inline _row_run4(A, row, j, nl) =
+    @inbounds (A[row, j], A[row, j + nl], A[row, j + Int32(2) * nl], A[row, j + Int32(3) * nl])
+
+# Scale each of the first `Nrows` rows of `A` to unit sum in place, by the reciprocal of its sum;
+# a row that sums to zero is left as it is. A block holds blockDim().x consecutive rows and
+# blockDim().y lanes per row. Lane l of a row adds the row's elements l, l + nl, l + 2nl, … in
+# that order and the nl partial sums are combined by a fixed binary tree, so the order of the
+# additions depends on the row length and the lane count alone — not on how many rows are
+# normalized together, on the array's shape, or on a reduction library.
+function normalize_rows_kernel!(A::CDM{T}, Nrows::Int32, L::Int32) where T<:AF
+    nr = Int32(blockDim().x)
+    nl = Int32(blockDim().y)
+    r = Int32(threadIdx().x)
+    lane = Int32(threadIdx().y)
+    row = (Int32(blockIdx().x) - Int32(1)) * nr + r
+    partials = CuDynamicSharedArray(T, Int(nr) * Int(nl))
+    sidx = r + (lane - Int32(1)) * nr
+    # a thread whose row is past Nrows does no work, but must still reach every barrier
+    active = row <= Nrows
+    span = Int32(3) * nl
+    step = Int32(4) * nl
+
+    acc = zero(T)
+    if active
+        j = lane
+        while j + span <= L
+            x1, x2, x3, x4 = _row_run4(A, row, j, nl)
+            acc = (((acc + x1) + x2) + x3) + x4
+            j += step
+        end
+        while j <= L
+            acc += @inbounds A[row, j]
+            j += nl
+        end
+    end
+    @inbounds partials[sidx] = acc
+    sync_threads()
+
+    d = nl >> Int32(1)
+    while d >= Int32(1)
+        if lane <= d
+            @inbounds partials[sidx] += partials[sidx + d * nr]
+        end
+        sync_threads()
+        d >>= Int32(1)
+    end
+
+    if active
+        s = @inbounds partials[r]
+        w = one(T) / ifelse(iszero(s), one(T), s)
+        j = lane
+        while j + span <= L
+            x1, x2, x3, x4 = _row_run4(A, row, j, nl)
+            @inbounds begin
+                iszero(x1) || (A[row, j] = x1 * w)
+                iszero(x2) || (A[row, j + nl] = x2 * w)
+                iszero(x3) || (A[row, j + Int32(2) * nl] = x3 * w)
+                iszero(x4) || (A[row, j + Int32(3) * nl] = x4 * w)
+            end
+            j += step
+        end
+        while j <= L
+            x = @inbounds A[row, j]
+            iszero(x) || (@inbounds A[row, j] = x * w)
+            j += nl
+        end
+    end
+    return nothing
+end
+
+# Normalize the first `Nrows` rows of the per-row kernels in `A`. Use this, not a library
+# reduction: `sum(A, dims=2)` picks its summation grouping from the array's shape, so a row's
+# normalization would depend on how many rows share the array, and it allocates.
+function _normalize_rows!(A::CuMatrix{T}, Nrows::Int) where T<:AF
+    nr = _ROW_NORM_ROWS
+    nl = _ROW_NORM_LANES
+    @cuda threads=(nr, nl) blocks=cld(Nrows, nr) shmem=nr * nl * sizeof(T) normalize_rows_kernel!(
+        A, Int32(Nrows), Int32(size(A, 2)))
+    return nothing
+end
+
+# build per-row kernels into conv_gpu and normalize them
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
                                   v_los::CA{T,1}, v_mic::T) where T<:AF
     i0 = cmem.Nλ ÷ 2 + 1
@@ -381,14 +477,8 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
         cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows))
-    # Do not "optimise" this into a preallocated reduction. No preallocated form is
-    # bit-identical to sum(A, dims=2): sum!, sum!(init=true), and both Base.mapreducedim!
-    # forms all land ~1 ULP away (measured, Float32, at two padded lengths). It allocates,
-    # which makes a captured CUDA graph single-use — a known, accepted cost, not an oversight.
-    # Anything faster here moves the log-likelihood, which the RT-exactness policy forbids.
-    row_sums = sum(cmem.conv_gpu, dims=2)
-    cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
-    _maybe_report_underflow!(cmem, row_sums)
+    _normalize_rows!(cmem.conv_gpu, Nrows)
+    _maybe_report_underflow!(cmem)
     return nothing
 end
 
@@ -404,14 +494,8 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_gpu!(
         cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows), Int32(Nrows))
-    # Do not "optimise" this into a preallocated reduction. No preallocated form is
-    # bit-identical to sum(A, dims=2): sum!, sum!(init=true), and both Base.mapreducedim!
-    # forms all land ~1 ULP away (measured, Float32, at two padded lengths). It allocates,
-    # which makes a captured CUDA graph single-use — a known, accepted cost, not an oversight.
-    # Anything faster here moves the log-likelihood, which the RT-exactness policy forbids.
-    row_sums = sum(cmem.conv_gpu, dims=2)
-    cmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
-    _maybe_report_underflow!(cmem, row_sums)
+    _normalize_rows!(cmem.conv_gpu, Nrows)
+    _maybe_report_underflow!(cmem)
     return nothing
 end
 
@@ -551,11 +635,10 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
         bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(BNatm))
-    row_sums = sum(bcmem.conv_gpu, dims=2)
-    bcmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
+    _normalize_rows!(bcmem.conv_gpu, BNatm)
     # Restrict underflow count to the first BNatm rows; trailing rows of
     # bcmem.conv_gpu are pre-zeroed by `fill!` and are not active.
-    n_underflow = Int(CUDA.sum(iszero.(@view row_sums[1:BNatm, :])))
+    n_underflow = _count_zero_rows(bcmem.conv_gpu, BNatm)
     n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $BNatm active row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     mul!(bcmem.kernel_ft_gpu, bcmem.plan_fwd_kernel, bcmem.conv_gpu)
 
@@ -602,11 +685,10 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_gpu!(
         bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(Natm), Int32(BNatm))
-    row_sums = sum(bcmem.conv_gpu, dims=2)
-    bcmem.conv_gpu ./= ifelse.(iszero.(row_sums), one(T), row_sums)
+    _normalize_rows!(bcmem.conv_gpu, BNatm)
     # Restrict underflow count to the first BNatm rows; trailing rows of
     # bcmem.conv_gpu are pre-zeroed by `fill!` and are not active.
-    n_underflow = Int(CUDA.sum(iszero.(@view row_sums[1:BNatm, :])))
+    n_underflow = _count_zero_rows(bcmem.conv_gpu, BNatm)
     n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $BNatm active row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
     mul!(bcmem.kernel_ft_gpu, bcmem.plan_fwd_kernel, bcmem.conv_gpu)
 

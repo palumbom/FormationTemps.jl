@@ -65,6 +65,8 @@ include("structures/AlphaCache.jl")
 # radiative transport
 include("contribution.jl")
 include("tau.jl")
+include("structures/StackedRenderMemory.jl")
+include("stacked_render.jl")
 
 # disk integration
 include("geometry.jl")
@@ -83,6 +85,7 @@ export round_to_power, elav, searchsortednearest, form_temps_from_cfunc,
        convolve_hirano_rotmacro, convolve_iso_rt_macro,
        convolve_rt_macro, gray_rot_kernel, hirano_rotmacro_ft_kernel,
        gray_iso_rt_macro_kernel, rt_macro_kernel, convolve_instrument_gauss,
-       rebin_spectrum, Atmosphere, get_τs, get_zs, get_Ts, AlphaCache
+       rebin_spectrum, Atmosphere, get_τs, get_zs, get_Ts, AlphaCache,
+       StackedRenderMemory, component_rows, set_signal_ft!, render_stacked!
 
 end

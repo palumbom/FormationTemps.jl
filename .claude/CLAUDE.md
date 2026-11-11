@@ -143,7 +143,9 @@ The `convolve=false` (disk integration) macro path does NOT use `cmem.out_gpu`. 
 
 The dominant Float32 precision loss is in the per-tile R2C/C2R FFT roundtrip during microturbulent convolution: absorption coefficients span ~5 orders of magnitude (continuum vs line core), and Float32 FFT arithmetic distributes absolute error proportional to the largest values. This produces ~2e-4 relative error in the convolved αs per tile, cascading to ~1e-3 in τ and ~1e-2 in cfunc_dt. After disk integration over ~10⁴ tiles (with partial cancellation from opposing Doppler signs), the net formation temperature error is ~1–2 K (~0.03% of ~5000 K). Other stages (τ integration, Planck evaluation, cumsum/interpolation) contribute negligibly at Float32.
 
-Bit-identity of the emergent flux is scoped to a fixed CUDA.jl. `row_sums = sum(conv_gpu, dims=2)` inherits CUDA.jl's `mapreduce` partitioning, `Manifest.toml` is gitignored, and `Project.toml` pins `CUDA = "5.9.6"` as a floor rather than an exact version — so a fresh clone or a `Pkg.up` can move the last ULP of the flux with no source change. The enforceable form of the RT-exactness policy is therefore "no change within a comparison set" (one chain, one suite of runs being compared), not "no change ever". Re-baseline at a deliberate boundary, never mid-array.
+Bit-identity of the emergent flux is scoped to a fixed environment. The cuFFT library, the GPU compiler and the device all sit under it, `Manifest.toml` is gitignored, and `Project.toml` gives CUDA.jl a floor rather than an exact version — so a fresh clone or a `Pkg.up` can move the last ULP of the flux with no source change. The single-tile Float32 render was bit-identical between CUDA.jl 5.11.1 and 6.5.1 on one RTX 6000 Ada (2026-11-11, one state), but nothing enforces that. The enforceable form of the RT-exactness policy is therefore "no change within a comparison set" (one chain, one suite of runs being compared), not "no change ever". Re-baseline at a deliberate boundary, never mid-array.
+
+No library reduction sits in the render path. The per-row Doppler kernels are normalized by `_normalize_rows!`, whose summation order depends only on the padded length and `_ROW_NORM_LANES`; a row's kernel is therefore the same bits whether it is built alone, in a batch of tiles, or under another CUDA.jl. `sum(A, dims=2)` must not come back: CUDA.jl's reductions pick their grouping from the array's shape (AcceleratedKernels' launch shapes from GPUArrays 12 on, `mapreduce`'s block count before), which made a tile's convolved opacities depend on the batch around it and moved the flux between CUDA.jl versions.
 
 The real-space tile accumulation kernels (`accumulate_batch_kernel!`, `accumulate_tile_kernel!`) use Kahan compensated summation with per-element compensation arrays to prevent O(N) rounding bias across the ~10⁴ tile sum. The Fourier-domain macro accumulation path (`batched_macro_multiply_accumulate_kernel!`) uses naive summation — acceptable for Float64 (~10⁴ × ε ≈ 10⁻¹²) but may need Kahan for Float32 if precision degrades. Run `debug/diagnose_f32_residuals.jl` for a stage-by-stage precision breakdown.
 
@@ -165,9 +167,30 @@ Contrast the macro convolutions (`convolve_rt_macro_gpu` and friends), which ext
 
 Two DFT layout conventions coexist. The microturbulence kernels (`kernel_to_dft_layout_2d_*_gpu!`) place zero-lag at index **1** (`idx = d >= 0 ? d + 1 : L + d + 1`). The macro kernel precomputation (`compute_rt_macro_dft_layout_2d!`) places zero-lag at index **L** (`idx = d > 0 ? d : L + d`), matching the serial `precompute_rt_macro_kernel_ft` path (roll + ifftshift produces zero-lag at L for even-length arrays). Each convention is internally consistent within its own FFT pipeline.
 
+#### cuFFT pairs rows at odd padded lengths
+
+For an odd padded length `L` the batched real plans (`plan_fwd`, `plan_bwd`, R2C and C2R along
+the wavelength axis) transform the rows in consecutive pairs (2k−1, 2k), and each row's output
+carries round-off-level leakage from its partner; the last row of an odd row count is unpaired.
+An even `L` transforms every row independently. Measured 2026-11-11 by zeroing one input row
+and listing the output rows that change, Float32 and Float64, CUDA.jl 5.11.1 and 6.5.1: paired
+at `L = 1875` (what Nλ = 1321 pads to), independent at 784, 960, 1024 and 2744.
+`next_fft_friendly_len` does not avoid odd lengths. What follows from it:
+
+- **A tile is independent of its batch only if it has an even number of rows, or `L` is even.**
+  With an even `Natm` the pairs fall inside each tile and a batched tile is bit-identical to the
+  same tile convolved alone; with an odd `Natm` at an odd `L` they straddle tile boundaries and
+  it is not, whatever the normalization.
+- **A row whose kernel underflowed is exactly zero only when `L` is even or its partner is zero
+  too.** Otherwise it holds ε times its partner.
+- **`convolve_wavelength_axis_batched!` does not write the spectrum rows past `BNatm`.** With an
+  odd `BNatm` at an odd `L` the last active row is therefore paired with stale or uninitialized
+  memory. It cannot happen with an even `Natm`; zeroing the rows the multiply launch over-spawns
+  in `batched_spectral_multiply!` would close it.
+
 #### Kernel normalization underflow guard
 
-All FFT convolution kernels in `src/microturbulence.jl` are normalized via `./= sum(...)`. When Doppler `v_los` shifts the kernel center more than ~half a wavelength window outside the grid (≳ 38 km/s at λ ≈ 6000 Å with `σ_floor = 0.25·Δλ`), every Gaussian sample underflows to zero and the divide produces NaN. That NaN propagates through αs → τ → cfunc and yields all-NaN intensity for the affected atmosphere layer; in the scalar-v_los case it wipes the entire column. The guard `./= ifelse(iszero(s), one(T), s)` (used at all 9 microturbulence sites) falls back to a zero kernel — αs_conv row → 0, the discrete-convolution limit "shifted out of window contributes nothing." For all non-degenerate rows the divide is bit-identical to the prior implementation. A `@warn ... maxlog=3` surfaces the underflow so upstream callers can detect e.g. cm/s vs m/s unit bugs rather than seeing silent NaN. Counting the zero-sum rows needs a blocking `Int(CUDA.sum(iszero.(row_sums)))`, so on the two single-tile paths (`_build_per_row_kernels!`) that count is **paced** by `_maybe_report_underflow!`: every build for the first `_UNDERFLOW_EAGER_BUILDS` on a given memory object, then one in every `_UNDERFLOW_CHECK_STRIDE`, tracked by `cmem.n_kernel_builds`. Underflow is a configuration error, not a transient, so sampling the diagnostic is enough; the *guard* is unconditional. The readback must stay inside that branch — computing it unconditionally and gating only the `@warn` restores the full per-render cost and passes every assertion in `test_underflow_guard.jl`, because the warning stays paced; `test/test_graph_capture.jl` is the only gate that catches it. The check is additionally skipped while `CUDA.is_capturing()`: a readback inside a CUDA graph capture invalidates it, and `CUDA.@captured` re-executes its body under capture on every invocation, so an unguarded due build would break capture periodically and force a from-scratch graph re-instantiation. `_build_per_row_kernels!` is the only capture blocker in the GPU render path, so that guard is what keeps the path capturable at all. Two consequences to expect: once a caller captures the render into a graph the paced check stops firing inside it, so detection reduces to the builds before capture; and the "fires on the first renders or never" premise holds for a fixed-configuration run, not for a long-lived cmem driven by per-call data velocities (a cube column sweep reusing one cmem across columns can first underflow at column 5000, and the guard turns that into zeros rather than the NaNs such a sweep's own checks look for) — such a caller should zero `cmem.n_kernel_builds` before each call to force a check. The counter is per-struct, so each parallel-tempering chain gets its own eager window; that is why a cold chain can warn while a hot one stays quiet. The batched path (`convolve_wavelength_axis_batched!`) is deliberately **not** paced — it runs ~165 times per disk integration rather than per render, and per-tile `v_los` varies, so a late batch can be the first to underflow; `BatchedMicroConvMem` therefore has no counter field and the test asserts its absence. The 1D scalar path (`_build_kernel_ft_1d!`) also reads back every call: its `normval` is already a host scalar because it is used as a scalar divisor. The 15 macro/instrumental/convenience normalization sites (`rad_tan.jl`, `iso_rad_tan.jl`, `gray_rot.jl`, `rad_tan_two.jl`, `hirano.jl`, `instrumental.jl`, `convenience.jl`) carry `# TODO(zero-sum-guard)` markers; they short-circuit for ζ=0 / vsini=0 upstream so underflow shouldn't trigger in practice, but the same guard should be added if/when one is touched.
+All FFT convolution kernels in `src/microturbulence.jl` are normalized to unit sum in real space: the CPU sites and the 1D scalar GPU site via `./= sum(...)`, the four GPU per-row sites (`_build_per_row_kernels!`, `convolve_wavelength_axis_batched!`) via `_normalize_rows!`. When Doppler `v_los` shifts the kernel center more than ~half a wavelength window outside the grid (≳ 38 km/s at λ ≈ 6000 Å with `σ_floor = 0.25·Δλ`), every Gaussian sample underflows to zero and the divide produces NaN. That NaN propagates through αs → τ → cfunc and yields all-NaN intensity for the affected atmosphere layer; in the scalar-v_los case it wipes the entire column. The guard — `./= ifelse(iszero(s), one(T), s)` at the five `sum` sites, the same test on the row sum inside `normalize_rows_kernel!` — falls back to a zero kernel — αs_conv row → 0, the discrete-convolution limit "shifted out of window contributes nothing." (At an odd padded length the convolved row is ε times its cuFFT pair partner rather than exactly zero; see "cuFFT pairs rows at odd padded lengths".) A `@warn ... maxlog=3` surfaces the underflow so upstream callers can detect e.g. cm/s vs m/s unit bugs rather than seeing silent NaN. Counting the zero rows (`_count_zero_rows`: a library `maximum` over the normalized kernels, which allocates, then a blocking read) is the cost the pacing avoids, so on the two single-tile paths (`_build_per_row_kernels!`) that count is **paced** by `_maybe_report_underflow!`: every build for the first `_UNDERFLOW_EAGER_BUILDS` on a given memory object, then one in every `_UNDERFLOW_CHECK_STRIDE`, tracked by `cmem.n_kernel_builds`. Underflow is a configuration error, not a transient, so sampling the diagnostic is enough; the *guard* is unconditional. The readback must stay inside that branch — computing it unconditionally and gating only the `@warn` restores the full per-render cost and passes every assertion in `test_underflow_guard.jl`, because the warning stays paced; `test/test_graph_capture.jl` is the only gate that catches it. The check is additionally skipped while `CUDA.is_capturing()`: a readback inside a CUDA graph capture invalidates it, and `CUDA.@captured` re-executes its body under capture on every invocation, so an unguarded due build would break capture periodically and force a from-scratch graph re-instantiation. `_build_per_row_kernels!` is the only capture blocker in the GPU render path, so that guard is what keeps the path capturable at all. Two consequences to expect: once a caller captures the render into a graph the paced check stops firing inside it, so detection reduces to the builds before capture; and the "fires on the first renders or never" premise holds for a fixed-configuration run, not for a long-lived cmem driven by per-call data velocities (a cube column sweep reusing one cmem across columns can first underflow at column 5000, and the guard turns that into zeros rather than the NaNs such a sweep's own checks look for) — such a caller should zero `cmem.n_kernel_builds` before each call to force a check. The counter is per-struct, so each parallel-tempering chain gets its own eager window; that is why a cold chain can warn while a hot one stays quiet. The batched path (`convolve_wavelength_axis_batched!`) is deliberately **not** paced — it runs ~165 times per disk integration rather than per render, and per-tile `v_los` varies, so a late batch can be the first to underflow; `BatchedMicroConvMem` therefore has no counter field and the test asserts its absence. The 1D scalar path (`_build_kernel_ft_1d!`) also reads back every call: its `normval` is already a host scalar because it is used as a scalar divisor. The 15 macro/instrumental/convenience normalization sites (`rad_tan.jl`, `iso_rad_tan.jl`, `gray_rot.jl`, `rad_tan_two.jl`, `hirano.jl`, `instrumental.jl`, `convenience.jl`) carry `# TODO(zero-sum-guard)` markers; they short-circuit for ζ=0 / vsini=0 upstream so underflow shouldn't trigger in practice, but the same guard should be added if/when one is touched.
 
 #### CUDA graph capture vs repeat replay
 
@@ -183,25 +206,32 @@ for different reasons:
   allocation becomes a graph node that cannot be replayed, so the graph is single-use: the
   first launch succeeds and the next fails with `ERROR_INVALID_VALUE`.
 
-`row_sums = sum(cmem.conv_gpu, dims=2)` in `_build_per_row_kernels!` is the sole allocation in
-the render path — the τ integration, the cfunc kernel and `reduce_intensity!` allocate nothing.
-Two traps for anyone trying to remove it:
+The render path allocates no device memory on a build whose underflow check is not due: the
+per-row kernels are normalized by `_normalize_rows!`, a hand-written kernel, and the τ
+integration, the cfunc kernel and `reduce_intensity!` allocate nothing. A due build does allocate
+(`_count_zero_rows`), and is skipped under capture. Checked 2026-11-11 on CUDA.jl 6.5.1:
+`CUDA.@allocated` over three renders returns 0, and one captured graph of three renders,
+replayed five times, reproduced the direct intensities bit for bit and followed a change of
+`v_los`. Replay ran 1.13× faster than direct launches on the single-tile render: the render is
+bound by device-side kernel latency, not by host launch overhead.
 
-- **Preallocating the output is not enough.** `sum!(buf, A)` still allocates reduction scratch
-  inside CUDA.jl's `mapreducedim!`, so replay still fails. Only a hand-written kernel reaches
-  zero bytes. Verify with `CUDA.@allocated`, not by reading the call.
-- **A hand-written reduction is easy to make slower than the library one.** One block per row
-  over the column-major `(Natm, L)` array is uncoalesced striding at low occupancy. Since
-  FormationTemps is the library and only a capturing consumer benefits, a slower reduction
-  taxes every other caller of the single-tile vector-`v_los` path (the `convolve_wavelength_axis_gpu`
-  sites in `contribution.jl`, reached from `convenience.jl`'s `convolve=true` path and the
-  `:quadrature` drivers; the `convolve=false` disk integration is unaffected, as it uses
-  `convolve_wavelength_axis_batched!`). The bar for such a change is allocation-free *and* no
-  slower than `sum(A, dims=2)` when ungraphed.
+Rules for the normalization:
 
-Removing the allocation is also value-changing at the ULP level: no preallocated or hand-written
-reduction reproduces `sum(A, dims=2)`'s `mapreduce` tree order, so the log-likelihood moves.
-That is why the allocation is still there.
+- **Keep it a hand-written kernel.** `sum(A, dims=2)` allocates, `sum!(buf, A)` still allocates
+  reduction scratch inside the library, and either one's summation grouping follows the array's
+  shape (see "Float32 Precision Characteristics"). Verify zero bytes with `CUDA.@allocated`,
+  not by reading the call.
+- **`_ROW_NORM_LANES` is part of the arithmetic; `_ROW_NORM_ROWS` is not.** The lanes per row
+  fix the order of the additions, so changing them moves the last bit of every per-row kernel.
+  The rows per block only trade coalescing against occupancy and can be retuned freely.
+- **The layout is measured.** One block per row is uncoalesced striding and costs about twice
+  the device time of the library reduction; 32 rows per block starves Float64, whose arithmetic
+  is throughput-bound on consumer-class devices. Any retuning has to beat `sum(A, dims=2)`
+  followed by the broadcast divide in *device* time at both precisions, since the single-tile
+  vector-`v_los` path serves every caller (`contribution.jl`, `convenience.jl`'s
+  `convolve=true` path, the `:quadrature` drivers) and the batched path the disk integration.
+  Time it with the calls queued behind a long-running kernel and bracketed by device events; a
+  host-side timing of a synchronized call mostly measures launch overhead.
 
 Capture freezes control flow as well as launches. `calc_intensity_cfunc!` branches on
 `cmem.signal_cached`, so a graph captured with the cache warm has the `copyto!(mem.αs, αs_init)`

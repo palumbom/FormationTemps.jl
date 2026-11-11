@@ -249,11 +249,11 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             τ0 = τs[k, j]
             τ1 = τs[k+1, j]
             Δτ = τ1 - τ0
-            τ_mid = 0.5 * (τ0 + τ1)
+            τ_mid = T(0.5) * (τ0 + τ1)
 
             # Gauss nodes
-            τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
-            τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
+            τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
+            τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
 
             # linear T interp at fixed 2-point Gauss nodes
             dT = Ts[k+1] - Ts[k]
