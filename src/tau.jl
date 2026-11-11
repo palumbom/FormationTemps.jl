@@ -1,9 +1,91 @@
-# calc_tau_cpu!(μ_i, zs, αs, τs) = Korg.RadiativeTransfer.compute_tau_bezier!(τs, zs ./ μ_i, αs)
+"""
+    calc_tau_bezier_cpu!(μ_i, zs, αs, τs)
 
-function calc_tau_bezier_cpu!(μ_i, zs, αs, τs)
-    for i in axes(τs,2)
-        Korg.RadiativeTransfer.compute_tau_bezier!(view(τs,:,i), zs ./ μ_i, view(αs,:,i))
+Compute optical depth along a ray at `μ_i` by integrating α over geometric depth, with α
+interpolated by a quadratic Bézier curve per layer (de la Cruz Rodríguez & Piskunov 2013).
+Used when the atmosphere carries no τ_ref for the anchored scheme.
+
+Node derivatives are Fritsch-Butland weighted harmonic means, zero at local extrema. Each
+control point lies on its node's tangent line at the midpoint of the adjacent layer, which
+makes the layer integral the Hermite-corrected trapezoid; the two end layers have a single
+control point. Control points are clamped to `[0, 2 max(α)]` and `τs[1, :] = TAU_FLOOR`.
+
+Mirrors `calc_tau_bezier_cached_kernel!` operation for operation, so the CPU and GPU paths
+agree to rounding. `Korg.RadiativeTransfer.compute_tau_bezier!` is not a substitute: its
+control points carry the opposite signs, and it neither zeroes the derivative at extrema nor
+uses the same clamp.
+"""
+function calc_tau_bezier_cpu!(μ_i::T, zs::AA{T,1}, αs::AA{T,2}, τs::AA{T,2}) where T<:AF
+    N = length(zs)
+    @assert N >= 3 "calc_tau_bezier_cpu! requires Natm >= 3"
+    @assert size(αs) == size(τs) "αs/τs dimension mismatch"
+    @assert size(αs, 1) == N "αs atmosphere dimension mismatch"
+
+    inv_μ = one(T) / μ_i
+    one_third = inv(T(3))
+    half = T(0.5)
+    zeroT = zero(T)
+    oneT = one(T)
+
+    @inbounds for j in axes(τs, 2)
+        # αmax scan for overshoot clamping
+        α_prev = αs[1, j]
+        αmax = α_prev
+        for p in 2:N
+            αmax = max(αmax, αs[p, j])
+        end
+        hi = max(T(2) * αmax, zeroT)
+        τs[1, j] = T(TAU_FLOOR)
+
+        # first layer: one control point, from node 2
+        ds_prev = (zs[2] - zs[1]) * inv_μ
+        ds_curr = (zs[3] - zs[2]) * inv_μ
+        α_curr = αs[2, j]
+        α_next = αs[3, j]
+        prev_dC = (α_curr - α_prev) / ds_prev
+        dC = (α_next - α_curr) / ds_curr
+
+        αC = one_third * (oneT + ds_curr / (ds_prev + ds_curr))
+        ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                      (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+        # control points lie on the node's tangent, half a layer toward each neighbor
+        C0 = α_curr - half * ds_prev * ybar
+        C1 = α_curr + half * ds_curr * ybar
+        Cf = min(max(C0, zeroT), hi)
+        τs[2, j] = τs[1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
+
+        prev_dC = dC
+        prev_C1 = C1
+        α_prev = α_curr
+        α_curr = α_next
+        ds_prev = ds_curr
+
+        # interior layers: mean of the control points from the two bounding nodes
+        for c in 3:(N - 1)
+            ds_curr = (zs[c+1] - zs[c]) * inv_μ
+            αC = one_third * (oneT + ds_curr / (ds_prev + ds_curr))
+            α_next = αs[c+1, j]
+            dC = (α_next - α_curr) / ds_curr
+
+            ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
+                          (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
+            C0 = α_curr - half * ds_prev * ybar
+            C1 = α_curr + half * ds_curr * ybar
+            Cf = min(max(half * (C0 + prev_C1), zeroT), hi)
+            τs[c, j] = τs[c-1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
+
+            prev_dC = dC
+            prev_C1 = C1
+            α_prev = α_curr
+            α_curr = α_next
+            ds_prev = ds_curr
+        end
+
+        # last layer: one control point, from node N-1
+        Cf = min(max(prev_C1, zeroT), hi)
+        τs[N, j] = τs[N-1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
     end
+    return nothing
 end
 
 """
@@ -133,8 +215,9 @@ function calc_tau_bezier_cached_kernel!(αs::CDM{T}, τs::CDM{T},
     @inbounds αC = alphaC[2]
     ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
                   (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-    C0 = α_curr + half * ds_prev * ybar
-    C1 = α_curr - half * ds_curr * ybar
+    # control points lie on the node's tangent, half a layer toward each neighbor
+    C0 = α_curr - half * ds_prev * ybar
+    C1 = α_curr + half * ds_curr * ybar
     Cf = min(max(C0, zeroT), hi)
     @inbounds τs[2, j] = τs[1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
 
@@ -155,8 +238,8 @@ function calc_tau_bezier_cached_kernel!(αs::CDM{T}, τs::CDM{T},
 
         ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
                       (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-        C0 = α_curr + half * ds_prev * ybar
-        C1 = α_curr - half * ds_curr * ybar
+        C0 = α_curr - half * ds_prev * ybar
+        C1 = α_curr + half * ds_curr * ybar
         Cf = min(max(half * (C0 + prev_C1), zeroT), hi)
         τs[c, j] = τs[c - Int32(1), j] - ds_prev * one_third * (α_prev + α_curr + Cf)
 
@@ -291,8 +374,9 @@ function calc_tau_bezier_batched_kernel!(αs, τs, ds, alphaC, Natm, Nλ, Bcur, 
         @inbounds αC = alphaC[off + 2]
         ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
                       (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-        C0 = α_curr + half * ds_prev * ybar
-        C1 = α_curr - half * ds_curr * ybar
+        # control points lie on the node's tangent, half a layer toward each neighbor
+        C0 = α_curr - half * ds_prev * ybar
+        C1 = α_curr + half * ds_curr * ybar
         Cf = min(max(C0, zeroT), hi)
         @inbounds τs[off + 2, j] = τs[off + 1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
 
@@ -311,8 +395,8 @@ function calc_tau_bezier_batched_kernel!(αs, τs, ds, alphaC, Natm, Nλ, Bcur, 
 
             ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
                           (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-            C0 = α_curr + half * ds_prev * ybar
-            C1 = α_curr - half * ds_curr * ybar
+            C0 = α_curr - half * ds_prev * ybar
+            C1 = α_curr + half * ds_curr * ybar
             Cf = min(max(half * (C0 + prev_C1), zeroT), hi)
             @inbounds τs[off + c, j] = τs[off + c - 1, j] - ds_prev * one_third * (α_prev + α_curr + Cf)
 

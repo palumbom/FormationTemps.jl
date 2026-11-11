@@ -507,8 +507,9 @@ function calc_tau_cfunc_reduce_bezier_kernel!(out::CDV{T}, αs::CDM{T},
     @inbounds αC = alphaC[2]
     ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
                   (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-    C0 = α_curr + half * ds_prev * ybar
-    C1 = α_curr - half * ds_curr * ybar
+    # control points lie on the node's tangent, half a layer toward each neighbor
+    C0 = α_curr - half * ds_prev * ybar
+    C1 = α_curr + half * ds_curr * ybar
     Cf = min(max(C0, zeroT), hi)
     τ_curr = τ_prev - ds_prev * one_third * (α_prev + α_curr + Cf)
 
@@ -534,8 +535,8 @@ function calc_tau_cfunc_reduce_bezier_kernel!(out::CDV{T}, αs::CDM{T},
 
         ybar = ifelse(prev_dC * dC <= zeroT, zeroT,
                       (prev_dC * dC) / (αC * dC + (oneT - αC) * prev_dC))
-        C0 = α_curr + half * ds_prev * ybar
-        C1 = α_curr - half * ds_curr * ybar
+        C0 = α_curr - half * ds_prev * ybar
+        C1 = α_curr + half * ds_curr * ybar
         Cf = min(max(half * (C0 + prev_C1), zeroT), hi)
         τ_curr = τ_prev - ds_prev * one_third * (α_prev + α_curr + Cf)
 

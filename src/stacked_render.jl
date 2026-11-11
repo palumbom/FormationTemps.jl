@@ -146,10 +146,10 @@ function render_stacked!(smem::StackedRenderMemory{T}) where T<:AF
     mul!(smem.conv_gpu, smem.plan_bwd, smem.conv_ft)
     αs_conv = @view smem.conv_gpu[:, (cmem.pad_left + 1):(cmem.pad_left + Nλ)]
 
-    # compute taus: one thread per (component, wavelength)
-    threads = 256
-    blocks = cld(total, threads)
-    @cuda threads=threads blocks=blocks calc_tau_bezier_batched_kernel!(
+    # compute taus: one thread per (component, wavelength), each a serial loop over the layers,
+    # in small blocks as calc_tau_bezier_cached! launches them
+    t_tau = 32
+    @cuda threads=t_tau blocks=cld(total, t_tau) calc_tau_bezier_batched_kernel!(
         αs_conv, smem.τs, smem.tau_ds, smem.tau_alphaC,
         Int32(Natm), Int32(Nλ), Int32(smem.B), Int32(total))
 
@@ -160,6 +160,8 @@ function render_stacked!(smem::StackedRenderMemory{T}) where T<:AF
         smem.cfunc, smem.τs, smem.Ts, smem.λs, Int32(Natm))
 
     # reduce over layers
+    threads = 256
+    blocks = cld(total, threads)
     @cuda threads=threads blocks=blocks reduce_intensity_stacked_kernel!(
         smem.intensity, smem.cfunc, smem.τs, Int32(Natm), Int32(Nλ), Int32(total))
     return nothing
