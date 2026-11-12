@@ -1,11 +1,34 @@
+# Sum over all integers n of exp(-(n/a)^2): the sum of the samples of a Gaussian of width `a`
+# pixels on a uniform grid that has a sample at the peak. Each of the two terms of the RT
+# kernel is normalized by its own sum, so that both carry the weight 1/2 whatever their widths.
+# Normalizing only the sum of the two hands a term narrower than a pixel, whose one sample of
+# the density exceeds 1/pixel, part of the other term's weight. For a ≥ 2 the sum is √π·a to
+# rounding (Poisson summation: the first correction is exp(-π²a²)); below that the series is
+# summed directly, and 13 terms a side reach exp(-(13/2)²).
+@inline function _sampled_gauss_sum(a::T) where T<:AF
+    a >= T(2) && return sqrt(T(π)) * a
+    s = one(T)
+    for n in 1:13
+        s += T(2) * exp(-(T(n) / a)^2)
+    end
+    return s
+end
+
+# Velocity step (m/s) of a uniform wavelength grid of N samples whose first and last samples
+# lie Δλ_first and Δλ_last from the window center λ0.
+@inline _velocity_step(Δλ_first, Δλ_last, λ0, N) =
+    (c_ms * Δλ_last / λ0 - c_ms * Δλ_first / λ0) / (N - 1)
+
 """
     rt_macro_kernel(vs, ζ_rt, μ)
 
 Compute the anisotropic radial-tangential macroturbulence kernel from Gray (2008)
 (Eq. 17.6), assuming equal amplitudes (A_R = A_T) and equal velocity scales (ζ_R = ζ_T).
+The radial and the tangential Gaussian are each normalized over the samples of `vs`, so both
+carry the weight 1/2 even where one is narrower than a pixel (μ → 1, μ → 0).
 
 Arguments:
-- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core (m/s).
+- `vs::AbstractVector{<:Real}`: Velocity grid (m/s), uniform, with a sample at zero velocity.
 - `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
 - `μ::Real`: Cosine of the angle between the local normal and the line of sight.
 
@@ -18,7 +41,6 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     # constants
     A_R = 0.5
     A_T = A_R
-    sqrt_π = sqrt(π)
 
     # get trig
     ϵ = T(1e-6)
@@ -26,12 +48,14 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_rt::T, μ::T) where T<:AF
     s2 = one(T) - μ * μ
     sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
 
-    # the terms
-    t1 = @. A_R * exp(-(vs / (ζ_rt * cosθ))^2.0) / (sqrt_π * ζ_rt * cosθ)
-    t2 = @. A_T * exp(-(vs / (ζ_rt * sinθ))^2.0) / (sqrt_π * ζ_rt * sinθ)
+    # the terms, each normalized by the sum of its own samples
+    Δv = (vs[end] - vs[1]) / (length(vs) - 1)
+    S_R = _sampled_gauss_sum(T(ζ_rt * cosθ / Δv))
+    S_T = _sampled_gauss_sum(T(ζ_rt * sinθ / Δv))
+    t1 = @. A_R * exp(-(vs / (ζ_rt * cosθ))^2.0) / S_R
+    t2 = @. A_T * exp(-(vs / (ζ_rt * sinθ))^2.0) / S_T
     kernel = t1 + t2
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    return kernel ./ sum(kernel)
+    return _normalize_kernel!(kernel, "RT macroturbulence")
 end
 
 """
@@ -98,19 +122,21 @@ function _convolve_macro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
     cosθ = max(μ, ϵ)
     s2 = one(T) - μ * μ
     sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ * ϵ))
-    sqrt_π = sqrt(T(π))
+
+    # each term is normalized by the sum of its own samples (see _sampled_gauss_sum)
+    Δv = _velocity_step(xs[1] - λ0, xs[Nλ] - λ0, λ0, Nλ)
+    S_R = _sampled_gauss_sum(T(ζ_rt * cosθ / Δv))
+    S_T = _sampled_gauss_sum(T(ζ_rt * sinθ / Δv))
 
     # evaluate kernel into a temporary Nλ-length buffer, then normalize
     kvec = Vector{T}(undef, Nλ)
     @inbounds for j in 1:Nλ
         v = c_ms * (xs[j] - λ0) / λ0
-        t1 = T(0.5) * exp(-(v / (ζ_rt * cosθ))^2) / (sqrt_π * ζ_rt * cosθ)
-        t2 = T(0.5) * exp(-(v / (ζ_rt * sinθ))^2) / (sqrt_π * ζ_rt * sinθ)
+        t1 = T(0.5) * exp(-(v / (ζ_rt * cosθ))^2) / S_R
+        t2 = T(0.5) * exp(-(v / (ζ_rt * sinθ))^2) / S_T
         kvec[j] = t1 + t2
     end
-    s = sum(kvec)
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    kvec ./= s
+    _normalize_kernel!(kvec, "RT macroturbulence")
 
     # place kernel in DFT layout, then R2C FFT
     _kernel_to_dft_layout!(ws.kernel_real, kvec, i0)
@@ -136,8 +162,10 @@ function compute_padded_rt_kernel_1D!(kernel_row, dx, λc, ζ_rt, μ, Nλ, pad_l
         s2 = one(T) - μ * μ
         sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
 
-        invR = T(0.5) / (sqrt(T(π)) * ζ_rt * cosθ)
-        invT = T(0.5) / (sqrt(T(π)) * ζ_rt * sinθ)
+        # each term is normalized by the sum of its own samples (see _sampled_gauss_sum)
+        Δv = @inbounds _velocity_step(dx[1], dx[Nλ], λc, Nλ)
+        invR = T(0.5) / _sampled_gauss_sum(T(ζ_rt * cosθ / Δv))
+        invT = T(0.5) / _sampled_gauss_sum(T(ζ_rt * sinθ / Δv))
 
         t1 = exp(-(xj / (ζ_rt * cosθ))^2) * invR
         t2 = exp(-(xj / (ζ_rt * sinθ))^2) * invT
@@ -207,9 +235,7 @@ function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                                               cmem.pad_left)
 
     # normalize the kernel
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    normval = CUDA.sum(kernel_row)
-    kernel_row ./= normval
+    _normalize_kernel!(kernel_row, "RT macroturbulence")
 
     # ensure zero-lag sits at padded center before FFT layout
     Ltot = length(kernel_row)
@@ -283,9 +309,7 @@ function precompute_rt_macro_kernel_ft(cmem::MacroConvolutionMemory, xs::AA{T,1}
                                                               cmem.pad_left)
 
     # normalize
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    normval = CUDA.sum(kernel_row)
-    kernel_row ./= normval
+    _normalize_kernel!(kernel_row, "RT macroturbulence")
 
     return _finalize_kernel_ft!(cmem, i0)
 end
@@ -413,8 +437,9 @@ end
 # ── batched macro kernel precomputation ───────────────────────────────────────
 
 # One sample of the RT macro kernel for row `row` (disk position μ), in DFT layout: `Δλ` is the
-# offset of sample j from the window center and `λ0` the wavelength there.
-@inline function _rt_macro_dft_sample!(kbuf, Δλ, λ0, μ, row, j, i0, ζ_rt, L)
+# offset of sample j from the window center, `λ0` the wavelength there and `Δv` the velocity
+# step of the grid.
+@inline function _rt_macro_dft_sample!(kbuf, Δλ, Δv, λ0, μ, row, j, i0, ζ_rt, L)
     T = eltype(kbuf)
     v = c_ms * Δλ / λ0
 
@@ -423,8 +448,9 @@ end
     s2 = one(T) - μ * μ
     sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ * ϵ))
 
-    invR = T(0.5) / (sqrt(T(π)) * ζ_rt * cosθ)
-    invT_val = T(0.5) / (sqrt(T(π)) * ζ_rt * sinθ)
+    # each term is normalized by the sum of its own samples (see _sampled_gauss_sum)
+    invR = T(0.5) / _sampled_gauss_sum(T(ζ_rt * cosθ / Δv))
+    invT_val = T(0.5) / _sampled_gauss_sum(T(ζ_rt * sinθ / Δv))
     t1 = exp(-(v / (ζ_rt * cosθ))^2) * invR
     t2 = exp(-(v / (ζ_rt * sinθ))^2) * invT_val
 
@@ -453,7 +479,8 @@ function compute_rt_macro_dft_layout_2d!(kbuf, xs, v_losals, i0, ζ_rt, Nλ, L)
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
     μ = @inbounds v_losals[row]
-    _rt_macro_dft_sample!(kbuf, xj - λ0, λ0, μ, row, j, i0, ζ_rt, L)
+    Δv = @inbounds _velocity_step(xs[1] - λ0, xs[Nλ] - λ0, λ0, Nλ)
+    _rt_macro_dft_sample!(kbuf, xj - λ0, Δv, λ0, μ, row, j, i0, ζ_rt, L)
     return nothing
 end
 
@@ -463,6 +490,7 @@ function compute_rt_macro_dft_layout_2d!(kbuf, dx, λ0, v_losals, i0, ζ_rt, Nλ
     (row > size(kbuf, 1) || j > Nλ) && return nothing
     Δλ = @inbounds dx[j]
     μ = @inbounds v_losals[row]
-    _rt_macro_dft_sample!(kbuf, Δλ, λ0, μ, row, j, i0, ζ_rt, L)
+    Δv = @inbounds _velocity_step(dx[1], dx[Nλ], λ0, Nλ)
+    _rt_macro_dft_sample!(kbuf, Δλ, Δv, λ0, μ, row, j, i0, ζ_rt, L)
     return nothing
 end

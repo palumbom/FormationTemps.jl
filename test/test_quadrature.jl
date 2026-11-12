@@ -110,9 +110,11 @@ end
         @test fine_err < coarse_err
     end
 
-    run_slow_tests() && @testset "Nμ default is justified: 32 beats 16 by an order of magnitude" begin
-        # vsini=0 bypasses the ring Doppler kernel, so this isolates the μ-quadrature and
-        # anchors the accuracy claim the Integration Methods guide makes for the default.
+    run_slow_tests() && @testset "μ-quadrature is converged at Nμ = 16 and at the default" begin
+        # vsini=0 bypasses the ring Doppler kernel, so this isolates the μ-quadrature. The
+        # 16-node bound is the sensitive one: it fails if the two Gaussians of the RT macro
+        # kernel are normalized jointly, which hands weight to a term narrower than a pixel
+        # at the nodes nearest μ = 1 and μ = 0 and so depends on the node set.
         star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=0.0, v_macro=ζ_RT,
                             v_micro=ξ, istar=90.0)
         rt = disk_reference(vsini=0.0, istar=90.0)
@@ -122,8 +124,8 @@ end
             maximum(abs.(rq.form_temps .- rt.form_temps))
         end
         e16, e32 = err(16), err(32)
-        @test e32 < e16 / 5          # order-of-magnitude class improvement
-        @test e32 < 0.2              # and the default is converged, in K
+        @test e16 < 0.2              # converged at half the default, in K
+        @test e32 < 0.2              # and at the default
     end
 
     @testset "formation temps within atmosphere T range" begin

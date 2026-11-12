@@ -115,14 +115,13 @@ function calc_intensity_cfunc_stacked_kernel!(cfunc::CDM{T}, τs::CDM{T}, Ts::CD
         τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
         τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
 
-        # linear T interp at fixed 2-point Gauss nodes
-        dT = Ts[row + Int32(1)] - Ts[row]
-        T1 = Ts[row] + dT * frac1
-        T2 = Ts[row] + dT * frac2
+        # source linear in τ across the interval, from B at its two layers
+        Ba = bb_num / (exp(bb_x / Ts[row]) - one(T))
+        Bb = bb_num / (exp(bb_x / Ts[row + Int32(1)]) - one(T))
+        B1 = Ba + (Bb - Ba) * frac1
+        B2 = Ba + (Bb - Ba) * frac2
 
         # evaluate integrand f = B(T,λ) * exp(-τ)
-        B1 = bb_num / (exp(bb_x / T1) - one(T))
-        B2 = bb_num / (exp(bb_x / T2) - one(T))
         f1 = B1 * exp(-τp1)
         f2 = B2 * exp(-τp2)
 

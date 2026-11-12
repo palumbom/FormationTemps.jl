@@ -515,8 +515,12 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             @cuda threads=ts_kc blocks=bs_kc compute_rt_macro_dft_layout_2d!(
                 kbuf_mac, bcmem.dx_gpu, λs_G[i0_mac], v_losals_gpu, Int32(i0_mac), G(star.ζ),
                 Int32(Nλ), Int32(L_mac))
-            # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-            kbuf_mac ./= sum(kbuf_mac, dims=2)
+            # normalize each row; a row that underflowed to zeros stays zero instead of NaN
+            mac_sums = sum(kbuf_mac, dims=2)
+            kbuf_mac ./= ifelse.(iszero.(mac_sums), one(G), mac_sums)
+            any(iszero, mac_sums) && @warn "RT macroturbulence kernel underflowed (zero-sum) " *
+                "for some disk positions; their convolution is set to zero." maxlog=3
+            CUDA.unsafe_free!(mac_sums)
             CUDA.unsafe_free!(v_losals_gpu)
 
             # batched R2C FFT → kernel_cache_flat; free temporary kbuf_mac afterward

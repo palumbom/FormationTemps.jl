@@ -7,6 +7,17 @@ _sigma_floor(xs::AA{T,1}, Δλ::T) where {T<:AF} =
 
 _sigma_floor(xs::AA{T,1}) where {T<:AF} = _sigma_floor(xs, median(diff(xs)))
 
+# Normalize a broadening kernel (host or device vector) to unit sum in place. A kernel that
+# underflowed to all zeros stays zero, so its convolution contributes nothing, rather than
+# dividing 0/0 into NaN; the warning names the kernel. For a nonzero sum this is the plain
+# division, bit for bit.
+function _normalize_kernel!(kernel::AA, name::AbstractString)
+    s = sum(kernel)
+    kernel ./= ifelse(iszero(s), one(s), s)
+    iszero(s) && @warn "$name kernel underflowed (zero-sum); its convolution is set to zero." maxlog=3
+    return kernel
+end
+
 # σ_floor for a caller-supplied grid: the cached value when the caller passed the grid the
 # struct was initialised with, recomputed otherwise. Identity, not equality — the host-`xs`
 # convolution overloads pass a fresh `collect` and must keep recomputing, which is what makes
@@ -264,13 +275,19 @@ function kernel_to_dft_layout_2d_scalar_v_mic_gpu!(kbuf, xs, dx, v_los, v_los_of
     return nothing
 end
 
-# broadcast shared signal_ft across per-row kernel FTs
+# broadcast shared signal_ft across per-row kernel FTs, and zero the rows past BNatm. At an odd
+# padded length cuFFT's C2R transforms rows in pairs (2k-1, 2k), so with an odd BNatm the last
+# active row is transformed with row BNatm + 1, which would otherwise hold a stale spectrum
+# from an earlier batch (or the macro buffers overlaid on this memory). Launch over every row.
 function batched_spectral_multiply!(conv_ft, signal_ft, kernel_ft, Natm, BNatm)
     f_idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     i     = (blockIdx().y - 1) * blockDim().y + threadIdx().y
-    if i <= BNatm && f_idx <= size(conv_ft, 2)
+    f_idx <= size(conv_ft, 2) || return nothing
+    if i <= BNatm
         i_local = ((i - 1) % Natm) + 1
         @inbounds conv_ft[i, f_idx] = signal_ft[i_local, f_idx] * kernel_ft[i, f_idx]
+    elseif i <= size(conv_ft, 1)
+        @inbounds conv_ft[i, f_idx] = zero(eltype(conv_ft))
     end
     return nothing
 end
@@ -651,7 +668,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     nfreq = size(bcmem.kernel_ft_gpu, 2)
     BNatm32 = Int32(BNatm)
-    bs3 = (cld(nfreq, ts2[1]), cld(BNatm, ts2[2]))
+    bs3 = (cld(nfreq, ts2[1]), cld(size(bcmem.conv_ft_gpu, 1), ts2[2]))
     @cuda threads=ts2 blocks=bs3 batched_spectral_multiply!(
         bcmem.conv_ft_gpu, bcmem.signal_ft_gpu, bcmem.kernel_ft_gpu,
         Int32(Natm), BNatm32)
@@ -701,7 +718,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
 
     nfreq = size(bcmem.kernel_ft_gpu, 2)
     BNatm32 = Int32(BNatm)
-    bs3 = (cld(nfreq, ts2[1]), cld(BNatm, ts2[2]))
+    bs3 = (cld(nfreq, ts2[1]), cld(size(bcmem.conv_ft_gpu, 1), ts2[2]))
     @cuda threads=ts2 blocks=bs3 batched_spectral_multiply!(
         bcmem.conv_ft_gpu, bcmem.signal_ft_gpu, bcmem.kernel_ft_gpu,
         Int32(Natm), BNatm32)

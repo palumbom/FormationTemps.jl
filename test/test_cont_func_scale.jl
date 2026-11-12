@@ -40,7 +40,7 @@ F_korg = median(sol.cntm)
 
 @testset "cont_func absolute scale" begin
     @testset "continuum level matches Korg's surface flux for every method" begin
-        # measured ratio to Korg: 0.99920 (:disk, Nϕ=64), 0.99919 (:quadrature, :hirano)
+        # measured ratio to Korg: 0.99996 (:disk, Nϕ=64), 0.99995 (:quadrature, :hirano)
         for m in methods
             @test isapprox(cont_level(cpu[m]), F_korg; rtol=2e-3)
         end

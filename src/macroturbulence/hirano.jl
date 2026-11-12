@@ -132,8 +132,7 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,1}, vsini::T,
     K_dft = Kσ ./ Δv
     k_circ = real(ifft(K_dft))
     kernel = FFTW.fftshift(k_circ)
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    kernel ./= sum(kernel)
+    _normalize_kernel!(kernel, "Hirano")
 
     return _padded_convolve(collect(T, ys), kernel; Npad=Npad)
 end
@@ -154,8 +153,7 @@ function convolve_hirano_rotmacro(xs::AA{T,1}, ys::AA{T,2}, vsini::T,
     K_dft = Kσ ./ Δv
     k_circ = real(ifft(K_dft))
     kernel = FFTW.fftshift(k_circ)
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    kernel ./= sum(kernel)
+    _normalize_kernel!(kernel, "Hirano")
 
     return _padded_convolve(collect(T, ys), kernel; Npad=Npad)
 end
@@ -172,8 +170,7 @@ function hirano_rotmacro_kernel_from_xs(xs::AA{T,1}, vsini::T, ζ_rt::T; u1::T=0
     K_dft = Kσ ./ Δv
     k_circ = real(ifft(K_dft))      # circular kernel, zero-lag at index 1
     kernel = FFTW.fftshift(k_circ)  # center at v=0
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    kernel ./= sum(kernel)
+    _normalize_kernel!(kernel, "Hirano")
     return kernel
 end
 
@@ -256,6 +253,8 @@ function convolve_hirano_rotmacro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     k_real .= real.(cmem.kc_1d)
     CUDA.cuFFT.fftshift!(@view(shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+N]), k_real, 1)
     normval = CUDA.sum(@view shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+N])
+    iszero(normval) && @warn "Hirano kernel underflowed (zero-sum); its convolution is set to zero." maxlog=3
+    normval = ifelse(iszero(normval), one(T), normval)
     @views kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ] .= shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ] ./ normval
 
     # pad the signal

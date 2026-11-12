@@ -418,7 +418,8 @@ try
     ax.set_xlabel("\$N_\\lambda\$")
     ax.set_ylabel("{\\rm Wall-clock time [s]}")
     ax.set_title(@sprintf("{\\rm Performance vs. }\$N_\\lambda\$ {\\rm (}\$N_\\phi\${\\rm =%d)}", 128))
-    ax.legend()
+    # outside, to the right: inside the axes it covers the CPU curves
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
 
     ticker = PythonPlot.pyimport("matplotlib.ticker")
     for a in [ax.xaxis, ax.yaxis]

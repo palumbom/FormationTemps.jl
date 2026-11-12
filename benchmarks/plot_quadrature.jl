@@ -67,74 +67,44 @@ function panel(f, name)
     end
 end
 
-# ── 1. convergence vs Nμ and N_az ────────────────────────────────────────────
+# ── 1. convergence vs Nμ ─────────────────────────────────────────────────────
 panel("quadrature_convergence.png") do
     hn, nmu = read_csv(joinpath(DATADIR, "quadrature_nmu.csv"))
-    ha, naz = read_csv(joinpath(DATADIR, "quadrature_naz.csv"))
+    x = col(nmu, icol(hn, "Nmu"))
+    emax, emean = col(nmu, icol(hn, "formT_max")), col(nmu, icol(hn, "formT_mean"))
+    tmin, tmed, tmax = col(nmu, icol(hn, "time_min_ms")), col(nmu, icol(hn, "time_med_ms")),
+                       col(nmu, icol(hn, "time_max_ms"))
 
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11, 4.4))
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    ax.plot(x, emax,  "o-",  color=COL_QUAD, lw=2, ms=6)
+    ax.plot(x, emean, "s--", color=COL_QUAD, lw=1.6, ms=5)
+    ax.set_xscale("log"); ax.set_yscale("log")
+    ax.set_xlabel("\$N_\\mu\$")
+    ax.set_ylabel("{\\rm formation-}\$T\${\\rm\\ error\\ vs.\\ :disk\\ [K]}")
+    ax.grid(true, which="major", color="#DDDDDD", lw=0.5)
+    nolog_sci!(ax)
+    # tick the sampled Nμ values: the axis spans little more than a decade, where the log
+    # locator labels its minor ticks and the labels collide
+    ticker = PythonPlot.pyimport("matplotlib.ticker")
+    ax.set_xticks(x)
+    ax.set_xticklabels([@sprintf("\$%d\$", n) for n in x])
+    ax.xaxis.set_minor_formatter(ticker.NullFormatter())
 
-    function panel!(ax, x, emax, emean, tmin, tmed, tmax, xlabel; ylabel=true)
-        ax.plot(x, emax,  "o-",  color=COL_QUAD, lw=2, ms=6, label="{\\rm max}")
-        ax.plot(x, emean, "s--", color=COL_QUAD, lw=1.6, ms=5, label="{\\rm mean}")
-        ax.set_xscale("log"); ax.set_yscale("log")
-        ax.set_xlabel(xlabel)
-        ylabel && ax.set_ylabel("{\\rm formation-}\$T\${\\rm\\ error\\ vs.\\ :disk\\ [K]}")
-        ax.grid(true, which="major", color="#DDDDDD", lw=0.5)
-        nolog_sci!(ax)
-        axt = ax.twinx()
-        # spread over timing rounds, so an unresolved difference is visible in the figure
-        axt.errorbar(x, tmed, yerr=(tmed .- tmin, tmax .- tmed), fmt="^:",
-                     color=COL_TIME, lw=1.4, ms=5, capsize=3, ecolor=COL_TIME)
-        axt.set_ylabel("{\\rm time\\ [ms]}", color=COL_TIME)
-        axt.tick_params(axis="y", colors=COL_TIME)
-        axt.grid(false)
-        return axt
-    end
+    # cost on a secondary axis; error bars span the timing rounds
+    axt = ax.twinx()
+    axt.errorbar(x, tmed, yerr=(tmed .- tmin, tmax .- tmed), fmt="^:", color=COL_TIME,
+                 lw=1.4, ms=5, capsize=3, ecolor=COL_TIME)
+    axt.set_ylabel("{\\rm time\\ [ms]}", color=COL_TIME)
+    axt.tick_params(axis="y", colors=COL_TIME)
+    axt.grid(false)
 
-    e_nmu = (col(nmu, icol(hn, "formT_max")), col(nmu, icol(hn, "formT_mean")))
-    e_naz = (col(naz, icol(ha, "formT_max")), col(naz, icol(ha, "formT_mean")))
-
-    panel!(axL, col(nmu, icol(hn, "Nmu")), e_nmu...,
-           col(nmu, icol(hn, "time_min_ms")), col(nmu, icol(hn, "time_med_ms")),
-           col(nmu, icol(hn, "time_max_ms")), "\$N_\\mu\$")
-    panel!(axR, col(naz, icol(ha, "Naz")), e_naz...,
-           col(naz, icol(ha, "time_min_ms")), col(naz, icol(ha, "time_med_ms")),
-           col(naz, icol(ha, "time_max_ms")), "\$N_{\\rm az}\$"; ylabel=false)
-
-    # Shared error axis. The N_az series is flat, so on its own auto-scaled log axis both lines
-    # end up pinned to the frame edges and unreadable. Sharing the Nμ panel's range puts them
-    # well inside it and makes the comparison the point: two decades of movement against none.
-    # Limits are computed from the data rather than read back off an axis, since PythonCall
-    # indexes Py tuples 0-based and get_ylim()[...] is an easy off-by-one.
-    all_e = vcat(e_nmu..., e_naz...)
-    ylo, yhi = 0.5 * minimum(all_e), 2.5 * maximum(all_e)
-    axL.set_ylim(ylo, yhi); axR.set_ylim(ylo, yhi)
-
-    axL.set_title("{\\rm Convergence vs.\\ }\$N_\\mu\$ {\\rm (}\$N_{\\rm az}\${\\rm =256)}")
-    axR.set_title("{\\rm Convergence vs.\\ }\$N_{\\rm az}\$ {\\rm (}\$N_\\mu\${\\rm =32, }\$\\alpha_2\${\\rm =0.2)}")
-
-    # mark where N_az starts exceeding the adaptive arc count; below it the knob is inert
-    binding = col(naz, icol(ha, "binding"))
-    naz_x = col(naz, icol(ha, "Naz"))
-    first_bind = findfirst(==(1.0), binding)
-    if first_bind !== nothing && first_bind > 1
-        # boundary between the last floored and first binding sample, geometric since x is log;
-        # shading up to naz_x[first_bind] itself would wrongly include a binding point
-        edge = sqrt(naz_x[first_bind - 1] * naz_x[first_bind])
-        axR.axvspan(minimum(naz_x) / 2, edge, color="#000000", alpha=0.06, zorder=0)
-        # axes-fraction coordinates: PythonCall indexes Py tuples 0-based, so reading a limit
-        # off get_ylim() is an easy off-by-one, and it would need care on a log axis anyway
-        axR.text(0.03, 0.96, "{\\rm below adaptive floor}", transform=axR.transAxes,
-                 fontsize=7, va="top", ha="left", color="#777777")
-    end
-
-    # combined legend (proxy handles — the two lines live on different axes)
+    # combined legend (proxy handles: the lines live on different axes)
     Line2D = PythonPlot.pyimport("matplotlib.lines").Line2D
     leg = [Line2D([0], [0]; color=COL_QUAD, marker="o", ls="-",  label="{\\rm max}"),
            Line2D([0], [0]; color=COL_QUAD, marker="s", ls="--", label="{\\rm mean}"),
            Line2D([0], [0]; color=COL_TIME, marker="^", ls=":",  label="{\\rm time}")]
-    axL.legend(handles=leg, loc="lower left", fontsize=9)
+    ax.legend(handles=leg, loc="upper center", fontsize=9)
+    ax.set_title("{\\rm Convergence vs.\\ }\$N_\\mu\$ {\\rm (}\$v\\sin i\${\\rm =15\\ km\\ s}\$^{-1}\${\\rm )}")
 
     fig.tight_layout()
     fig.savefig(joinpath(PLOTDIR, "quadrature_convergence.png"), dpi=150, bbox_inches="tight")
@@ -233,6 +203,12 @@ panel("quadrature_scaling.png") do
     ax.grid(true, which="major", color="#DDDDDD", lw=0.5)
     ax.grid(true, which="minor", color="#EEEEEE", lw=0.3)
     nolog_sci!(ax)
+    # tick the sampled Nλ values: the minor tick labels collide on this narrow log range
+    nl_ticks = sort(unique([parse(Int, r[jn]) for r in rows]))
+    ticker = PythonPlot.pyimport("matplotlib.ticker")
+    ax.set_xticks(nl_ticks)
+    ax.set_xticklabels([@sprintf("\$%d\$", n) for n in nl_ticks])
+    ax.xaxis.set_minor_formatter(ticker.NullFormatter())
     ax.legend(fontsize=8, ncol=1)
     fig.tight_layout()
     fig.savefig(joinpath(PLOTDIR, "quadrature_scaling.png"), dpi=150, bbox_inches="tight")

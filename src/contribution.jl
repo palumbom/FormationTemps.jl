@@ -255,14 +255,13 @@ function calc_intensity_cfunc!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
             τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
 
-            # linear T interp at fixed 2-point Gauss nodes
-            dT = Ts[k+1] - Ts[k]
-            T1 = Ts[k] + dT * frac1
-            T2 = Ts[k] + dT * frac2
+            # source linear in τ across the interval, from B at its two layers
+            Ba = bb_num / (exp(bb_x / Ts[k]) - one(T))
+            Bb = bb_num / (exp(bb_x / Ts[k+1]) - one(T))
+            B1 = Ba + (Bb - Ba) * frac1
+            B2 = Ba + (Bb - Ba) * frac2
 
             # evaluate integrand f = B(T,λ) * exp(-τ)
-            B1 = bb_num / (exp(bb_x / T1) - one(T))
-            B2 = bb_num / (exp(bb_x / T2) - one(T))
             f1 = B1 * exp(-τp1)
             f2 = B2 * exp(-τp2)
 
@@ -301,12 +300,12 @@ function calc_intensity_cfunc_dt!(μ_i::T, Ts::CDV, λs::CDV, τs::CDM,
             τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
             τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
 
-            dT = Ts[k+1] - Ts[k]
-            T1 = Ts[k] + dT * frac1
-            T2 = Ts[k] + dT * frac2
+            # source linear in τ across the interval, from B at its two layers
+            Ba = bb_num / (exp(bb_x / Ts[k]) - one(T))
+            Bb = bb_num / (exp(bb_x / Ts[k+1]) - one(T))
 
-            B1 = bb_num / (exp(bb_x / T1) - one(T))
-            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            B1 = Ba + (Bb - Ba) * frac1
+            B2 = Ba + (Bb - Ba) * frac2
             f1 = B1 * exp(-τp1)
             f2 = B2 * exp(-τp2)
 
@@ -354,12 +353,12 @@ function cfunc_reduce_intensity_kernel!(out::CDV{T}, Ts::CDV, λs::CDV,
                 τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
                 τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
 
-                dT = Ts[k + Int32(1)] - Ts[k]
-                T1 = Ts[k] + dT * frac1
-                T2 = Ts[k] + dT * frac2
+                # source linear in τ across the interval, from B at its two layers
+                Ba = bb_num / (exp(bb_x / Ts[k]) - one(T))
+                Bb = bb_num / (exp(bb_x / Ts[k + Int32(1)]) - one(T))
 
-                B1 = bb_num / (exp(bb_x / T1) - one(T))
-                B2 = bb_num / (exp(bb_x / T2) - one(T))
+                B1 = Ba + (Bb - Ba) * frac1
+                B2 = Ba + (Bb - Ba) * frac2
                 f1 = B1 * exp(-τp1)
                 f2 = B2 * exp(-τp2)
 
@@ -445,11 +444,11 @@ end
     τ_mid = half * (τ0 + τ1)
     τp1 = τ_mid - half * Δτ * one_over_sqrt3
     τp2 = τ_mid + half * Δτ * one_over_sqrt3
-    dT = T1 - T0
-    Tg1 = T0 + dT * frac1
-    Tg2 = T0 + dT * frac2
-    B1 = bb_num / (exp(bb_x / Tg1) - one(T))
-    B2 = bb_num / (exp(bb_x / Tg2) - one(T))
+    # source linear in τ across the interval, from B at its two layers
+    Ba = bb_num / (exp(bb_x / T0) - one(T))
+    Bb = bb_num / (exp(bb_x / T1) - one(T))
+    B1 = Ba + (Bb - Ba) * frac1
+    B2 = Ba + (Bb - Ba) * frac2
     f1 = B1 * exp(-τp1)
     f2 = B2 * exp(-τp2)
     cfunc_k = half * (f1 + f2) * T(ANGSTROM_TO_CM)
@@ -612,14 +611,13 @@ function calc_flux_cfunc!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM)
             τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
-            # linear T interp at fixed 2-point Gauss nodes
-            dT = Ts[k+1] - Ts[k]
-            T1 = Ts[k] + dT * frac1
-            T2 = Ts[k] + dT * frac2
+            # source linear in τ across the interval, from B at its two layers
+            Ba = bb_num / (exp(bb_x / Ts[k]) - one(T))
+            Bb = bb_num / (exp(bb_x / Ts[k+1]) - one(T))
+            B1 = Ba + (Bb - Ba) * frac1
+            B2 = Ba + (Bb - Ba) * frac2
 
             # evaluate integrand f = B(T,λ) * E_2(τ)
-            B1 = bb_num / (exp(bb_x / T1) - one(T))
-            B2 = bb_num / (exp(bb_x / T2) - one(T))
             f1 = B1 * E_2(τp1)
             f2 = B2 * E_2(τp2)
 
@@ -657,12 +655,12 @@ function calc_flux_cfunc_dt!(Ts::CDV, λs::CDV, τs::CDM, cfunc::CDM, cfunc_dt::
             τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
             τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
 
-            dT = Ts[k+1] - Ts[k]
-            T1 = Ts[k] + dT * frac1
-            T2 = Ts[k] + dT * frac2
+            # source linear in τ across the interval, from B at its two layers
+            Ba = bb_num / (exp(bb_x / Ts[k]) - one(T))
+            Bb = bb_num / (exp(bb_x / Ts[k+1]) - one(T))
 
-            B1 = bb_num / (exp(bb_x / T1) - one(T))
-            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            B1 = Ba + (Bb - Ba) * frac1
+            B2 = Ba + (Bb - Ba) * frac2
             f1 = B1 * E_2(τp1)
             f2 = B2 * E_2(τp2)
 
@@ -691,12 +689,12 @@ function calc_intensity_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
             τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
-            dT = Ts[k+1] - Ts[k]
-            T1 = Ts[k] + dT * frac1
-            T2 = Ts[k] + dT * frac2
+            # source linear in τ across the interval, from B at its two layers
+            Ba = Korg.blackbody(Ts[k], λ_cm)
+            Bb = Korg.blackbody(Ts[k+1], λ_cm)
 
-            f1 = Korg.blackbody(T1, λ_cm) * exp(-τp1)
-            f2 = Korg.blackbody(T2, λ_cm) * exp(-τp2)
+            f1 = (Ba + (Bb - Ba) * frac1) * exp(-τp1)
+            f2 = (Ba + (Bb - Ba) * frac2) * exp(-τp2)
             @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * T(ANGSTROM_TO_CM)
         end
     end
@@ -721,12 +719,12 @@ function calc_flux_cfunc_cpu!(cfunc::AA{T,2}, Ts::AA{T,1}, λs::AA{T,1},
             τp1 = τ_mid - 0.5 * Δτ * one_over_sqrt3
             τp2 = τ_mid + 0.5 * Δτ * one_over_sqrt3
 
-            dT = Ts[k+1] - Ts[k]
-            T1 = Ts[k] + dT * frac1
-            T2 = Ts[k] + dT * frac2
+            # source linear in τ across the interval, from B at its two layers
+            Ba = Korg.blackbody(Ts[k], λ_cm)
+            Bb = Korg.blackbody(Ts[k+1], λ_cm)
 
-            f1 = Korg.blackbody(T1, λ_cm) * E2(τp1)
-            f2 = Korg.blackbody(T2, λ_cm) * E2(τp2)
+            f1 = (Ba + (Bb - Ba) * frac1) * E2(τp1)
+            f2 = (Ba + (Bb - Ba) * frac2) * E2(τp2)
             @inbounds cfunc[k, j] = 0.5 * (f1 + f2) * T(ANGSTROM_TO_CM)
         end
     end
@@ -776,12 +774,12 @@ function calc_tau_cfunc_dt_fused_kernel!(cfunc_dt, αs, log_τ_ref, ifactor_base
             τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
             τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
 
-            dT = Ts[k + Int32(1)] - Ts[k]
-            T1 = Ts[k] + dT * frac1
-            T2 = Ts[k] + dT * frac2
+            # source linear in τ across the interval, from B at its two layers
+            Ba = bb_num / (exp(bb_x / Ts[k]) - one(T))
+            Bb = bb_num / (exp(bb_x / Ts[k + Int32(1)]) - one(T))
 
-            B1 = bb_num / (exp(bb_x / T1) - one(T))
-            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            B1 = Ba + (Bb - Ba) * frac1
+            B2 = Ba + (Bb - Ba) * frac2
             f1 = B1 * exp(-τp1)
             f2 = B2 * exp(-τp2)
 
@@ -840,12 +838,12 @@ function calc_intensity_cfunc_dt_batched_kernel!(cfunc_dt, τs, Ts, λs,
             τp1 = τ_mid - T(0.5) * Δτ * one_over_sqrt3
             τp2 = τ_mid + T(0.5) * Δτ * one_over_sqrt3
 
-            dT = Ts[k + 1] - Ts[k]
-            T1 = Ts[k] + dT * frac1
-            T2 = Ts[k] + dT * frac2
+            # source linear in τ across the interval, from B at its two layers
+            Ba = bb_num / (exp(bb_x / Ts[k]) - one(T))
+            Bb = bb_num / (exp(bb_x / Ts[k + 1]) - one(T))
 
-            B1 = bb_num / (exp(bb_x / T1) - one(T))
-            B2 = bb_num / (exp(bb_x / T2) - one(T))
+            B1 = Ba + (Bb - Ba) * frac1
+            B2 = Ba + (Bb - Ba) * frac2
             f1 = B1 * exp(-τp1)
             f2 = B2 * exp(-τp2)
 

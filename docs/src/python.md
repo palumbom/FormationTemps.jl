@@ -5,7 +5,11 @@ FormationTemps.jl can be called from Python using [juliacall](https://juliapy.gi
 ## Prerequisites
 
 - Julia 1.12+: install from [julialang.org](https://julialang.org/downloads/) or via [juliaup](https://github.com/JuliaLang/juliaup).
+  The install steps below ask juliapkg for Julia 1.12; if the `julia` on your PATH is newer,
+  juliapkg prints a warning and uses it anyway, which works with 1.13.
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/) (recommended) or pip.
+- A LaTeX installation, to run the example below as written: it uses the package's plot style,
+  which renders text with LaTeX.
 
 ## Installing the Python interface
 
@@ -16,8 +20,21 @@ If you have cloned the FormationTemps.jl repository:
 ```bash
 cd FormationTemps.jl
 uv sync
+uv run python -c "import ssl; print(ssl.OPENSSL_VERSION)"   # must be 3.5 or newer
 uv run python deps/setup.py
 ```
+
+!!! note "If OpenSSL is older than 3.5"
+    Julia 1.12 can only be loaded into a Python linked against OpenSSL 3.5 or newer. Older uv
+    releases install Pythons with OpenSSL 3.0; update uv and its Python, then rebuild the
+    environment:
+    ```bash
+    uv self update            # or update uv the way you installed it
+    uv python upgrade 3.12
+    rm -rf .venv && uv sync
+    ```
+    Any other Python 3.12+ that qualifies also works: `uv sync --python /path/to/python3`.
+    `deps/setup.py` checks this and stops with the same advice.
 
 This installs FormationTemps.jl as a development package, meaning changes you make to
 the Julia source code are immediately reflected without reinstalling.
@@ -28,6 +45,7 @@ If you want to use the released version of FormationTemps.jl without cloning
 the repository:
 
 ```bash
+python -c "import ssl; print(ssl.OPENSSL_VERSION)"   # must be 3.5 or newer; see the note above
 pip install juliacall juliapkg numpy matplotlib
 ```
 
@@ -45,11 +63,13 @@ Finally, run the following once in Python to register the Julia dependency:
 import juliapkg
 juliapkg.require_julia("~1.12")
 juliapkg.add("FormationTemps", "03bcd87b-2230-4045-a5fa-95a5fcdd1ff8", version="^3")
+juliapkg.add("Korg", "acafc109-a718-429c-b0e5-afd7f8c7ae46")
 juliapkg.resolve()
 ```
 
-This pulls the latest compatible version of FormationTemps.jl from the
-[Julia General registry](https://github.com/JuliaRegistries/General).
+This pulls the latest compatible versions of FormationTemps.jl and Korg.jl from the
+[Julia General registry](https://github.com/JuliaRegistries/General). Korg is added explicitly
+because the examples call it directly, and Julia only loads packages the environment lists.
 
 !!! warning
     `PYTHON_JULIAPKG_EXE` is required on macOS with juliaup (see Troubleshooting below).
@@ -89,26 +109,9 @@ Markdown.parse("```python\n" * code * "\n```")
     ```
 
 !!! details "\"julia compat entries have empty intersection\" (OpenSSL conflict)"
-    juliacall requires that Julia and Python share a compatible OpenSSL version.
-    Julia 1.12 needs OpenSSL 3.5+, but some Python builds (notably uv's standalone
-    builds) ship OpenSSL 3.0, causing the resolver to reject Julia 1.12 entirely.
-    Check your Python's OpenSSL version:
-    ```python
-    import ssl; print(ssl.OPENSSL_VERSION)
-    ```
-    If it reports < 3.5, recreate your venv pointing at a Python built against a
-    newer OpenSSL:
-    ```bash
-    rm -rf .venv
-    uv sync --python /path/to/python3
-    ```
-    On macOS, Homebrew Python (`/opt/homebrew/bin/python3`) links against Homebrew's
-    OpenSSL, which is typically up to date. On Linux, system Python from recent distros
-    (Ubuntu 24.04+, Fedora 39+) ships OpenSSL 3.1+; on older distros, install a newer
-    OpenSSL and rebuild Python via [pyenv](https://github.com/pyenv/pyenv). On Windows,
-    the [python.org installer](https://www.python.org/downloads/) bundles its own OpenSSL
-    (releases 3.13.4+ include OpenSSL 3.5). Note that uv's standalone Python builds
-    (`uv python install`) currently bundle OpenSSL 3.0 and will not work.
+    Python is linked against an OpenSSL older than 3.5. Check with
+    `python -c "import ssl; print(ssl.OPENSSL_VERSION)"` and see
+    the note under [From a Local Clone](@ref) above.
 
 !!! details "Julia GC crash (SIGBUS/segfault) during long computations"
     Julia's multi-threaded garbage collector can conflict with PythonCall's runtime

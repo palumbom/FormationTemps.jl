@@ -165,11 +165,11 @@ function convolve_instrument_gauss(xs::AA{T,1}, ys::AA{T,1}; new_res::T=1.17e5,
 
     # sample and normalize the kernel
     kernel = g.(xs, λc)
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    kernel ./= sum(kernel)
+    _normalize_kernel!(kernel, "Instrumental")
 
-    # convolve it
-    convolved = imfilter(ys, reflect(centered(kernel)), Pad(:replicate), ImageFiltering.FFT())
+    # convolve it. The kernel peaks at i0, so that is the index to put at zero: `centered`
+    # with no center picks (N+1)÷2, which is i0 only for an odd N.
+    convolved = imfilter(ys, reflect(centered(kernel, (i0,))), Pad(:replicate), ImageFiltering.FFT())
 
     # get wavelength grid at lower resolution
     Δlnλ = 1.0 / new_res

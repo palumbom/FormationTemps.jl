@@ -1,8 +1,7 @@
 # Manipulating Contribution Functions
 
-Formation temperatures are computed from the model contribution functions, and can be thought of as a simple summary statistic thereof. For some users, it may be advantageous to view and manipulate these contribution functions. 
-
-Following a procedure like that in the [Basic Tutorial](@ref "Basic Tutorial"), we can see that the ```FormTempResult``` composite type also contains a ```cont_func``` field. We can plot this like so:
+Formation temperatures are a summary statistic of the contribution functions, which
+```FormTempResult``` also carries in its ```cont_func``` field. To plot them:
 
 ```@eval
 using Markdown
@@ -16,23 +15,27 @@ Markdown.parse("```julia\n" * code * "\n```")
 
 ## Integrals or densities?
 
-It is worth being careful about what ```cont_func``` actually holds. Element `[k, j]` is the contribution of the atmosphere interval between layers `k` and `k+1` to the flux at wavelength `j`, so summing down a column recovers the emergent flux:
+Element `[k, j]` of ```cont_func``` is the contribution of the atmosphere interval between layers
+`k` and `k+1` to the flux at wavelength `j`. Summing a column gives the emergent flux, in the
+units of `Korg.synthesize` and on the same scale for every `method`; `result.flux` is that sum
+divided by the continuum sum:
 
 ```julia
 sum(result.cont_func, dims=1)   # the emergent flux
 ```
 
-That sum is the emergent surface flux itself, in the same units as the `flux` returned by `Korg.synthesize`, and on the same scale whichever `method` produced the result. The normalized `result.flux` is this sum divided by the corresponding continuum sum.
+Each element already includes the width of its interval, so:
 
-These are integrals, not densities, which means each element already carries the width of its own layer interval. Whether we want to divide that width out depends on what we are doing with it.
+- **For sums over depth**, use ```cont_func``` as it is. Weighted means, cumulative
+  distributions and the 50% crossing behind ```form_temps_from_cfunc``` are all of this kind.
+- **For comparisons across depth**, such as plotting against depth or taking a ratio of two
+  intervals, convert to a density with ```cfunc_per_dex```, which gives `dF/dlog₁₀τ_ref`.
+  MARCS layers are 0.1 dex apart in log τ_ref between −3 and +1 and 0.2 dex outside, so raw
+  ```cont_func``` jumps by a factor of two at those depths for no physical reason. The plots on
+  this page use the density, and ```ceiling_ratio``` converts internally, which is why it needs
+  `τ_ref`.
 
-If we are summing over depth, we should use ```cont_func``` as it comes. Weighted means, cumulative distributions, and the 50% crossing behind ```form_temps_from_cfunc``` are all sums in which the interval width cancels, so they do not care about the layer grid at all. Dividing by the width first would throw away that weighting and bias the answer.
-
-If instead we are comparing one depth against another, we need a density. Plotting ```cont_func``` against depth, or taking a ratio of one interval to another, reads the interval widths as though they were signal. MARCS samples depth at Δlog τ_ref = 0.1 dex for log τ_ref between -3 and +1, and 0.2 dex outside that range, so a raw plot carries a factor-of-two step at those two depths which has nothing to do with the physics. ```cfunc_per_dex``` divides the width out and gives us `dF/dlog₁₀τ_ref` instead. That is what the examples on this page plot.
-
-```ceiling_ratio``` is a ratio of two intervals, so it needs the reference grid for the same reason. It applies the conversion internally, which is why it asks for `τ_ref`.
-
-We can also add axis values. The x-axis is wavelength, and y-axis is a coordinate in the model atmosphere. Let's first parse out and view the model atmosphere structure from the ```FormTempResult``` composite type instance. 
+To label the depth axis, take the atmosphere structure from the result:
 
 ```@eval
 using Markdown
@@ -51,7 +54,8 @@ Markdown.parse("```julia\n" * code * "\n```")
 ```
 ![formation_temps](static/atmosphere.png)
 
-Now we can zoom-in on some lines (to better see the structure of the contribution function) and add on the axis values:
+Zoomed in on a few lines, with the depth axis labeled:
+
 ```@eval
 using Markdown
 code = read(joinpath(pwd(), "examples", "cont_func.jl"), String)
@@ -71,20 +75,28 @@ Markdown.parse("```julia\n" * code * "\n```")
 
 ## Formation temperatures can lie to you!
 
-This is discussed at greater length in Sections 4.2 and 4.3 of the [paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract), which we would encourage anyone using formation temperatures to read.
-
-We can also slice through the contribution functions of individual pixels in lines. Doing so, we can demonstrate that wavelength elements which share a formation temperature need not have the same (or even similar) contribution functions! In each frame of the below animations, the contribution functions for the black pixel in each absorption line are shown. These pixels share the same formation temperature (within a tolerance of a couple Kelvin), yet their contribution functions look very different in the cores of the lines! Of course, the contribution functions tend to each other toward the continuum, but the bulk of the radial velocity information is found where the derivative of the spectrum is highest. 
+Pixels with the same formation temperature need not have similar contribution functions. In
+each frame below, the black pixels in the line cores share a formation temperature to within a
+couple of Kelvin, yet their contribution functions differ markedly. They converge toward the
+continuum, but most of the radial-velocity information sits in the steep line flanks, where
+they do not. Sections 4.2 and 4.3 of the
+[paper presenting FormationTemps.jl](https://ui.adsabs.harvard.edu/abs/2025arXiv251209861P/abstract)
+discuss this further; read them before relying on formation temperatures.
 
 ![line_animation](static/line_lineup.gif)
 ![cont_func_animation](static/cont_comparison.gif)
 
 ## Lines the model cannot get right
 
-```boundary_mask``` tells us that the contribution function had not decayed before the model atmosphere was truncated. That is a statement about the integration domain: it catches the case where the answer depends on where MARCS stops. It tells us nothing about whether the physics was right everywhere the contribution function *did* decay.
+```boundary_mask``` only catches lines whose contribution function has not decayed by the top
+of the model atmosphere. It cannot catch a line whose physics is wrong: Korg assumes LTE and
+MARCS has no chromosphere, so a chromospheric line, a line far from LTE, or one with poor
+atomic data gives a well-behaved contribution function and a meaningless formation
+temperature.
 
-Some lines are untrustworthy for reasons no contribution-function statistic can see. Korg assumes LTE and MARCS models have no chromosphere, so a line formed in the chromosphere, one whose level populations depart from LTE, or one whose atomic data is simply poor will produce a perfectly well-behaved contribution function and a formation temperature that means nothing.
-
-Which transitions those are is a judgement call rather than something we can measure from the output, so the repo carries a curated list in `data/bad_lines.csv`, with the code that applies it in `scripts/bad_lines_mask.jl`. Each row names a wavelength, a species, and a reason — `chromo`, `nlte`, or `linedata`:
+The repo carries a curated list of such lines in `data/bad_lines.csv`, applied by
+`scripts/bad_lines_mask.jl`. Each row gives an air wavelength (`lambda_air`), a species and a
+reason: `chromo`, `nlte` or `linedata`.
 
 ```julia
 using FormationTemps; FT = FormationTemps
@@ -101,16 +113,19 @@ lm = build_line_mask(result.wavs, result.flux, entries;
                      core_frac=CORE_FRAC)
 ```
 
-Here `line_wavs` and `line_species` come from the linelist the synthesis used, and `v_broad` is the quadrature sum of the broadening velocities, `sqrt(vsini^2 + ζ^2 + ξ^2)`.
+`line_wavs` and `line_species` come from the linelist the synthesis used, and
+`v_broad = sqrt(vsini^2 + ζ^2 + ξ^2)`.
 
 !!! note "Packages the script loads"
-    The script loads CSV, DataFrames, and Korg. FormationTemps depends on all three, but Julia only loads packages that are direct dependencies of the active environment. Unless you are running inside the FormationTemps project itself, add them to your environment first:
+    The script loads CSV, DataFrames and Korg. Outside the FormationTemps project, add them to
+    your environment first:
 
     ```julia
     using Pkg; Pkg.add(["CSV", "DataFrames", "Korg"])
     ```
 
-The two masks are built to compose. ```build_line_mask``` returns one `UInt8` per pixel using bits `0x02`, `0x04` and `0x08` for the three reasons, leaving `0x01` free for the boundary flag, so we can carry both in a single array:
+The line mask uses bits `0x02`, `0x04` and `0x08` for the three reasons and leaves `0x01` for
+the boundary flag, so the two combine into one array:
 
 ```julia
 bnd = ifelse.(boundary_mask(result), MASK_BOUNDARY, 0x00)
@@ -118,8 +133,13 @@ mask = lm.mask .| bnd
 good = mask .== 0x00
 ```
 
-A curated entry is not applied as a fixed window. ```build_line_mask``` seeds on the flux minimum near the tabulated wavelength and walks outward until the line climbs back above `max(DEPTH_THRESH, CORE_FRAC · core_depth)`, so the masked region takes the sense of the line's own width at half depth whether the line is strong or weak. ```report_line_mask``` prints the region each entry settled on, together with the threshold that governed it and whether the per-row `max_extent` cap clipped it.
+Each entry masks the line's own core: ```build_line_mask``` starts at the flux minimum near the
+listed wavelength and widens until the line rises back above
+`max(DEPTH_THRESH, CORE_FRAC · core_depth)`. ```report_line_mask``` prints the region each entry
+settled on.
 
-Two things are worth knowing before editing the list. The wavelength column is `lambda_air`, so entries are tabulated in air and converted on read; the column name is there so the frame cannot be mistaken. And ```verify_species_present``` drops, with a warning, any entry whose species the linelist has no line for nearby. That check earns its place: the seed is a flux minimum, and in a dense spectrum that minimum is nearly always *some* deep line, so an entry naming a transition the linelist lacks would not quietly mask nothing — it would mask whichever unrelated neighbour is deepest, under the curated label.
+```verify_species_present``` drops, with a warning, any entry whose species has no nearby line
+in the linelist. Without it, an entry for a missing transition would mask whatever unrelated
+line happened to be deepest nearby.
 
-This is script-level rather than part of the package API. The list is data we can inspect and amend, and nothing in ```src/``` depends on it.
+This is a script, not package API: the list is data you can inspect and amend.

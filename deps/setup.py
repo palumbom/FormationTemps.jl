@@ -18,6 +18,18 @@ def _warn(msg):
 def _ok(msg):
     print(f"{_green}{_bold}[setup]{_reset} {msg}", flush=True)
 
+# --- check OpenSSL before anything slow ---
+# Julia 1.12 ships OpenSSL 3.5, and juliacall refuses a Julia whose OpenSSL is newer than
+# Python's, so an older Python fails later with "'julia' compat entries have empty
+# intersection". Older uv releases install Pythons linked against OpenSSL 3.0.
+import ssl
+if ssl.OPENSSL_VERSION_INFO < (3, 5):
+    _warn(f"This Python is linked against {ssl.OPENSSL_VERSION}; Julia 1.12 from Python needs OpenSSL 3.5+.")
+    _warn("Update uv and its Python, then rebuild the environment:")
+    _warn("    uv self update && uv python upgrade 3.12 && rm -rf .venv && uv sync")
+    _warn("or use another Python 3.12+ that qualifies: uv sync --python /path/to/python3")
+    sys.exit(1)
+
 # --- locate julia before importing juliapkg (reads env at import time) ---
 # on macOS with juliaup, Julia 1.12+ installs as .app bundles that juliapkg
 # cannot find. pointing at the juliaup shim on PATH works around this.
@@ -32,6 +44,7 @@ import juliapkg
 
 # --- detect local clone vs registry install ---
 FALLBACK_UUID = "03bcd87b-2230-4045-a5fa-95a5fcdd1ff8"
+KORG_UUID = "acafc109-a718-429c-b0e5-afd7f8c7ae46"
 
 def _find_repo_root():
     """Return (root, uuid) if running inside a FormationTemps.jl clone, else (None, None)."""
@@ -60,7 +73,11 @@ if repo is not None:
     juliapkg.add("FormationTemps", uuid, dev=True, path=str(repo))
 else:
     _info("No local clone found -- installing from Julia package registry.")
-    juliapkg.add("FormationTemps", FALLBACK_UUID, version="^1")
+    juliapkg.add("FormationTemps", FALLBACK_UUID, version="^3")
+
+# Korg too: Julia loads only direct dependencies of the environment, and callers need
+# `using Korg` for linelists and atmospheres. The version follows FormationTemps' compat.
+juliapkg.add("Korg", KORG_UUID)
 
 # --- write .pth file for persistent env vars ---
 # .pth files with `import` lines are executed by site.py on every Python startup.

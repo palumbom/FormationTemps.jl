@@ -58,6 +58,10 @@ function format_max_resid(resids)
     return @sprintf("\$%.1f \\times 10^{%d}\$", m, e)
 end
 
+# linear threshold of a symlog residual axis: one decade below the decade of the largest
+# residual, so the axis always shows decade ticks whatever the size of the residuals
+symlog_thresh(ext) = ext > 0 ? 10.0^(floor(log10(ext)) - 1) : 1e-12
+
 # consistent palette (matches plot_benchmarks.jl)
 const COL_GPU64 = "#D55E00"  # orange
 const COL_GPU32 = "#009E73"  # green
@@ -144,12 +148,12 @@ function make_plot(res_cpu, res_gpu64, res_gpu32; title_str, filename)
     ax_fr.scatter(py(wavs), py(flux_resid_32), s=4, marker="^", c=COL_GPU32, alpha=0.8,
                   label="{\\rm GPU32}")
     ax_fr.axhline(0, color="k", lw=0.5, ls="--", alpha=0.5)
-    ax_fr.set_yscale("symlog", linthresh=1e-6)
+    fr_ext = max(maximum(abs.(flux_resid_64)), maximum(abs.(flux_resid_32)))
+    ax_fr.set_yscale("symlog", linthresh=symlog_thresh(fr_ext))
     ax_fr.set_ylabel("{\\rm CPU \$-\$ GPU}")
     ax_fr.set_xlabel("{\\rm Wavelength [\\AA]}")
     ax_fr.legend(fontsize=9)
     ax_fr.set_xlim(xl...)
-    fr_ext = max(maximum(abs.(flux_resid_64)), maximum(abs.(flux_resid_32)))
     ax_fr.set_ylim(-1.5 * fr_ext, 1.5 * fr_ext)
 
     ax_ftr.scatter(py(wavs[interior]), py(ft_resid_64[interior]), s=4, marker="s",
@@ -157,12 +161,12 @@ function make_plot(res_cpu, res_gpu64, res_gpu32; title_str, filename)
     ax_ftr.scatter(py(wavs[interior]), py(ft_resid_32[interior]), s=4, marker="^",
                    c=COL_GPU32, alpha=0.8, label="{\\rm GPU32}")
     ax_ftr.axhline(0, color="k", lw=0.5, ls="--", alpha=0.5)
-    ax_ftr.set_yscale("symlog", linthresh=0.01)
+    ftr_ext = max(maximum(abs.(ft_resid_64[interior])), maximum(abs.(ft_resid_32[interior])))
+    ax_ftr.set_yscale("symlog", linthresh=symlog_thresh(ftr_ext))
     ax_ftr.set_ylabel("{\\rm CPU \$-\$ GPU}")
     ax_ftr.set_xlabel("{\\rm Wavelength [\\AA]}")
     ax_ftr.legend(fontsize=9)
     ax_ftr.set_xlim(xl...)
-    ftr_ext = max(maximum(abs.(ft_resid_64[interior])), maximum(abs.(ft_resid_32[interior])))
     ax_ftr.set_ylim(-1.5 * ftr_ext, 1.5 * ftr_ext)
 
     # hide x tick labels on top row
@@ -200,11 +204,11 @@ println()
 
 # make plots
 make_plot(res_cpu_c, res_gpu64_c, res_gpu32_c;
-          title_str=@sprintf("{\\rm Hirano convolution (}\$N_\\lambda\${\\rm =%d, }\$\\Delta\\lambda\${\\rm =%.3f \\AA)}", length(res_cpu_c.wavs), Δλ),
+          title_str=@sprintf("{\\rm Hirano convolution (}\$N_\\lambda\${\\rm =%d, }\$\\Delta\\lambda\${\\rm =%.4f \\AA)}", length(res_cpu_c.wavs), Δλ),
           filename="gpu_precision_convolve.png")
 
 make_plot(res_cpu_d, res_gpu64_d, res_gpu32_d;
-          title_str=@sprintf("{\\rm Disk integration (}\$N_\\phi\${\\rm =%d, }\$N_\\lambda\${\\rm =%d, }\$\\Delta\\lambda\${\\rm =%.3f \\AA)}", Nϕ, length(res_cpu_d.wavs), Δλ),
+          title_str=@sprintf("{\\rm Disk integration (}\$N_\\phi\${\\rm =%d, }\$N_\\lambda\${\\rm =%d, }\$\\Delta\\lambda\${\\rm =%.4f \\AA)}", Nϕ, length(res_cpu_d.wavs), Δλ),
           filename="gpu_precision_diskint.png")
 
 # print summary statistics
@@ -226,10 +230,10 @@ for (label, rc, r64, r32) in [("Convolve", res_cpu_c, res_gpu64_c, res_gpu32_c),
     @printf("    GPU32 flux   max|resid| = %.2e   mean = %.2e\n",
             maximum(abs.(Float64.(r32.flux) .- Float64.(rc.flux))),
             mean(abs.(Float64.(r32.flux) .- Float64.(rc.flux))))
-    @printf("    GPU64 Tform  max|resid| = %.2f K   mean = %.2f K  (interior)\n",
+    @printf("    GPU64 Tform  max|resid| = %.2e K   mean = %.2e K  (interior)\n",
             maximum(abs.(Float64.(r64.form_temps[interior]) .- Float64.(rc.form_temps[interior]))),
             mean(abs.(Float64.(r64.form_temps[interior]) .- Float64.(rc.form_temps[interior]))))
-    @printf("    GPU32 Tform  max|resid| = %.2f K   mean = %.2f K  (interior)\n",
+    @printf("    GPU32 Tform  max|resid| = %.2e K   mean = %.2e K  (interior)\n",
             maximum(abs.(Float64.(r32.form_temps[interior]) .- Float64.(rc.form_temps[interior]))),
             mean(abs.(Float64.(r32.form_temps[interior]) .- Float64.(rc.form_temps[interior]))))
 end

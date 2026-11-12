@@ -3,10 +3,11 @@
 
 Compute the anisotropic radial-tangential macroturbulence kernel from Gray (2008)
 (Eq. 17.6) with independent radial and tangential velocity scales, assuming equal
-amplitudes (A_R = A_T).
+amplitudes (A_R = A_T). The radial and the tangential Gaussian are each normalized over the
+samples of `vs`, so both carry the weight 1/2 even where one is narrower than a pixel.
 
 Arguments:
-- `vs::AbstractVector{<:Real}`: Velocity grid centered on the line core (m/s).
+- `vs::AbstractVector{<:Real}`: Velocity grid (m/s), uniform, with a sample at zero velocity.
 - `ζ_r::Real`: Radial macroturbulence velocity scale (m/s).
 - `ζ_t::Real`: Tangential macroturbulence velocity scale (m/s).
 - `μ::Real`: Cosine of the angle between the local normal and the line of sight.
@@ -20,7 +21,6 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
     # constants
     A_R = 0.5
     A_T = A_R
-    sqrt_π = sqrt(π)
 
     # get trig
     ϵ = T(1e-6)
@@ -28,12 +28,14 @@ function rt_macro_kernel(vs::AA{T,1}, ζ_r::T, ζ_t::T, μ::T) where T<:AF
     s2 = one(T) - μ * μ
     sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
 
-    # the terms
-    t1 = @. A_R * exp(-(vs / (ζ_r * cosθ))^2.0) / (sqrt_π * ζ_r * cosθ)
-    t2 = @. A_T * exp(-(vs / (ζ_t * sinθ))^2.0) / (sqrt_π * ζ_t * sinθ)
+    # the terms, each normalized by the sum of its own samples (see _sampled_gauss_sum)
+    Δv = (vs[end] - vs[1]) / (length(vs) - 1)
+    S_R = _sampled_gauss_sum(T(ζ_r * cosθ / Δv))
+    S_T = _sampled_gauss_sum(T(ζ_t * sinθ / Δv))
+    t1 = @. A_R * exp(-(vs / (ζ_r * cosθ))^2.0) / S_R
+    t2 = @. A_T * exp(-(vs / (ζ_t * sinθ))^2.0) / S_T
     kernel = t1 + t2
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    return kernel ./ sum(kernel)
+    return _normalize_kernel!(kernel, "RT macroturbulence")
 end
 
 """
@@ -93,8 +95,10 @@ function compute_padded_rt_kernel_1D!(kernel_row, dx, λc, ζ_r, ζ_t, μ, Nλ, 
         s2 = one(T) - μ * μ
         sinθ = sqrt(ifelse(s2 > zero(T), s2, ϵ*ϵ))
 
-        invR = T(0.5) / (sqrt(T(π)) * ζ_r * cosθ)
-        invT = T(0.5) / (sqrt(T(π)) * ζ_t * sinθ)
+        # each term is normalized by the sum of its own samples (see _sampled_gauss_sum)
+        Δv = @inbounds _velocity_step(dx[1], dx[Nλ], λc, Nλ)
+        invR = T(0.5) / _sampled_gauss_sum(T(ζ_r * cosθ / Δv))
+        invT = T(0.5) / _sampled_gauss_sum(T(ζ_t * sinθ / Δv))
 
         t1 = exp(-(xj / (ζ_r * cosθ))^2) * invR
         t2 = exp(-(xj / (ζ_t * sinθ))^2) * invT
@@ -165,9 +169,7 @@ function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
                                                               cmem.pad_left)
 
     # normalize the kernel
-    # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
-    normval = CUDA.sum(kernel_row)
-    kernel_row ./= normval
+    _normalize_kernel!(kernel_row, "RT macroturbulence")
 
     # ensure zero-lag sits at padded center before FFT layout
     Ltot = length(kernel_row)

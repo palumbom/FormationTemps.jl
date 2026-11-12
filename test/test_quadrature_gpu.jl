@@ -78,26 +78,27 @@ end
     end
 
     # slow tier: the only Float32 run of the quadrature driver
-    run_slow_tests() && @testset "Float32 GPU quadrature (smoke)" begin
-        # Float32 runs and stays finite/physical, but is materially less accurate than
-        # Float64 (the ring-kernel FFT roundtrip compounds single-precision loss):
-        # measured ~5-16 K vs tiling. Use Float64 (default) when accuracy matters.
+    run_slow_tests() && @testset "Float32 GPU quadrature ≈ Float64" begin
+        # Single precision costs this path no accuracy: the Doppler, macro and ring kernels
+        # are placed from the Float64 wavelength grid, so Float32 follows Float64 far more
+        # closely than either follows the tiling. The bounds against Float64 fail if a kernel
+        # is placed from differences of the Float32-rounded grid.
+        rq64, _, rt, interior = run_trio(vsini=15000.0, istar=90.0)
         star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=15000.0,
                             v_macro=ζ_RT, v_micro=ξ, istar=90.0)
         rq32 = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=true, method=:quadrature,
                                    gpu_precision=Float32, ne_warn_thresh=Inf)
-        rt = calc_formation_temp(star, linelist; Δλ=Δλ, use_gpu=false, method=:disk,
-                                 Nϕ=Nϕ, showprogress=false, ne_warn_thresh=Inf)
-        λ0 = mean(rt.wavs)
-        edge = ceil(Int, max(15000.0, ζ_RT) * 3 / (FT.c_ms * Δλ / λ0)) + 10
-        interior = (edge + 1):(length(rt.wavs) - edge)
-        @test !isempty(interior)
         @test rq32.atmosphere isa FT.AtmosphereGPU     # GPU driver ran (Float32)
         @test all(isfinite, rq32.form_temps)
         @test all(isfinite, rq32.flux)
         @test all(rq32.form_temps .>= minimum(FT.get_Ts(rt.atmosphere)))
         @test all(rq32.form_temps .<= maximum(FT.get_Ts(rt.atmosphere)))
-        @test maximum(abs.(rq32.form_temps[interior] .- rt.form_temps[interior])) < 30.0  # loose (F32)
+        # against Float64 on the same device
+        @test maximum(abs.(rq32.flux .- rq64.flux)) < 1e-5
+        @test maximum(abs.(rq32.form_temps .- rq64.form_temps)) < 1e-2
+        # against the tiling, to the Float64 tolerances of the rigid rotator above
+        @test maximum(abs.(rq32.flux[interior] .- rt.flux[interior])) < 1e-3
+        @test maximum(abs.(rq32.form_temps[interior] .- rt.form_temps[interior])) < 3.0
     end
 end
 

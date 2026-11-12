@@ -12,7 +12,8 @@ end
         s = zero(T)
         t = -x                         # (-x)^1 / 1!
         k = 1
-        tol = sqrt(eps(T))
+        # stop at rounding: a looser tolerance leaves truncation error far above it
+        tol = 4 * eps(T)
         while true
             add = t / T(k)             # term_k / k
             s += add
@@ -29,7 +30,7 @@ end
         c = inv(tiny)
         d = inv(b)
         h = d
-        tol = sqrt(eps(T))
+        tol = 4 * eps(T)
         @inbounds for n in 1:100
             a = -T(n*n)
             b += T(2)
