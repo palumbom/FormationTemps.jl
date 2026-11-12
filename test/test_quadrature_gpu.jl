@@ -1,3 +1,5 @@
+isdefined(Main, :run_slow_tests) || include(joinpath(@__DIR__, "test_tiers.jl"))
+
 let
 # Validates the GPU quadrature path (method=:quadrature, use_gpu=true) against the CPU
 # quadrature (same algorithm, cross-device) and against the explicit tiling reference.
@@ -13,7 +15,7 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 Teff, logg, Fe_H = 5777.0, 4.44, 0.0
 ζ_RT, ξ = 3400.0, 850.0
 Δλ = 0.01
-Nϕ = 64
+Nϕ = run_slow_tests() ? 64 : 32      # tiling reference resolution; the tolerances below hold at both
 
 # GPU quad, CPU quad, CPU tiling (ground truth) for one star
 function run_trio(; vsini, istar, α₂=0.0, α₄=0.0)
@@ -36,9 +38,11 @@ end
 @testset "GPU quadrature" begin
 
     @testset "GPU quad ≈ CPU quad (cross-device, Float64)" begin
-        for (vsini, istar, α₂, α₄) in ((0.0, 90.0, 0.0, 0.0),
-                                       (15000.0, 90.0, 0.0, 0.0),
-                                       (15000.0, 30.0, 0.2, 0.1))
+        stars = ((0.0, 90.0, 0.0, 0.0),
+                 (15000.0, 90.0, 0.0, 0.0),
+                 (15000.0, 30.0, 0.2, 0.1))
+        # fast tier: the differential, inclined star alone
+        for (vsini, istar, α₂, α₄) in (run_slow_tests() ? stars : stars[end:end])
             rq_gpu, rq_cpu, _, interior = run_trio(vsini=vsini, istar=istar, α₂=α₂, α₄=α₄)
             # prove the GPU driver actually ran (guards a silent CPU fallback, which
             # would make every tolerance below pass trivially)
@@ -65,14 +69,16 @@ end
         @test maximum(abs.(rq_gpu.form_temps[interior] .- rt.form_temps[interior])) < 3.0
     end
 
-    @testset "formation temps within atmosphere T range" begin
+    # slow tier: range checks on the rigid rotator the tiling comparison above also runs
+    run_slow_tests() && @testset "formation temps within atmosphere T range" begin
         rq_gpu, _, _, _ = run_trio(vsini=15000.0, istar=90.0)
         atm = rq_gpu.atmosphere
         @test all(rq_gpu.form_temps .>= minimum(FT.get_Ts(atm)))
         @test all(rq_gpu.form_temps .<= maximum(FT.get_Ts(atm)))
     end
 
-    @testset "Float32 GPU quadrature (smoke)" begin
+    # slow tier: the only Float32 run of the quadrature driver
+    run_slow_tests() && @testset "Float32 GPU quadrature (smoke)" begin
         # Float32 runs and stays finite/physical, but is materially less accurate than
         # Float64 (the ring-kernel FFT roundtrip compounds single-precision loss):
         # measured ~5-16 K vs tiling. Use Float64 (default) when accuracy matters.

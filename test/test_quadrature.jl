@@ -1,3 +1,5 @@
+isdefined(Main, :run_slow_tests) || include(joinpath(@__DIR__, "test_tiers.jl"))
+
 let
 # Validates the ring-by-ring μ-quadrature disk integration (method=:quadrature)
 # against the explicit tile-based disk integration (method=:disk), which is the
@@ -18,7 +20,12 @@ linelist = [Korg.Line(l, wl=Korg.vacuum_to_air(l.wl)) for l in linelist]
 Teff, logg, Fe_H = 5777.0, 4.44, 0.0
 ζ_RT, ξ = 3400.0, 850.0
 Δλ = 0.01
-Nϕ = 64          # tiling ground-truth resolution
+
+# tiling ground-truth resolution. The fast tier's reference is coarser; where its own
+# discretization error exceeds a slow-tier tolerance, the fast-tier tolerance (K) covers it.
+Nϕ = run_slow_tests() ? 64 : 32
+tol_mean_diffrot = run_slow_tests() ? 0.3 : 0.5     # mean |ΔT|, differential + inclined
+tol_max_nomacro = run_slow_tests() ? 3.0 : 7.0      # max |ΔT|, ζ=0: tile velocities unsmoothed
 
 # tiling ground truth, memoized per star: it is the expensive half of every comparison,
 # and several testsets compare against the same star
@@ -71,7 +78,7 @@ end
         rt, rq, interior = run_pair(vsini=15000.0, istar=30.0, α₂=0.2, α₄=0.1)
         @test maximum(abs.(rq.flux[interior] .- rt.flux[interior])) < 1e-3
         @test maximum(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 3.0
-        @test mean(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 0.3
+        @test mean(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < tol_mean_diffrot
     end
 
     @testset "small vsini (2 km/s): narrow Doppler kernel" begin
@@ -87,10 +94,11 @@ end
         # exercises the ζ==0 short-circuit in the per-ring macro step
         rt, rq, interior = run_pair(vsini=15000.0, istar=90.0, ζ=0.0)
         @test maximum(abs.(rq.flux[interior] .- rt.flux[interior])) < 1e-3
-        @test maximum(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < 3.0
+        @test maximum(abs.(rq.form_temps[interior] .- rt.form_temps[interior])) < tol_max_nomacro
     end
 
-    @testset "convergence: more nodes → closer to tiling" begin
+    # slow tier: the two convergence checks, graded against the full-size reference
+    run_slow_tests() && @testset "convergence: more nodes → closer to tiling" begin
         # tiling ground truth + coarse quadrature from one call; fine quadrature separately
         rt, rq_coarse, interior = run_pair(vsini=15000.0, istar=90.0, Nμ=6, N_az=64)
         star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=15000.0, v_macro=ζ_RT,
@@ -102,7 +110,7 @@ end
         @test fine_err < coarse_err
     end
 
-    @testset "Nμ default is justified: 32 beats 16 by an order of magnitude" begin
+    run_slow_tests() && @testset "Nμ default is justified: 32 beats 16 by an order of magnitude" begin
         # vsini=0 bypasses the ring Doppler kernel, so this isolates the μ-quadrature and
         # anchors the accuracy claim the Integration Methods guide makes for the default.
         star = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H, vsini=0.0, v_macro=ζ_RT,

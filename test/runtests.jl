@@ -6,6 +6,10 @@ using Statistics
 using ProgressMeter
 using Test
 
+include("test_tiers.jl")
+@info (run_slow_tests() ? "running the fast and slow tiers" :
+       "running the fast tier; FT_TEST_SLOW=1 or Pkg.test(test_args=[\"slow\"]) adds the slow tier")
+
 # conditional CUDA usage
 global use_gpu = FT.GPU_DEFAULT
 if use_gpu

@@ -1,3 +1,5 @@
+isdefined(Main, :run_slow_tests) || include(joinpath(@__DIR__, "test_tiers.jl"))
+
 let
 using FormationTemps; FT = FormationTemps
 using Korg
@@ -36,7 +38,7 @@ iso_rt_macro_kernel = FT.gray_iso_rt_macro_kernel(vs, ζ_rt)
 ρstar = 1.0
 istar = 90.0
 v0 = 0.0
-Nϕ = 256
+Nϕ = run_slow_tests() ? 256 : 64      # tiling resolution; the tolerance below holds at both
 μs, dA, z_rot, z_cbs = FT.calc_stellar_grid(ρstar, istar, v0, Nϕ)
 
 idx = findall(x -> x > 0.0, Array(μs))
