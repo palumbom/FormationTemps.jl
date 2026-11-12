@@ -511,7 +511,7 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             CUDA.unsafe_free!(v_losals_gpu)
 
             # batched R2C FFT → kernel_cache_flat; free temporary kbuf_mac afterward
-            plan_kc = CUDA.CUFFT.plan_rfft(kbuf_mac, 2)
+            plan_kc = CUDA.cuFFT.plan_rfft(kbuf_mac, 2)
             kernel_cache_flat = CUDA.zeros(Complex{G}, N_unique, nfreq_mac)
             mul!(kernel_cache_flat, plan_kc, kbuf_mac)
             CUDA.unsafe_free!(kbuf_mac)
@@ -531,8 +531,8 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             mac_pad_cont = unsafe_wrap(CuArray{G, 2}, pointer(bcmem_cont.conv_gpu), (B * Natm1, L_mac))
             mac_ft      = unsafe_wrap(CuArray{Complex{G}, 2}, pointer(bcmem.conv_ft_gpu), (B * Natm1, nfreq_mac))
             mac_ft_cont = unsafe_wrap(CuArray{Complex{G}, 2}, pointer(bcmem_cont.conv_ft_gpu), (B * Natm1, nfreq_mac))
-            plan_mac_fwd      = CUDA.CUFFT.plan_rfft(mac_pad, 2)
-            plan_mac_fwd_cont = CUDA.CUFFT.plan_rfft(mac_pad_cont, 2)
+            plan_mac_fwd      = CUDA.cuFFT.plan_rfft(mac_pad, 2)
+            plan_mac_fwd_cont = CUDA.cuFFT.plan_rfft(mac_pad_cont, 2)
 
             # Fourier-space accumulators (Natm1 × nfreq, summed across all batches)
             acc_ft      = CUDA.zeros(Complex{G}, Natm1, nfreq_mac)
@@ -542,8 +542,8 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             # throwaway CuArray allocations)
             mac_ifft_buf      = CUDA.zeros(G, Natm1, L_mac)
             mac_ifft_buf_cont = CUDA.zeros(G, Natm1, L_mac)
-            plan_mac_bwd      = CUDA.CUFFT.plan_irfft(acc_ft, L_mac, 2)
-            plan_mac_bwd_cont = CUDA.CUFFT.plan_irfft(acc_ft_cont, L_mac, 2)
+            plan_mac_bwd      = CUDA.cuFFT.plan_irfft(acc_ft, L_mac, 2)
+            plan_mac_bwd_cont = CUDA.cuFFT.plan_irfft(acc_ft_cont, L_mac, 2)
 
             # real-space output after final IFFT + extract
             mac_out      = CUDA.zeros(G, Natm1, Nλ)

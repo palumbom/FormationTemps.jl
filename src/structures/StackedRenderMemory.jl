@@ -150,8 +150,8 @@ function StackedRenderMemory(mems::AbstractVector{<:GPUMemory{T}},
     kernel_ft = CuMatrix{Complex{T}}(undef, BNatm, nfreq)
     conv_ft = CuMatrix{Complex{T}}(undef, BNatm, nfreq)
     conv_gpu = CuMatrix{T}(undef, BNatm, L)
-    plan_fwd = CUDA.CUFFT.plan_rfft(conv_gpu, 2)
-    plan_bwd = CUDA.CUFFT.plan_irfft(conv_ft, L, 2)
+    plan_fwd = CUDA.cuFFT.plan_rfft(conv_gpu, 2)
+    plan_bwd = CUDA.cuFFT.plan_irfft(conv_ft, L, 2)
 
     τs = CUDA.zeros(T, BNatm, Nλ)
     cfunc = CUDA.zeros(T, BNatm, Nλ)

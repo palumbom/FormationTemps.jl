@@ -177,7 +177,7 @@ function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     end
 
     # center -> FFT indexing, then R2C FFT of padded kernel (no allocation)
-    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
+    CUDA.cuFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
     copyto!(cmem.kr_1d, shifted_kernel_row)
     mul!(cmem.kernel_row_ft_1d, cmem.plan_fwd_1d, cmem.kr_1d)
 

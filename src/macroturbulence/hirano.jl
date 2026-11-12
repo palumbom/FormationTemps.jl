@@ -254,7 +254,7 @@ function convolve_hirano_rotmacro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     fill!(shifted_kernel_row, zero(T))
     k_real = @view cmem.kr_1d[1:N]
     k_real .= real.(cmem.kc_1d)
-    CUDA.CUFFT.fftshift!(@view(shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+N]), k_real, 1)
+    CUDA.cuFFT.fftshift!(@view(shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+N]), k_real, 1)
     normval = CUDA.sum(@view shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+N])
     @views kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ] .= shifted_kernel_row[cmem.pad_left+1 : cmem.pad_left+cmem.Nλ] ./ normval
 
@@ -275,7 +275,7 @@ function convolve_hirano_rotmacro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
         shifted_kernel_row = tmp
     end
 
-    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
+    CUDA.cuFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
     copyto!(cmem.kr_1d, shifted_kernel_row)
     mul!(cmem.kernel_row_ft_1d, cmem.plan_fwd_1d, cmem.kr_1d)
 

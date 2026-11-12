@@ -219,7 +219,7 @@ function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     end
 
     # center -> FFT indexing (writes into shifted_kernel_row)
-    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
+    CUDA.cuFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
 
     # copy into contiguous 1D buffer and FFT (no allocation)
     copyto!(cmem.kr_1d, shifted_kernel_row)
@@ -307,7 +307,7 @@ function _finalize_kernel_ft!(cmem::MacroConvolutionMemory{T}, i0::Int) where {T
     end
 
     # center -> FFT indexing
-    CUDA.CUFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
+    CUDA.cuFFT.ifftshift!(shifted_kernel_row, kernel_row, 1)
 
     # FFT into pre-allocated buffer and return a copy (caller stores it)
     copyto!(cmem.kr_1d, shifted_kernel_row)

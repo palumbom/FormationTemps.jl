@@ -231,7 +231,7 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
         kbuf_mac, λs_gpu, v_losals_gpu, Int32(i0_mac), T(star.ζ),
         Int32(Nλ), Int32(L_mac))
     kbuf_mac ./= sum(kbuf_mac, dims=2)
-    plan_kc = CUDA.CUFFT.plan_rfft(kbuf_mac, 2)
+    plan_kc = CUDA.cuFFT.plan_rfft(kbuf_mac, 2)
     kernel_cache_flat = CUDA.zeros(Complex{T}, N_unique, nfreq_mac)
     mul!(kernel_cache_flat, plan_kc, kbuf_mac)
     μ_idx_gpu = CuArray(Int32[μ_to_idx[T(μs_cpu[i])] for i in 1:Ntiles])
@@ -243,8 +243,8 @@ function benchmark_gpu_batched(αs, αs_cont, star, λs_korg, μs_cpu, z_rot_cpu
     mac_pad_cont = unsafe_wrap(CuArray{T, 2}, pointer(bcmem_cont.conv_gpu), (B * Natm1, L_mac))
     mac_ft       = unsafe_wrap(CuArray{Complex{T}, 2}, pointer(bcmem.conv_ft_gpu), (B * Natm1, nfreq_mac))
     mac_ft_cont  = unsafe_wrap(CuArray{Complex{T}, 2}, pointer(bcmem_cont.conv_ft_gpu), (B * Natm1, nfreq_mac))
-    plan_mac_fwd      = CUDA.CUFFT.plan_rfft(mac_pad, 2)
-    plan_mac_fwd_cont = CUDA.CUFFT.plan_rfft(mac_pad_cont, 2)
+    plan_mac_fwd      = CUDA.cuFFT.plan_rfft(mac_pad, 2)
+    plan_mac_fwd_cont = CUDA.cuFFT.plan_rfft(mac_pad_cont, 2)
     acc_ft      = CUDA.zeros(Complex{T}, Natm1, nfreq_mac)
     acc_ft_cont = CUDA.zeros(Complex{T}, Natm1, nfreq_mac)
 

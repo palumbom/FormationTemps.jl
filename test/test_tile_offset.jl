@@ -158,7 +158,7 @@ v_mic = Float64(ξ)
         bs_all = (cld(Ntiles * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
         @cuda threads=ts_pad blocks=bs_all FT.pad_signal!(mac_pad_all, cfdt_6,
                                                             Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_all = CUDA.CUFFT.plan_rfft(mac_pad_all, 2)
+        plan_all = CUDA.cuFFT.plan_rfft(mac_pad_all, 2)
         mac_ft_all = CUDA.zeros(Complex{Float64}, Ntiles * Natm1, nfreq_mac)
         mul!(mac_ft_all, plan_all, mac_pad_all)
         acc_ref = CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac)
@@ -174,7 +174,7 @@ v_mic = Float64(ξ)
         bs_half = (cld(half * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
         @cuda threads=ts_pad blocks=bs_half FT.pad_signal!(mac_pad_b1, cfdt_b1,
                                                              Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_b1 = CUDA.CUFFT.plan_rfft(mac_pad_b1, 2)
+        plan_b1 = CUDA.cuFFT.plan_rfft(mac_pad_b1, 2)
         mac_ft_b1 = CUDA.zeros(Complex{Float64}, half * Natm1, nfreq_mac)
         mul!(mac_ft_b1, plan_b1, mac_pad_b1)
         FT.batched_macro_multiply_accumulate!(acc_split, mac_ft_b1, kernel_cache_flat,
@@ -184,7 +184,7 @@ v_mic = Float64(ξ)
         mac_pad_b2 = CUDA.zeros(Float64, half * Natm1, L_mac)
         @cuda threads=ts_pad blocks=bs_half FT.pad_signal!(mac_pad_b2, cfdt_b2,
                                                              Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_b2 = CUDA.CUFFT.plan_rfft(mac_pad_b2, 2)
+        plan_b2 = CUDA.cuFFT.plan_rfft(mac_pad_b2, 2)
         mac_ft_b2 = CUDA.zeros(Complex{Float64}, half * Natm1, nfreq_mac)
         mul!(mac_ft_b2, plan_b2, mac_pad_b2)
         FT.batched_macro_multiply_accumulate!(acc_split, mac_ft_b2, kernel_cache_flat,

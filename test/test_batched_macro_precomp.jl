@@ -48,7 +48,7 @@ test_μs = [0.95, 0.7, 0.4, 0.2, 0.05]
         @cuda threads=ts blocks=bs FT.compute_rt_macro_dft_layout_2d!(
             kbuf, λs_gpu, v_losals_gpu, Int32(i0), ζ_rt, Int32(Nλ), Int32(L))
         kbuf ./= sum(kbuf, dims=2)
-        plan = CUDA.CUFFT.plan_rfft(kbuf, 2)
+        plan = CUDA.cuFFT.plan_rfft(kbuf, 2)
         batched_ft = CUDA.zeros(Complex{Float64}, N_unique, nfreq)
         mul!(batched_ft, plan, kbuf)
         batched_ft_h = Array(batched_ft)
@@ -87,7 +87,7 @@ test_μs = [0.95, 0.7, 0.4, 0.2, 0.05]
         @cuda threads=ts blocks=bs FT.compute_rt_macro_dft_layout_2d!(
             kbuf32, λs_gpu32, v_losals_gpu32, Int32(i0), Float32(ζ_rt), Int32(Nλ), Int32(L32))
         kbuf32 ./= sum(kbuf32, dims=2)
-        plan32 = CUDA.CUFFT.plan_rfft(kbuf32, 2)
+        plan32 = CUDA.cuFFT.plan_rfft(kbuf32, 2)
         ft32 = CUDA.zeros(Complex{Float32}, 1, nfreq32)
         mul!(ft32, plan32, kbuf32)
 

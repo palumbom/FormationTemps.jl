@@ -9,11 +9,18 @@ FormationTemps.jl is a Julia package that wraps [Korg.jl](https://github.com/ajw
 ## Build and Test Commands
 
 ```julia
-# From Julia REPL, run all tests
+# From Julia REPL, run the fast tier (the default)
 using Pkg; Pkg.test()
 
-# Or from shell
+# Or from shell: the fast tier directly, or in Pkg's sandbox
+julia --project=. test/runtests.jl
 julia --project=. -e 'using Pkg; Pkg.test()'
+
+# Fast and slow tiers. test/test_tiers.jl defines run_slow_tests(): FT_TEST_SLOW=1 or "slow" in ARGS.
+# The slow tier adds the convergence checks, the GPU T-range and Float32 smoke runs, and the finer
+# tilings; the fast tier runs the same comparisons on coarser tilings with wider tolerances.
+FT_TEST_SLOW=1 julia --project=. test/runtests.jl
+julia --project=. -e 'using Pkg; Pkg.test(test_args=["slow"])'
 
 # Run a single test file. The test files are include-only: they inherit `using Test` (and
 # variously Korg, make_plots, test_plotdir) from runtests.jl, and macros resolve at lowering
@@ -25,6 +32,16 @@ julia --project=. -e 'using Test; include("test/test_convenience.jl")'
 # Instantiate dependencies (first time or after Project.toml changes)
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
+
+Requires Julia 1.12 or later (`julia = "^1.12"`) and CUDA.jl 6.5.1; the 5.x series is no longer in the compat,
+and the FFT module is `CUDA.cuFFT` (on 6.x `CUDA.CUFFT` is only a deprecated alias for it; 5.x has no `cuFFT`).
+On the development workstation `Manifest.toml` is resolved under the default `julia` (1.13), and
+`julia +1.12 --project=.` reads its own gitignored `Manifest-v1.12.toml`.
+
+**The fast tier is slower under Julia 1.13 because of one compile** (measured 2026-11-11, Korg 1.2.1):
+`Korg.interpolate_marcs` compiles in about 30 s on 1.12.7 and about 230 s on 1.13.3, once per process;
+execution time and results are the same. Every `calc_formation_temp(star, …)` path pays it, so the fast tier
+takes about 12 min under 1.13.3 and about 4.5 min as `julia +1.12 --project=. test/runtests.jl`.
 
 CI runs on Julia 1.12 and the latest 1.x release (`'1'`) / ubuntu / x64. The runners have no GPU, so CI covers only the CPU tests; the GPU files in `runtests.jl` run only in local passes, which are the pre-release gate. The Aqua.jl test suite is included in the test directory but commented out in `runtests.jl`.
 
@@ -89,7 +106,7 @@ multiplies by exactly 1. Every other consumer is a ratio and cannot see the scal
 
 ### GPU vs CPU
 
-The module sets `GPU_DEFAULT = CUDA.functional()` at load time. Both `_calc_formation_temp_cpu` and `_calc_formation_temp_gpu` exist; the GPU path uses `AtmosphereGPU`, `GPUMemory`, `ConvolutionMemory`, and `BatchedMicroConvMem` structs that pre-allocate CuArrays and CUFFT plans. Pass `use_gpu=false` to force CPU. Pass `gpu_precision=Float32` to run GPU computations at single precision (absorption is always Float64 via Korg; conversion happens before GPU upload).
+The module sets `GPU_DEFAULT = CUDA.functional()` at load time. Both `_calc_formation_temp_cpu` and `_calc_formation_temp_gpu` exist; the GPU path uses `AtmosphereGPU`, `GPUMemory`, `ConvolutionMemory`, and `BatchedMicroConvMem` structs that pre-allocate CuArrays and cuFFT plans. Pass `use_gpu=false` to force CPU. Pass `gpu_precision=Float32` to run GPU computations at single precision (absorption is always Float64 via Korg; conversion happens before GPU upload).
 
 `ConvolutionMemory` caches FFT plans and pads to the next FFT-friendly length (factors of 2/3/5/7). Its `signal_cached` flag avoids redundant FFTs when absorption coefficients have not changed between disk integration tiles.
 
@@ -107,7 +124,7 @@ The GPU disk integration path (`convolve=false`) uses several optimizations:
 | `StellarProps` | Input: Teff, logg, Fe_H, vsini, ζ (macro), ξ (micro; scalar `T` or per-layer `AbstractVector{T}`), ρstar, istar, α₂, α₄ (differential rotation). Parametric: `StellarProps{T, V}` where `V <: Union{T, AbstractVector{T}}` |
 | `AtmosphereCPU` / `AtmosphereGPU` | Wrap Korg MARCS atmosphere; GPU variant holds `CuArray` fields including `nd_gpu` (number densities) |
 | `GPUMemory` | Pre-allocated GPU working arrays (αs, τs, cfunc, cfunc_dt, flux); Bezier work arrays (tau_ds, tau_alphaC); anchored-τ constants (log_τ_ref, ifactor_base, use_anchored); `v_los_zeros` for stationary-frame flux path |
-| `ConvolutionMemory` | Pre-allocated buffers + CUFFT plans for single-tile Doppler convolution; 1D FFT infrastructure for broadening kernels (kr_1d, kernel_row_ft_1d, plan_fwd_1d); `signal_cached` flag skips redundant FFTs; `xs_cpu` caches the CPU-side wavelength grid (set once in `_init_micro_params!`) to avoid redundant GPU→CPU syncs; `σ_floor` caches the grid-invariant Gaussian width floor, written with `xs_cpu` in `_init_micro_params!`; `n_kernel_builds` paces the underflow readback; used by `convolve=true` (Hirano) path and standalone GPU broadening functions |
+| `ConvolutionMemory` | Pre-allocated buffers + cuFFT plans for single-tile Doppler convolution; 1D FFT infrastructure for broadening kernels (kr_1d, kernel_row_ft_1d, plan_fwd_1d); `signal_cached` flag skips redundant FFTs; `xs_cpu` caches the CPU-side wavelength grid (set once in `_init_micro_params!`) to avoid redundant GPU→CPU syncs; `σ_floor` caches the grid-invariant Gaussian width floor, written with `xs_cpu` in `_init_micro_params!`; `n_kernel_builds` paces the underflow readback; used by `convolve=true` (Hirano) path and standalone GPU broadening functions |
 | `MacroConvolutionMemory` | Similar layout to `ConvolutionMemory` but for macroturbulence kernels, plus the Hirano C2C infrastructure (`kc_1d`, `plan_bwd_1d`) and the `out_gpu` output buffer, none of which exist on `ConvolutionMemory` (`test_convmem_types.jl` asserts that). Carries `σ_floor` and `n_kernel_builds` for the same reasons. `xs_gpu` is reused as scratch by `hirano.jl` (stores frequency-domain σ values), so `xs_cpu` is the authoritative wavelength grid after init; used by `convolve=true` path and by `precompute_rt_macro_kernel_ft` (serial per-μ kernel FFT). In the `convolve=false` (disk integration) path, only `.L` and `.pad_left` geometry fields are used — the actual macro convolution uses inline batched buffers |
 | `BatchedMicroConvMem` | Pre-allocated GPU buffers + cuFFT plans for batched Doppler convolution of B tiles simultaneously; shared signal FFT (Natm rows) + per-tile batched buffers (B*Natm rows); `signal_cached` flag skips redundant signal FFTs across batches; `xs_cpu` caches wavelength grid to avoid per-call GPU→CPU copies; `σ_floor` as above. **No** `n_kernel_builds`: the batched underflow readback is deliberately not paced |
 | `AlphaCache` | Caches electron density guesses and abundance normalization across atmosphere columns to warm-start the chemical equilibrium solver in repeated `compute_alpha!` calls |
@@ -137,7 +154,7 @@ The `convolve=false` (disk integration) macro path does NOT use `cmem.out_gpu`. 
 
 - **v_los additive model**: Disk integration computes per-tile v_los as `atm.v_los + rotation_velocity`. Default `atm.v_los` is zeros (backward-compatible). The flux path (`calc_flux_quantities`, `calc_flux_cfunc!`) uses a pre-allocated `mem.v_los_zeros` buffer instead of destructively zeroing `atm.v_los`.
 
-- **All broadening kernels (iso_rad_tan, rad_tan, rad_tan_two, gray_rot, Hirano)**: CPU and GPU both use padded linear convolution with edge replication. CPU uses R2C FFTs (FFTW); GPU uses R2C FFTs (CUFFT). CPU/GPU agreement is at floating-point precision (~1e-8). (Previously the CPU used circular FFT, causing ~1e-4 edge divergence that was misattributed to CUDA vs Julia `erfc` differences — CUDA's Float64 `erfc` is accurate to ≤5 ULP.)
+- **All broadening kernels (iso_rad_tan, rad_tan, rad_tan_two, gray_rot, Hirano)**: CPU and GPU both use padded linear convolution with edge replication. CPU uses R2C FFTs (FFTW); GPU uses R2C FFTs (cuFFT). CPU/GPU agreement is at floating-point precision (~1e-8). (Previously the CPU used circular FFT, causing ~1e-4 edge divergence that was misattributed to CUDA vs Julia `erfc` differences — CUDA's Float64 `erfc` is accurate to ≤5 ULP.)
 
 #### Float32 Precision Characteristics
 

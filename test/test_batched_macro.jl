@@ -95,7 +95,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
         @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(mac_pad, cfdt_batch,
                                                             Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_fwd = CUDA.CUFFT.plan_rfft(mac_pad, 2)
+        plan_fwd = CUDA.cuFFT.plan_rfft(mac_pad, 2)
         mac_ft = CUDA.zeros(Complex{Float64}, B * Natm1, nfreq_mac)
         mul!(mac_ft, plan_fwd, mac_pad)
 
@@ -106,7 +106,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
 
         # final IFFT + extract
         mac_ifft = CUDA.zeros(Float64, Natm1, L_mac)
-        plan_bwd = CUDA.CUFFT.plan_irfft(CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac), L_mac, 2)
+        plan_bwd = CUDA.cuFFT.plan_irfft(CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac), L_mac, 2)
         mul!(mac_ifft, plan_bwd, acc_ft)
         mac_out = CUDA.zeros(Float64, Natm1, Nλ)
         ts_ext = (32, 32)
@@ -160,7 +160,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         bs_pad = (cld(B_big * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
         @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(mac_pad, cfdt_big,
                                                             Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_fwd = CUDA.CUFFT.plan_rfft(mac_pad, 2)
+        plan_fwd = CUDA.cuFFT.plan_rfft(mac_pad, 2)
         mac_ft = CUDA.zeros(Complex{Float64}, B_big * Natm1, nfreq_mac)
         mul!(mac_ft, plan_fwd, mac_pad)
 
@@ -169,7 +169,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
                                                μ_idx, dA_gpu, Natm1, Bcur)
 
         mac_ifft = CUDA.zeros(Float64, Natm1, L_mac)
-        plan_bwd = CUDA.CUFFT.plan_irfft(CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac), L_mac, 2)
+        plan_bwd = CUDA.cuFFT.plan_irfft(CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac), L_mac, 2)
         mul!(mac_ifft, plan_bwd, acc_ft)
         mac_out = CUDA.zeros(Float64, Natm1, Nλ)
         ts_ext = (32, 32)
@@ -204,7 +204,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         bs_pad4 = (cld(4 * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
         @cuda threads=ts_pad blocks=bs_pad4 FT.pad_signal!(mac_pad_4, cfdt_4,
                                                              Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_fwd_4 = CUDA.CUFFT.plan_rfft(mac_pad_4, 2)
+        plan_fwd_4 = CUDA.cuFFT.plan_rfft(mac_pad_4, 2)
         mac_ft_4 = CUDA.zeros(Complex{Float64}, 4 * Natm1, nfreq_mac)
         mul!(mac_ft_4, plan_fwd_4, mac_pad_4)
         acc_one = CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac)
@@ -220,7 +220,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         bs_pad2 = (cld(B2 * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
         @cuda threads=ts_pad blocks=bs_pad2 FT.pad_signal!(mac_pad_b1, cfdt_b1,
                                                              Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_fwd_b1 = CUDA.CUFFT.plan_rfft(mac_pad_b1, 2)
+        plan_fwd_b1 = CUDA.cuFFT.plan_rfft(mac_pad_b1, 2)
         mac_ft_b1 = CUDA.zeros(Complex{Float64}, B2 * Natm1, nfreq_mac)
         mul!(mac_ft_b1, plan_fwd_b1, mac_pad_b1)
         FT.batched_macro_multiply_accumulate!(acc_two, mac_ft_b1, kernel_cache_flat,
@@ -231,7 +231,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         mac_pad_b2 = CUDA.zeros(Float64, B2 * Natm1, L_mac)
         @cuda threads=ts_pad blocks=bs_pad2 FT.pad_signal!(mac_pad_b2, cfdt_b2,
                                                              Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_fwd_b2 = CUDA.CUFFT.plan_rfft(mac_pad_b2, 2)
+        plan_fwd_b2 = CUDA.cuFFT.plan_rfft(mac_pad_b2, 2)
         mac_ft_b2 = CUDA.zeros(Complex{Float64}, B2 * Natm1, nfreq_mac)
         mul!(mac_ft_b2, plan_fwd_b2, mac_pad_b2)
         FT.batched_macro_multiply_accumulate!(acc_two, mac_ft_b2, kernel_cache_flat,
@@ -253,7 +253,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         bs_pad = (cld(B * Natm1, ts_pad[1]), cld(L_mac, ts_pad[2]))
         @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(
             mac_pad_fresh, cfdt_batch, Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_fresh = CUDA.CUFFT.plan_rfft(mac_pad_fresh, 2)
+        plan_fresh = CUDA.cuFFT.plan_rfft(mac_pad_fresh, 2)
         mul!(mac_ft_fresh, plan_fresh, mac_pad_fresh)
 
         acc_fresh = CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac)
@@ -283,7 +283,7 @@ cfdt_batch = CUDA.rand(Float64, B * Natm1, Nλ) .* 1e-10
         fill!(mac_pad_alias, 0.0)
         @cuda threads=ts_pad blocks=bs_pad FT.pad_signal!(
             mac_pad_alias, cfdt_batch, Nλ, pad_left_mac, L_mac - pad_left_mac - Nλ)
-        plan_alias = CUDA.CUFFT.plan_rfft(mac_pad_alias, 2)
+        plan_alias = CUDA.cuFFT.plan_rfft(mac_pad_alias, 2)
         mul!(mac_ft_alias, plan_alias, mac_pad_alias)
 
         acc_alias = CUDA.zeros(Complex{Float64}, Natm1, nfreq_mac)

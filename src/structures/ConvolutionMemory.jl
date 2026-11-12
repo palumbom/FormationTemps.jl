@@ -12,7 +12,7 @@ abstract type AbstractConvolutionMemory{T<:AF} end
 """
     ConvolutionMemory{T<:AbstractFloat}
 
-Pre-allocated GPU buffers and CUFFT plans for batched FFT-based Doppler convolution
+Pre-allocated GPU buffers and cuFFT plans for batched FFT-based Doppler convolution
 (micro-turbulence path).
 
 See also: [`MacroConvolutionMemory`](@ref), [`ConvolutionMemory(Nλ, Natm, Npad)`](@ref)
@@ -41,7 +41,7 @@ mutable struct ConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     conv_gpu::CuMatrix{T}
 
     # 2D batched FFT plans (along dim=2, wavelength axis)
-    plan_fwd::CUDA.CUFFT.CuFFTPlan
+    plan_fwd::CUDA.cuFFT.CuFFTPlan
     plan_bwd::AbstractFFTs.ScaledPlan
 
     # 1D R2C FFT for real-space micro kernel (Tier 1: uniform v_mic)
@@ -49,7 +49,7 @@ mutable struct ConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     xs_cpu::Vector{T}                      # CPU cache of wavelength grid, set once in _init_micro_params!
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
-    plan_fwd_1d::CUDA.CUFFT.CuFFTPlan     # 1D R2C plan on kr_1d
+    plan_fwd_1d::CUDA.cuFFT.CuFFTPlan     # 1D R2C plan on kr_1d
     # Read nowhere in src/ today; retained deliberately as the invalidation flag for reusing
     # the Doppler filter across renders (applies when v_los and v_mic are fixed for a sweep,
     # i.e. the free_atm=true T/nd sweeps). test_convmem_types.jl asserts it exists — do not
@@ -61,7 +61,7 @@ end
 """
     MacroConvolutionMemory{T<:AbstractFloat}
 
-Pre-allocated GPU buffers and CUFFT plans for macro-turbulence / rotation convolution.
+Pre-allocated GPU buffers and cuFFT plans for macro-turbulence / rotation convolution.
 Extends the base convolution buffers with 1D kernel FFT infrastructure, padded kernel
 work vectors, and an output extraction buffer.
 
@@ -87,7 +87,7 @@ mutable struct MacroConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     conv_ft_gpu::CuMatrix{Complex{T}}
     conv_gpu::CuMatrix{T}
 
-    plan_fwd::CUDA.CUFFT.CuFFTPlan
+    plan_fwd::CUDA.cuFFT.CuFFTPlan
     plan_bwd::AbstractFFTs.ScaledPlan
 
     # ── macro-specific fields ──
@@ -100,7 +100,7 @@ mutable struct MacroConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     # 1D R2C FFT for macro kernel
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D kernel (nfreq)
-    plan_fwd_1d::CUDA.CUFFT.CuFFTPlan
+    plan_fwd_1d::CUDA.cuFFT.CuFFTPlan
     kernel_cached::Bool                     # micro base kernel FT is valid
 
     # 1D C2C infrastructure for Hirano kernel
@@ -285,7 +285,7 @@ end
 """
     ConvolutionMemory(Nλ, Natm, Npad; T=Float64)
 
-Allocate GPU buffers and CUFFT plans for micro-turbulence convolution of
+Allocate GPU buffers and cuFFT plans for micro-turbulence convolution of
 `Natm × Nλ` matrices.
 """
 function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
@@ -301,14 +301,14 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     conv_ft_gpu   = similar(kernel_ft_gpu)
     conv_gpu      = CuMatrix{T}(undef, Natm, L)
 
-    plan_fwd = CUDA.CUFFT.plan_rfft(signal_gpu, 2)
-    plan_bwd = CUDA.CUFFT.plan_irfft(conv_ft_gpu, L, 2)
+    plan_fwd = CUDA.cuFFT.plan_rfft(signal_gpu, 2)
+    plan_bwd = CUDA.cuFFT.plan_irfft(conv_ft_gpu, L, 2)
 
     # 1D kernel infrastructure
     xs_gpu           = CUDA.zeros(T, Nλ)
     kr_1d            = CUDA.zeros(T, L)
     kernel_row_ft_1d = CuVector{Complex{T}}(undef, nfreq)
-    plan_fwd_1d      = CUDA.CUFFT.plan_rfft(kr_1d)
+    plan_fwd_1d      = CUDA.cuFFT.plan_rfft(kr_1d)
 
     return ConvolutionMemory{T}(Nλ, Natm, Npad_eff, L, pad_left, pad_right,
                                 zero(T), false, false,
@@ -322,7 +322,7 @@ end
 """
     MacroConvolutionMemory(Nλ, Natm, Npad; T=Float64)
 
-Allocate GPU buffers and CUFFT plans for macro-turbulence / rotation convolution
+Allocate GPU buffers and cuFFT plans for macro-turbulence / rotation convolution
 of `Natm × Nλ` matrices. Includes 1D kernel FFT infrastructure.
 """
 function MacroConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
@@ -339,8 +339,8 @@ function MacroConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
     conv_ft_gpu   = similar(kernel_ft_gpu)
     conv_gpu      = CuMatrix{T}(undef, Natm, L)
 
-    plan_fwd = CUDA.CUFFT.plan_rfft(signal_gpu, 2)
-    plan_bwd = CUDA.CUFFT.plan_irfft(conv_ft_gpu, L, 2)
+    plan_fwd = CUDA.cuFFT.plan_rfft(signal_gpu, 2)
+    plan_bwd = CUDA.cuFFT.plan_irfft(conv_ft_gpu, L, 2)
 
     # macro-specific buffers
     xs_gpu             = CUDA.zeros(T, Nλ)
@@ -350,10 +350,10 @@ function MacroConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
 
     kr_1d              = CUDA.zeros(T, L)
     kernel_row_ft_1d   = CuVector{Complex{T}}(undef, nfreq)
-    plan_fwd_1d        = CUDA.CUFFT.plan_rfft(kr_1d)
+    plan_fwd_1d        = CUDA.cuFFT.plan_rfft(kr_1d)
 
     kc_1d              = CuVector{Complex{T}}(undef, Nλ)
-    plan_bwd_1d        = CUDA.CUFFT.plan_ifft!(kc_1d)
+    plan_bwd_1d        = CUDA.cuFFT.plan_ifft!(kc_1d)
 
     return MacroConvolutionMemory{T}(Nλ, Natm, Npad_eff, L, pad_left, pad_right,
                                      zero(T), false, false,
