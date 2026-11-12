@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Contribution Functions · FormationTemps.jl</title><meta name="title" content="Contribution Functions · FormationTemps.jl"/><meta property="og:title" content="Contribution Functions · FormationTemps.jl"/><meta property="twitter:title" content="Contribution Functions · FormationTemps.jl"/><meta name="description" content="Documentation for FormationTemps.jl."/><meta property="og:description" content="Documentation for FormationTemps.jl."/><meta property="twitter:description" content="Documentation for FormationTemps.jl."/><meta property="og:url" content="https://palumbom.github.io/FormationTemps.jl/cont_func/"/><meta property="twitter:url" content="https://palumbom.github.io/FormationTemps.jl/cont_func/"/><link rel="canonical" href="https://palumbom.github.io/FormationTemps.jl/cont_func/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.png" alt="FormationTemps.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">FormationTemps.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Quickstart</a></li><li><span class="tocitem">Guides</span><ul><li><a class="tocitem" href="../tutorial/">Basic Tutorial</a></li><li class="is-active"><a class="tocitem" href>Contribution Functions</a><ul class="internal"><li><a class="tocitem" href="#Formation-temperatures-can-lie-to-you!"><span>Formation temperatures can lie to you!</span></a></li></ul></li><li><a class="tocitem" href="../convolutions/">Broadening &amp; Convolutions</a></li><li><a class="tocitem" href="../chunked/">Large Linelists</a></li><li><a class="tocitem" href="../parallelization/">Parallelization</a></li><li><a class="tocitem" href="../python/">Python Tutorial</a></li></ul></li><li><a class="tocitem" href="../internals/">Public Functions</a></li><li><a class="tocitem" href="../longlist/">Full Index</a></li><li><a class="tocitem" href="../license/">License</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Guides</a></li><li class="is-active"><a href>Contribution Functions</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Contribution Functions</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/palumbom/FormationTemps.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/palumbom/FormationTemps.jl/blob/main/docs/src/cont_func.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Manipulating-Contribution-Functions"><a class="docs-heading-anchor" href="#Manipulating-Contribution-Functions">Manipulating Contribution Functions</a><a id="Manipulating-Contribution-Functions-1"></a><a class="docs-heading-anchor-permalink" href="#Manipulating-Contribution-Functions" title="Permalink"></a></h1><p>Formation temperatures are computed from the model contribution functions, and can be thought of as a simple summary statistic thereof. For some users, it may be advantageous to view and manipulate these contribution functions. </p><p>Following a procedure like that in the <a href="../tutorial/#Basic-Tutorial">Basic Tutorial</a>, we can see that the <code>FormTempResult</code> composite type also contains a <code>cont_func</code> field. We can plot this like so:</p><pre><code class="language-julia hljs">using Korg
+using PythonPlot; plt = PythonPlot.pyplot
+using FormationTemps; FT = FormationTemps
+plt.style.use(joinpath(FT.moddir, &quot;fig.mplstyle&quot;))
+
+# get the linelist
+linelist = Korg.read_linelist(joinpath(FT.datdir, &quot;Sun_VALD.lin&quot;))[16000:16100]
+
+# set stellar parameters
+Teff = 5777.0
+logg = 4.44
+Fe_H = 0.0
+vsini = 2100.0
+ζ_RT = 3400.0   # radial-tangential macroturbulent broadening
+ξ = 850.0       # microturbulent broadening
+
+# create StellarProps composite type to hold everything
+star_props = StellarProps(Teff=Teff, logg=logg, Fe_H=Fe_H,
+                          vsini=vsini, v_macro=ζ_RT, v_micro=ξ)
+
+# get the flux + formation temperature spectra
+form_temp_result = FT.calc_formation_temp(star_props, linelist; Δλ=0.005)
+
+# parse the result
+wavs = form_temp_result.wavs
+flux = form_temp_result.flux
+temp = form_temp_result.form_temps
+cont_func = form_temp_result.cont_func
+
+# plot the output
+fig, ax1 = plt.subplots(figsize=(9.6,4.8))
+img = ax1.pcolormesh(cont_func ./ maximum(cont_func), cmap=&quot;viridis&quot;)
+ax1.set_xticklabels([])
+ax1.set_yticklabels([])
+fname = joinpath(FT.moddir, &quot;docs&quot;, &quot;src&quot;, &quot;static&quot;, &quot;cont_func_simple_example.png&quot;)
+cbar = fig.colorbar(img, ax=ax1)
+cbar.set_label(&quot;{\\rm Normalized Flux Contribution Fn.}&quot;)
+fig.savefig(fname, bbox_inches=&quot;tight&quot;)
+plt.show()
+plt.clf(); plt.close()
+
+</code></pre><p><img src="../static/cont_func_simple_example.png" alt="formation_temps"/></p><p>We can also add axis values. The x-axis is wavelength, and y-axis is a coordinate in the model atmosphere. Let&#39;s first parse out and view the model atmosphere structure from the <code>FormTempResult</code> composite type instance. </p><pre><code class="language-julia hljs">
+# parse the atmosphere
+atm = form_temp_result.atmosphere
+zs = get_zs(atm)
+Ts = get_Ts(atm)
+τs = get_τs(atm)
+
+# plot temperature structure vs optical depth (if available) or height
+fig, ax1 = plt.subplots(figsize=(9.6,4.8))
+if isempty(τs)
+    ax1.plot(zs ./ 1e5, Ts, c=&quot;k&quot;)   # fall back to height in km
+    ax1.set_xlabel(&quot;{\\rm Height [km]}&quot;)
+else
+    ax1.plot(τs, Ts, c=&quot;k&quot;)
+    ax1.set_xlabel(&quot;{\\rm Optical Depth at 5000 \\AA}&quot;)
+end
+ax1.set_ylabel(&quot;{\\rm Atmosphere Temperature [K]}&quot;)
+fname = joinpath(FT.moddir, &quot;docs&quot;, &quot;src&quot;, &quot;static&quot;, &quot;atmosphere.png&quot;)
+fig.savefig(fname, bbox_inches=&quot;tight&quot;)
+plt.show()
+plt.clf(); plt.close()
+
+</code></pre><p><img src="../static/atmosphere.png" alt="formation_temps"/></p><p>Now we can zoom-in on some lines (to better see the structure of the contribution function) and add on the axis values:</p><pre><code class="language-julia hljs">
+# choose some lines to zoom into
+lines_to_focus = linelist[5:25]
+rest_wls = [1e8 * l.wl for l in lines_to_focus]
+buffer = 0.5
+idx1 = findfirst(x -&gt; x .&gt;= minimum(rest_wls) - buffer, wavs)
+idx2 = findfirst(x -&gt; x .&gt;= maximum(rest_wls) + buffer, wavs)
+
+# get the bounding values for pcolormesh
+xedges = view(wavs, idx1:idx2)
+yedges = log10.(elav(τs))
+yedges2 = elav(zs ./ 1e7)
+cfuncp = view(cont_func, :, idx1:idx2)
+
+# plot the contribution function
+fig, ax1 = plt.subplots(figsize=(9.6,4.8))
+img = ax1.pcolormesh(xedges, yedges, cfuncp ./ maximum(cfuncp), cmap=&quot;viridis&quot;)
+ax1.set_xlabel(&quot;{\\rm Vacuum Wavelength [\\AA]}&quot;)
+ax1.set_ylabel(&quot;{\\rm Optical Depth at 5000 \\AA}&quot;)
+cbar = fig.colorbar(img, ax=ax1)
+cbar.set_label(&quot;{\\rm Normalized Flux Contribution Fn.}&quot;)
+fname = joinpath(FT.moddir, &quot;docs&quot;, &quot;src&quot;, &quot;static&quot;, &quot;cont_func_example.png&quot;)
+fig.savefig(fname, bbox_inches=&quot;tight&quot;)
+plt.show()
+plt.clf(); plt.close()
+
+</code></pre><p><img src="../static/cont_func_example.png" alt="formation_temps"/></p><h2 id="Formation-temperatures-can-lie-to-you!"><a class="docs-heading-anchor" href="#Formation-temperatures-can-lie-to-you!">Formation temperatures can lie to you!</a><a id="Formation-temperatures-can-lie-to-you!-1"></a><a class="docs-heading-anchor-permalink" href="#Formation-temperatures-can-lie-to-you!" title="Permalink"></a></h2><p>We can also slice through the contribution functions of individual pixels in lines. Doing so, we can demonstrate that wavelength elements which share a formation temperature need not have the same (or even similar) contribution functions! In each frame of the below animations, the contribution functions for the black pixel in each absorption line are shown. These pixels share the same formation temperature (within a tolerance of a couple Kelvin), yet their contribution functions look very different in the cores of the lines! Of course, the contribution functions tend to each other toward the continuum, but the bulk of the radial velocity information is found where the derivative of the spectrum is highest. </p><p><img src="../static/line_lineup.gif" alt="line_animation"/> <img src="../static/cont_comparison.gif" alt="cont_func_animation"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../tutorial/">« Basic Tutorial</a><a class="docs-footer-nextpage" href="../convolutions/">Broadening &amp; Convolutions »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 2 June 2026 20:00">Tuesday 2 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
