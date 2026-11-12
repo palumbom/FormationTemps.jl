@@ -10,6 +10,7 @@ docs/src/index.md
 *__pycache__*
 notes/
 scratch/
+/*.md
 
 *.pdf
 *.csv
@@ -34,3 +35,4 @@ scratch/
 !docs/src/static/*.png
 !docs/src/static/*.gif
 !docs/src/assets/*.png
+!/README.md
