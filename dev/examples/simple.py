@@ -1,6 +1,6 @@
 import os
 import matplotlib
-# matplotlib.use("Agg")
+matplotlib.use("Agg")   # interactive backends can crash under juliacall
 
 from juliacall import Main as jl
 import numpy as np
@@ -12,7 +12,7 @@ jl.seval("using FormationTemps")
 FT = jl.FormationTemps
 Korg = jl.Korg
 
-# apply project style
+# apply project style; it renders text with LaTeX, so a TeX installation is required
 plt.style.use(os.path.join(str(FT.moddir), "fig.mplstyle"))
 
 # read the linelist (ships with the package)
@@ -45,7 +45,6 @@ ax2.set_ylabel(r"{\rm Formation Temperature [K]}")
 fig.tight_layout()
 
 # write out the file
-import os
 outpath = os.path.join(os.getcwd(), "formation_temps.png")
 fig.savefig(outpath, dpi=150, bbox_inches="tight")
 print(f"Saved {outpath}")
