@@ -59,7 +59,8 @@ integration progress bar.
 
 `gpu_precision=Float32` runs GPU computations at single precision, roughly halving GPU memory
 use. Absorption coefficients are always Float64 (a Korg requirement) and converted before
-upload. Keep the `Float64` default for `:quadrature`, which loses accuracy at Float32.
+upload, and the broadening kernels are placed on the Float64 wavelength grid, so every method
+stays close to its Float64 result; see [Parallelization](parallelization.md).
 
 The CPU `:disk` path is parallelized across tiles with `Threads.@threads`; launch Julia with
 multiple threads (`julia -t auto`) to benefit. See [Parallelization](parallelization.md).

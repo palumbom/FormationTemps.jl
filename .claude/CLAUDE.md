@@ -17,16 +17,19 @@ julia --project=. test/runtests.jl
 julia --project=. -e 'using Pkg; Pkg.test()'
 
 # Fast and slow tiers. test/test_tiers.jl defines run_slow_tests(): FT_TEST_SLOW=1 or "slow" in ARGS.
-# The slow tier adds the convergence checks, the GPU T-range and Float32 smoke runs, and the finer
-# tilings; the fast tier runs the same comparisons on coarser tilings with wider tolerances.
+# The slow tier adds the convergence checks, the GPU T-range runs, the Float32-against-Float64
+# accuracy checks and the finer tilings; the fast tier runs the same comparisons on coarser
+# tilings with wider tolerances.
 FT_TEST_SLOW=1 julia --project=. test/runtests.jl
 julia --project=. -e 'using Pkg; Pkg.test(test_args=["slow"])'
 
-# Run a single test file. The test files are include-only: they inherit `using Test` (and
-# variously Korg, make_plots, test_plotdir) from runtests.jl, and macros resolve at lowering
-# time, so a `using Test` inside a file's own `let` block leaves @testset undefined. Running
-# `julia --project=. test/<file>.jl` directly fails on all but the few files whose `using`s
-# are at top level (test_sigma_floor_cache.jl, test_graph_capture.jl).
+# Run a single test file. Files with their own top-level `using Test` (most GPU and newer
+# files, e.g. test_cont_func_scale.jl, test_quadrature.jl) run directly. The rest are
+# include-only (e.g. test_convenience.jl, test_underflow_guard.jl, test_cfunc_measure.jl): they
+# inherit `using Test` (and variously Korg, make_plots, test_plotdir) from runtests.jl, and
+# macros resolve at lowering time, so a `using Test` inside a file's own `let` block leaves
+# @testset undefined. Run those through an `include` after `using Test`:
+julia --project=. test/test_quadrature.jl
 julia --project=. -e 'using Test; include("test/test_convenience.jl")'
 
 # Instantiate dependencies (first time or after Project.toml changes)
@@ -61,7 +64,7 @@ julia --startup-file=no --project=docs docs/make.jl
 
 1. **Absorption** (`absorption.jl`): `compute_alpha!` wraps `Korg.line_absorption!` to fill `αs` (total) and `αs_cont` (continuum-only) arrays of shape `(Natm, Nλ)`. Hydrogen lines, which Korg builds from its own Stark/MHD physics rather than the linelist, are added by `_add_hydrogen_line_absorption!` (`hydrogen_lines=true` by default) to `αs` only, never `αs_cont`, and with `ξ = 0` because microturbulence is applied downstream.
 2. **Microturbulence** (`microturbulence.jl`): FFT-based Gaussian convolution along the wavelength axis applied per atmosphere layer.
-3. **Optical depth** (`tau.jl`): `calc_tau_anchored_cpu!` / GPU Bezier integration to build `τs` arrays of shape `(Natm, Nλ)`. On the single-tile GPU Bézier path (`calc_intensity_direct!`), τ is kept in registers and never written to global memory (see fused kernel below).
+3. **Optical depth** (`tau.jl`): builds `τs` arrays of shape `(Natm, Nλ)`. The anchored scheme (`calc_tau_anchored_cpu!` and its GPU kernels) runs when the atmosphere supplies τ_ref, which MARCS models from Korg do; otherwise the Bézier scheme (`calc_tau_bezier_cpu!` and its GPU kernels) integrates α over geometric depth. The CPU chooses in `_make_tau_integrator`, the GPU through `GPUMemory.use_anchored`; the stacked render supports Bézier only. The Bézier control points sit on each node's tangent with the signs of de la Cruz Rodríguez & Piskunov (2013), and the node slope is zero at local extrema. Korg's `fritsch_butland_C` has the signs reversed (open as Korg.jl#600, present through v1.3.1), so the CPU path is FT's own implementation mirroring the GPU kernel: never route it back through `Korg.RadiativeTransfer.compute_tau_bezier!`. Judge the Bézier path against a high-order integration in z, not against anchored on MARCS: with Korg's default mixture the z-integrated τ sits ~11% below the tabulated τ_ref in the upper photosphere whatever the rule (the model's electron density does not match the chemistry), so "closer to anchored" is not evidence of correctness. On the single-tile GPU Bézier path (`calc_intensity_direct!`), τ is kept in registers and never written to global memory (see fused kernel below).
 4. **Contribution functions** (`contribution.jl`): `calc_flux_cfunc_cpu!` / GPU kernels yield `cfunc` of shape `(Natm-1, Nλ)`. On the single-tile GPU Bézier path, cfunc is also register-resident (fused with τ and intensity reduction in `calc_tau_cfunc_reduce_bezier!`). Each interval is integrated by two-point Gauss–Legendre in τ, with the Planck source evaluated at the two layers and interpolated **linearly in τ** to the nodes: Korg's linear-source scheme up to the quadrature error. Do not interpolate T to the nodes and evaluate B there instead: T(τ) is concave and B(T) steeply convex in the optical, so that scheme biases the intensity low by about 1e-3 at 5000 Å on the native MARCS grid (its continuum sat 8e-4 below Korg's; the B-linear one sits 4e-5 below). All eleven sites (CPU, GPU single-tile, batched, fused, Bézier helper `_accumulate_cfunc`, stacked) use the same expressions, which keeps the paths bit-identical to each other.
 5. **Disk integration**, selected by `method` (three modes):
    - `:disk` (default): numerical disk integration over a `Nϕ × 2Nϕ` stellar surface grid, looping over visible tiles.
@@ -130,6 +133,7 @@ The GPU disk integration path (`convolve=false`) uses several optimizations:
 | `AlphaCache` | Caches electron density guesses and abundance normalization across atmosphere columns to warm-start the chemical equilibrium solver in repeated `compute_alpha!` calls |
 | `CPUTileWorkspace` | Per-thread pre-allocated working arrays for the CPU disk integration tile loop; includes radiative transfer buffers (τs, cfunc), convolution output buffers (αs_broad, macro_out), FFT work buffers (row_buf, kernel_ft, kernel_real), per-tile velocity buffer (v_los_buf), and in-place FFTW plans; eliminates per-tile heap allocations so threading scales without GC contention |
 | `FormTempResult` | Output: wavs, flux, form_temps, cont_func, ceiling_ratio, r_thresh, atmosphere. The five-argument constructor derives `ceiling_ratio` from `cont_func` and `atmosphere.τs`; internal paths use it so the two cannot disagree |
+| `StackedRenderMemory` | Buffers and cuFFT plans for rendering `B` atmosphere components in one set of launches (`render_stacked!`, `set_signal_ft!`, `component_rows`; exported, aimed at MCMC drivers such as Anemoi). Rows `(b-1)*Natm+1 : b*Natm` belong to component `b`; each component keeps its own wavelength grid, copied from its serial `GPUMemory` at construction, while the Doppler-kernel grid, offsets `dx` and `σ_floor` are latched from its `ConvolutionMemory` on the first render. Bézier τ only. A component is bit-identical to its serial render only when `rows_independent` (even `Natm` or even padded `L`, see "cuFFT pairs rows at odd padded lengths"), which `render_stacked!` asserts; its kernel and cfunc builders repeat the serial ones operation for operation and must be changed together with them. No suite test covers it |
 
 ### Broadening Kernels (`src/macroturbulence/`)
 
@@ -163,13 +167,15 @@ The `convolve=false` (disk integration) macro path does NOT use `cmem.out_gpu`. 
 
 #### Float32 Precision Characteristics
 
-The dominant Float32 precision loss is in the per-tile R2C/C2R FFT roundtrip during microturbulent convolution: absorption coefficients span ~5 orders of magnitude (continuum vs line core), and Float32 FFT arithmetic distributes absolute error proportional to the largest values. This produces ~2e-4 relative error in the convolved αs per tile, cascading to ~1e-3 in τ and ~1e-2 in cfunc_dt. After disk integration over ~10⁴ tiles (with partial cancellation from opposing Doppler signs), the net formation temperature error is ~1–2 K (~0.03% of ~5000 K). Other stages (τ integration, Planck evaluation, cumsum/interpolation) contribute negligibly at Float32.
+At `gpu_precision=Float32` the opacity is still computed at Float64 by Korg and only its values are converted, so the Float32 error comes from the GPU arithmetic and from where the kernels sit on the grid. Measured 2026-11-12 (RTX 6000 Ada, CUDA.jl 6.5.1, solar star, Δλ = 0.01 Å, ξ = 850 m/s), Float32 against Float64: `:disk` and `:quadrature` agree to ≲ 3e-6 in normalized flux and ≲ 5e-3 K in formation temperature; `:hirano` to ~1e-5 and 0.015–0.03 K. `test_quadrature_gpu.jl` asserts the `:quadrature` bounds (flux < 1e-5, T_form < 1e-2 K), which fail if a kernel is placed from the rounded grid.
+
+Most of what used to pass for Float32 round-off was not round-off. Kernels placed by differencing the Float32-rounded wavelength grid shifted every line by several m/s and moved formation temperatures by 3–11 K (fixed; see "Kernel offsets come from the Float64 grid"). In `:hirano` the remaining 0.15 K was the E₂ series stopping at `sqrt(eps(T))`, 4.6e-4 relative at Float32; `expint.jl` now stops at `4·eps(T)`, and a looser tolerance brings that back. Before attributing a Float32 discrepancy to FFT round-off, check placement and series tolerances first. What remains: the R2C/C2R round trip spreads absolute error in proportion to the largest opacity in a row, which spans ~5 orders of magnitude from continuum to line core; E₂ at Float32 is limited to ~1e-5 relative for x ≳ 10 by the cancellation in `exp(-x) - x·E1(x)`; and forming `1 - μ²` in the RT macro trigonometry loses digits within ~1e-4 of μ = 1 (≤ 2e-4 in that kernel). The 0.015–0.03 K left in `:hirano` has not been attributed.
 
 Bit-identity of the emergent flux is scoped to a fixed environment. The cuFFT library, the GPU compiler and the device all sit under it, `Manifest.toml` is gitignored, and `Project.toml` gives CUDA.jl a floor rather than an exact version — so a fresh clone or a `Pkg.up` can move the last ULP of the flux with no source change. The single-tile Float32 render was bit-identical between CUDA.jl 5.11.1 and 6.5.1 on one RTX 6000 Ada (2026-11-11, one state), but nothing enforces that. The enforceable form of the RT-exactness policy is therefore "no change within a comparison set" (one chain, one suite of runs being compared), not "no change ever". Re-baseline at a deliberate boundary, never mid-array.
 
 No library reduction sits in the render path. The per-row Doppler kernels are normalized by `_normalize_rows!`, whose summation order depends only on the padded length and `_ROW_NORM_LANES`; a row's kernel is therefore the same bits whether it is built alone, in a batch of tiles, or under another CUDA.jl. `sum(A, dims=2)` must not come back: CUDA.jl's reductions pick their grouping from the array's shape (AcceleratedKernels' launch shapes from GPUArrays 12 on, `mapreduce`'s block count before), which made a tile's convolved opacities depend on the batch around it and moved the flux between CUDA.jl versions.
 
-The real-space tile accumulation kernels (`accumulate_batch_kernel!`, `accumulate_tile_kernel!`) use Kahan compensated summation with per-element compensation arrays to prevent O(N) rounding bias across the ~10⁴ tile sum. The Fourier-domain macro accumulation path (`batched_macro_multiply_accumulate_kernel!`) uses naive summation — acceptable for Float64 (~10⁴ × ε ≈ 10⁻¹²) but may need Kahan for Float32 if precision degrades. Run `debug/diagnose_f32_residuals.jl` for a stage-by-stage precision breakdown.
+The real-space tile accumulation kernels (`accumulate_batch_kernel!`, `accumulate_tile_kernel!`) use Kahan compensated summation with per-element compensation arrays to prevent O(N) rounding bias across the ~10⁴ tile sum. The Fourier-domain macro accumulation path (`batched_macro_multiply_accumulate_kernel!`) uses naive summation; at Float32 `:disk` with ζ ≠ 0 still agrees with Float64 to the figures above, so Kahan has not been needed there.
 
 #### Short-Circuit Aliasing
 
@@ -270,7 +276,7 @@ reduces to the renders taken before capture.
 - All velocities are in **m/s** throughout (vsini, v_macro, v_micro inputs and stored fields).
 - Wavelengths in **Angstrom** on the public API; internally Korg uses cm.
 - Linelists from Korg use vacuum wavelengths (`l.wl` in cm); convert with `Korg.vacuum_to_air` if needed (see `test_convenience.jl`).
-- Constants in `src/constants.jl`; `c_ms = 2.99782458e8` is the primary speed-of-light constant used in Doppler shifts.
+- Constants in `src/constants.jl`; `c_ms = 2.99792458e8` is the primary speed-of-light constant used in Doppler shifts.
 - Disk-integration rotation (`calc_stellar_grid[_cpu]`, `disk_calculations.jl`): the per-tile line-of-sight velocity is `z_rot·c = -vsini·f(ϕ)·(x_sky/ρstar) = -vsini·f(ϕ)·cosϕ·sinθ`, where `x_sky` is the sky-plane coordinate perpendicular to the projected spin axis and `f(ϕ) = 1 - α₂·sin²ϕ - α₄·sin⁴ϕ` is the normalized differential-rotation rate factor (`diff_rot_factor` in `geometry.jl`). `vsini` is the **projected equatorial** rotational velocity (`f(0)=1`). For rigid rotation (`α₂=α₄=0`) the field is independent of `istar` — inclination is degenerate with `vsini` for a featureless sphere, so `istar` is a no-op. With differential rotation (`α≠0`) `istar` becomes physically meaningful: it selects which latitude bands are visible/weighted, and those rotate at different rates. Coefficients `α₂`, `α₄` live on `StellarProps` (default 0). (A prior implementation normalized the rotation vector to constant `vsini` and re-projected through the inclination matrix, dropping the `cosϕ` latitude factor and adding a spurious `sin i`; both errors vanished only at the default `istar=90°`.)
 
 ### Empirical Fits (`src/turb_fits.jl`)
@@ -279,15 +285,15 @@ reduces to the renders taken before capture.
 
 ## Data Directory
 
-`src/config.jl` sets `FT.datdir` to `<repo>/data/` at load time (auto-created if absent). The solar linelist is at `FT.datdir * "Sun_VALD.lin"` and is required by the test suite.
+`src/config.jl` sets `FT.datdir` to `<repo>/data/` at load time (auto-created if absent). The solar linelist is at `joinpath(FT.datdir, "Sun_VALD.lin")` and is required by the test suite (`datdir` has no trailing separator, so string concatenation gives a wrong path).
 
 ## Python Interop
 
-`pyproject.toml` defines Python dependencies managed by `uv`. The Python interface uses `juliacall`/`juliapkg`. The CI workflow sets `PYTHON=python` so that PyCall finds the correct interpreter; replicate this when testing locally if PyCall is used.
+`pyproject.toml` defines the Python dependencies of the Python interface, managed by `uv`; the interface uses `juliacall`/`juliapkg`. `deps/setup.py` adds FormationTemps (the local clone in dev mode, else the registry at `^3`) and Korg to the Julia environment, pins juliacall to Julia 1.12, and refuses a Python linked against OpenSSL older than 3.5. Julia-side plotting uses PythonPlot through PythonCall and CondaPkg. Nothing depends on PyCall: the `PYTHON=python` environment variable and the "Install Python deps for PyCall" steps in `.github/workflows/CI.yml` and `Documentation.yml` are leftovers.
 
 ## Scripts
 
-`scripts/` contains standalone analysis and plotting scripts used to generate figures for the paper (arXiv:2512.09861). They are not part of the package API and import `FormationTemps` directly. Most plotting scripts use Matplotlib via `PythonPlot` (note: the recent commits switched from `PyPlot` to `PythonPlot`).
+`scripts/` contains standalone analysis and plotting scripts used to generate figures for the paper (arXiv:2512.09861). They are not part of the package API and import `FormationTemps` directly. Plotting scripts use Matplotlib via `PythonPlot`.
 
 ## Plotting
 
