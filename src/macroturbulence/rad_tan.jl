@@ -120,13 +120,14 @@ function _convolve_macro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
     return nothing
 end
 
-function compute_padded_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, μ, Nλ, pad_left)
+# `dx[j]` is the offset of sample j from the window center, `λc` the wavelength there
+function compute_padded_rt_kernel_1D!(kernel_row, dx, λc, ζ_rt, μ, Nλ, pad_left)
     # get thread index
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
 
     # evaluate the kernel
     if j <= Nλ
-        xj = c_ms * (xs[j] - λc) / λc
+        xj = c_ms * dx[j] / λc
 
         # trig from μ directly; guard μ≈0 or μ≈1
         T = typeof(ζ_rt)
@@ -158,6 +159,8 @@ Arguments:
 - `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
 - `ζ_rt::Real`: Radial-tangential macroturbulence velocity scale (m/s).
 - `μ::Real`: Cosine of the angle between the local normal and the line of sight.
+- `xs_exact`: `xs` at the precision it was generated at; the kernel is placed from its
+  differences (see `_kernel_offsets`). Defaults to `xs` itself.
 
 Returns:
 - `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
@@ -169,7 +172,7 @@ Notes:
 See also: [`convolve_rt_macro`](@ref), [`rt_macro_kernel`](@ref)
 """
 function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
-                               ys::AA{T,2}, ζ_rt::T, μ::T) where {T<:AF}
+                               ys::AA{T,2}, ζ_rt::T, μ::T; xs_exact=nothing) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
     if iszero(ζ_rt)
         return CuArray(ys)
@@ -179,6 +182,7 @@ function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     xs_h = xs isa CA ? Array(xs) : collect(T, xs)
     copyto!(cmem.ys_gpu, ys)
     copyto!(cmem.xs_gpu, xs_h)
+    copyto!(cmem.dx_gpu, _kernel_offsets(xs_h, xs_exact))
 
     # compute velocity offset from discrete center
     i0 = length(xs_h) ÷ 2 + 1
@@ -198,7 +202,7 @@ function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     ts1 = (256,)
     bs1 = (cld(cmem.Nλ, ts1[1]),)
     @cuda threads=ts1 blocks=bs1 compute_padded_rt_kernel_1D!(kernel_row,
-                                                              cmem.xs_gpu, λ0,
+                                                              cmem.dx_gpu, λ0,
                                                               ζ_rt, μ, cmem.Nλ,
                                                               cmem.pad_left)
 
@@ -244,13 +248,15 @@ function convolve_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
 end
 
 """
-    precompute_rt_macro_kernel_ft(cmem, xs, ζ_rt, μ)
+    precompute_rt_macro_kernel_ft(cmem, xs, ζ_rt, μ; xs_exact=nothing)
 
 Precompute the Fourier transform of the RT macroturbulence kernel for a given `μ`.
 Returns a `CuVector{Complex{T}}` that can be passed to [`convolve_rt_macro_gpu_cached`](@ref).
+`xs_exact` is `xs` at the precision it was generated at; the kernel is placed from its
+differences (see `_kernel_offsets`).
 """
 function precompute_rt_macro_kernel_ft(cmem::MacroConvolutionMemory, xs::AA{T,1},
-                                       ζ_rt::T, μ::T) where {T<:AF}
+                                       ζ_rt::T, μ::T; xs_exact=nothing) where {T<:AF}
     # populate wavelength grid on device and get center wavelength without scalar indexing
     if xs isa CA
         copyto!(cmem.xs_gpu, xs)
@@ -259,6 +265,7 @@ function precompute_rt_macro_kernel_ft(cmem::MacroConvolutionMemory, xs::AA{T,1}
         copyto!(cmem.xs_gpu, CuArray(xs))
         xs_h = xs
     end
+    copyto!(cmem.dx_gpu, _kernel_offsets(xs_h, xs_exact))
 
     i0 = length(xs_h) ÷ 2 + 1
     λ0 = xs_h[i0]
@@ -271,7 +278,7 @@ function precompute_rt_macro_kernel_ft(cmem::MacroConvolutionMemory, xs::AA{T,1}
     ts1 = (256,)
     bs1 = (cld(cmem.Nλ, ts1[1]),)
     @cuda threads=ts1 blocks=bs1 compute_padded_rt_kernel_1D!(kernel_row,
-                                                              cmem.xs_gpu, λ0,
+                                                              cmem.dx_gpu, λ0,
                                                               ζ_rt, μ, cmem.Nλ,
                                                               cmem.pad_left)
 
@@ -405,24 +412,11 @@ end
 
 # ── batched macro kernel precomputation ───────────────────────────────────────
 
-"""
-    compute_rt_macro_dft_layout_2d!(kbuf, xs, v_losals, i0, ζ_rt, Nλ, L)
-
-CUDA kernel: evaluate the RT macroturbulence kernel for multiple μ values in parallel,
-writing directly in DFT layout (zero-lag at index 1). Each row of `kbuf` (N_unique, L)
-corresponds to one unique μ value. Skips the roll + ifftshift needed by the serial path.
-"""
-function compute_rt_macro_dft_layout_2d!(kbuf, xs, v_losals, i0, ζ_rt, Nλ, L)
-    j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-    row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
-    Nrows = size(kbuf, 1)
-    (row > Nrows || j > Nλ) && return nothing
+# One sample of the RT macro kernel for row `row` (disk position μ), in DFT layout: `Δλ` is the
+# offset of sample j from the window center and `λ0` the wavelength there.
+@inline function _rt_macro_dft_sample!(kbuf, Δλ, λ0, μ, row, j, i0, ζ_rt, L)
     T = eltype(kbuf)
-
-    xj = @inbounds xs[j]
-    λ0 = @inbounds xs[i0]
-    v = c_ms * (xj - λ0) / λ0
-    μ = @inbounds v_losals[row]
+    v = c_ms * Δλ / λ0
 
     ϵ = T(1e-6)
     cosθ = max(μ, ϵ)
@@ -437,5 +431,38 @@ function compute_rt_macro_dft_layout_2d!(kbuf, xs, v_losals, i0, ζ_rt, Nλ, L)
     d = j - i0
     idx = d > 0 ? d : L + d
     @inbounds kbuf[row, idx] = t1 + t2
+    return nothing
+end
+
+"""
+    compute_rt_macro_dft_layout_2d!(kbuf, xs, v_losals, i0, ζ_rt, Nλ, L)
+    compute_rt_macro_dft_layout_2d!(kbuf, dx, λ0, v_losals, i0, ζ_rt, Nλ, L)
+
+CUDA kernel: evaluate the RT macroturbulence kernel for multiple μ values in parallel,
+writing directly in DFT layout (zero-lag at index L). Each row of `kbuf` (N_unique, L)
+corresponds to one unique μ value. Skips the roll + ifftshift needed by the serial path.
+
+The first form differences the device grid `xs`. The second takes the offsets
+`dx[j] = xs[j] - xs[i0]` and the center wavelength `λ0` from the host, where they can be
+differenced from the grid at the precision it was generated at (see `_kernel_offsets`).
+"""
+function compute_rt_macro_dft_layout_2d!(kbuf, xs, v_losals, i0, ζ_rt, Nλ, L)
+    j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    (row > size(kbuf, 1) || j > Nλ) && return nothing
+    xj = @inbounds xs[j]
+    λ0 = @inbounds xs[i0]
+    μ = @inbounds v_losals[row]
+    _rt_macro_dft_sample!(kbuf, xj - λ0, λ0, μ, row, j, i0, ζ_rt, L)
+    return nothing
+end
+
+function compute_rt_macro_dft_layout_2d!(kbuf, dx, λ0, v_losals, i0, ζ_rt, Nλ, L)
+    j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+    (row > size(kbuf, 1) || j > Nλ) && return nothing
+    Δλ = @inbounds dx[j]
+    μ = @inbounds v_losals[row]
+    _rt_macro_dft_sample!(kbuf, Δλ, λ0, μ, row, j, i0, ζ_rt, L)
     return nothing
 end

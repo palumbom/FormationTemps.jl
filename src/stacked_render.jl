@@ -31,10 +31,11 @@ function set_signal_ft!(smem::StackedRenderMemory{T}, b::Integer,
     return nothing
 end
 
-# Copy the Doppler-kernel grid and the Gaussian width floor of every component's
-# ConvolutionMemory into smem.xs and smem.σ_floor. A ConvolutionMemory holds both only once it
-# has rendered, and they are constant from then on, so this runs once, on the first stacked
-# render. The floor is read through _sigma_floor_cached, as the serial kernel build reads it.
+# Copy the Doppler-kernel grid, the kernel offsets and the Gaussian width floor of every
+# component's ConvolutionMemory into smem.xs, smem.dx and smem.σ_floor. A ConvolutionMemory
+# holds them only once it has rendered or been initialized, and they are constant from then on,
+# so this runs once, on the first stacked render. The floor is read through _sigma_floor_cached,
+# as the serial kernel build reads it.
 function _latch_grids!(smem::StackedRenderMemory{T}) where T<:AF
     Nλ = smem.Nλ
     σ_floor = Vector{T}(undef, smem.B)
@@ -42,6 +43,7 @@ function _latch_grids!(smem::StackedRenderMemory{T}) where T<:AF
         @assert cmem.doppler_ready "the ConvolutionMemory of component $b has not rendered " *
             "yet: its wavelength grid and σ_floor are not set"
         copyto!(smem.xs, (b - 1) * Nλ + 1, cmem.xs_gpu, 1, Nλ)
+        copyto!(smem.dx, (b - 1) * Nλ + 1, cmem.dx_gpu, 1, Nλ)
         σ_floor[b] = _sigma_floor_cached(cmem, cmem.xs_cpu)
     end
     copyto!(smem.σ_floor, σ_floor)
@@ -49,13 +51,14 @@ function _latch_grids!(smem::StackedRenderMemory{T}) where T<:AF
     return nothing
 end
 
-# kernel_to_dft_layout_2d_gpu! with the wavelength grid and the width floor of the row's
-# component: row `row` belongs to component b = (row - 1) ÷ Natm + 1, whose grid is elements
-# (b - 1) * Nλ + 1 : b * Nλ of `xs` and whose floor is σ_floor[b]. The floating-point
-# operations and their order are those of kernel_to_dft_layout_2d_gpu!.
-function kernel_to_dft_layout_stacked_kernel!(kbuf::CDM{T}, xs::CDV{T}, v_los::CDV{T},
-                                              v_mic::CDV{T}, σ_floor::CDV{T}, i0::Int32,
-                                              Nλ::Int32, L::Int32, Natm::Int32,
+# kernel_to_dft_layout_2d_gpu! with the wavelength grid, the kernel offsets and the width
+# floor of the row's component: row `row` belongs to component b = (row - 1) ÷ Natm + 1, whose
+# grid and offsets are elements (b - 1) * Nλ + 1 : b * Nλ of `xs` and `dx` and whose floor is
+# σ_floor[b]. The floating-point operations and their order are those of
+# kernel_to_dft_layout_2d_gpu!.
+function kernel_to_dft_layout_stacked_kernel!(kbuf::CDM{T}, xs::CDV{T}, dx::CDV{T},
+                                              v_los::CDV{T}, v_mic::CDV{T}, σ_floor::CDV{T},
+                                              i0::Int32, Nλ::Int32, L::Int32, Natm::Int32,
                                               BNatm::Int32) where T<:AF
     j = Int32(threadIdx().x) + Int32(blockDim().x) * (Int32(blockIdx().x) - Int32(1))
     row = Int32(threadIdx().y) + Int32(blockDim().y) * (Int32(blockIdx().y) - Int32(1))
@@ -68,8 +71,8 @@ function kernel_to_dft_layout_stacked_kernel!(kbuf::CDM{T}, xs::CDV{T}, v_los::C
         xj = xs[off + j]
         λ0 = xs[off + i0]
         σx = max(xj * v_mic[row] / T(c_ms), σ_floor[b])
-        # (xj - λ0) and (v_los/c)*λ0 are both small; subtracting λc from xj would cancel
-        Δx = (xj - λ0) - v_los[row] / T(c_ms) * λ0
+        # dx and (v_los/c)*λ0 are both small; subtracting λc from xj would cancel
+        Δx = dx[off + j] - v_los[row] / T(c_ms) * λ0
         val = exp(-(Δx / σx)^2)
         d = j - i0
         idx = d >= Int32(0) ? d + Int32(1) : L + d + Int32(1)
@@ -158,9 +161,9 @@ Column `b` of `smem.intensity` is bit-identical to the serial render of componen
 (`calc_intensity_cfunc!` with its signal FFT cached, then `reduce_intensity!`) on its own
 `GPUMemory` and `ConvolutionMemory`, the `mems[b]` and `cmems[b]` that `smem` was built from.
 Every one of those `ConvolutionMemory`s must have rendered at least once before the first
-call, which is what sets its wavelength grid and `σ_floor`; the first call copies them into
-`smem`, and no later call reads a `ConvolutionMemory`. Every component's signal FFT must have
-been handed over with [`set_signal_ft!`](@ref).
+call, which is what sets its wavelength grid, kernel offsets and `σ_floor`; the first call
+copies them into `smem`, and no later call reads a `ConvolutionMemory`. Every component's
+signal FFT must have been handed over with [`set_signal_ft!`](@ref).
 
 Afterwards the valid columns of `smem.conv_gpu` hold the convolved opacities and `smem.τs` and
 `smem.cfunc` the optical depths and contribution functions, in the stacked row layout.
@@ -188,7 +191,7 @@ function render_stacked!(smem::StackedRenderMemory{T}) where T<:AF
     ts = (32, 32)
     bs = (cld(Nλ, ts[1]), cld(BNatm, ts[2]))
     @cuda threads=ts blocks=bs kernel_to_dft_layout_stacked_kernel!(
-        smem.conv_gpu, smem.xs, smem.v_los, smem.v_mic, smem.σ_floor,
+        smem.conv_gpu, smem.xs, smem.dx, smem.v_los, smem.v_mic, smem.σ_floor,
         Int32(i0), Int32(Nλ), Int32(L), Int32(Natm), Int32(BNatm))
     _normalize_rows!(smem.conv_gpu, BNatm)
     _maybe_report_underflow!(smem)

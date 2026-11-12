@@ -60,7 +60,8 @@ function convolve_gray_rotation(xs::AA{T,1}, ys::AA{T,2}, vsini::T, u1::T) where
     return _padded_convolve(collect(T, ys), kernel)
 end
 
-function compute_padded_gray_kernel_1D!(kernel_row, xs, λc, vsini, u1, Nλ, pad_left)
+# `dx[j]` is the offset of sample j from the window center, `λc` the wavelength there
+function compute_padded_gray_kernel_1D!(kernel_row, dx, λc, vsini, u1, Nλ, pad_left)
     # get thread index
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
 
@@ -72,7 +73,7 @@ function compute_padded_gray_kernel_1D!(kernel_row, xs, λc, vsini, u1, Nλ, pad
 
     # evaluate the kernel
     if j <= Nλ
-        xj = F(c_ms) * (xs[j] - λc) / λc / vsini
+        xj = F(c_ms) * dx[j] / λc / vsini
         omx2 = CUDA.abs(one(F) - xj ^ 2)
 
         val = (ld1 * sqrt(omx2) + ld2 * omx2) / ld3
@@ -94,6 +95,8 @@ Arguments:
 - `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
 - `vsini::Real`: Projected rotational velocity (m/s).
 - `u1::Real`: Linear limb-darkening coefficient.
+- `xs_exact`: `xs` at the precision it was generated at; the kernel is placed from its
+  differences (see `_kernel_offsets`). Defaults to `xs` itself.
 
 Returns:
 - `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
@@ -104,7 +107,7 @@ Notes:
 See also: [`convolve_gray_rotation`](@ref), [`gray_rot_kernel`](@ref)
 """
 function convolve_gray_rotation_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
-                                    ys::AA{T,2}, vsini::T, u1::T) where {T<:AF}
+                                    ys::AA{T,2}, vsini::T, u1::T; xs_exact=nothing) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
     if iszero(vsini)
         return CuArray(ys)
@@ -114,6 +117,7 @@ function convolve_gray_rotation_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     xs_h = xs isa CA ? Array(xs) : collect(T, xs)
     copyto!(cmem.ys_gpu, ys)
     copyto!(cmem.xs_gpu, xs_h)
+    copyto!(cmem.dx_gpu, _kernel_offsets(xs_h, xs_exact))
 
     # compute velocity offset from discrete center
     i0 = length(xs_h) ÷ 2 + 1
@@ -133,7 +137,7 @@ function convolve_gray_rotation_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     ts1 = (256,)
     bs1 = (cld(cmem.Nλ, ts1[1]),)
     @cuda threads=ts1 blocks=bs1 compute_padded_gray_kernel_1D!(kernel_row,
-                                                                cmem.xs_gpu, λ0,
+                                                                cmem.dx_gpu, λ0,
                                                                 vsini, u1,
                                                                 cmem.Nλ, cmem.pad_left)
 

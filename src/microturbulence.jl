@@ -206,14 +206,15 @@ function extract_valid!(out, src, pad_left, Nλ)
 end
 
 # Build a single kernel in DFT layout (scalar v_los, v_mic).
-function kernel_to_dft_layout_1d_gpu!(kbuf, xs, λ0, v_los_val, v_mic_val, σ_floor, i0, Nλ, L)
+function kernel_to_dft_layout_1d_gpu!(kbuf, xs, dx, λ0, v_los_val, v_mic_val, σ_floor, i0, Nλ, L)
     j = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     j > Nλ && return nothing
     T = eltype(kbuf)
     xj = @inbounds xs[j]
     σx = max(xj * (v_mic_val / T(c_ms)), σ_floor)
-    # avoid catastrophic cancellation: (xj - λ0) and (v_los/c)*λ0 are both small
-    Δx = (xj - λ0) - (v_los_val / T(c_ms)) * λ0
+    # dx[j] is the offset of sample j from the window center and (v_los/c)*λ0 the shift; both
+    # are small, where subtracting λc from xj would cancel
+    Δx = (@inbounds dx[j]) - (v_los_val / T(c_ms)) * λ0
     val = exp(-(Δx / σx)^2)
     d = j - i0
     idx = d >= 0 ? d + 1 : L + d + 1
@@ -225,7 +226,7 @@ end
 # Natm_v is the period for v_mic indexing: v_mic[(row-1) % Natm_v + 1].
 # When length(v_mic) == Nrows the modulo is a no-op; when Nrows = B*Natm
 # the Natm-length v_mic wraps across batched tiles without tiling allocation.
-function kernel_to_dft_layout_2d_gpu!(kbuf, xs, v_los, v_los_off, v_mic, σ_floor, i0, Nλ, L, Natm_v, BNatm)
+function kernel_to_dft_layout_2d_gpu!(kbuf, xs, dx, v_los, v_los_off, v_mic, σ_floor, i0, Nλ, L, Natm_v, BNatm)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     # guard on BNatm (the active batch height), not size(kbuf,1): the launch ceil-rounds to
@@ -236,7 +237,7 @@ function kernel_to_dft_layout_2d_gpu!(kbuf, xs, v_los, v_los_off, v_mic, σ_floo
     λ0 = @inbounds xs[i0]
     mic_idx = (row - Int32(1)) % Natm_v + Int32(1)
     σx = max(xj * (@inbounds v_mic[mic_idx]) / T(c_ms), σ_floor)
-    Δx = (xj - λ0) - (@inbounds v_los[v_los_off + row]) / T(c_ms) * λ0
+    Δx = (@inbounds dx[j]) - (@inbounds v_los[v_los_off + row]) / T(c_ms) * λ0
     val = exp(-(Δx / σx)^2)
     d = j - i0
     idx = d >= 0 ? d + 1 : L + d + 1
@@ -245,7 +246,7 @@ function kernel_to_dft_layout_2d_gpu!(kbuf, xs, v_los, v_los_off, v_mic, σ_floo
 end
 
 # Build per-row kernels in DFT layout (vector v_los, scalar v_mic).
-function kernel_to_dft_layout_2d_scalar_v_mic_gpu!(kbuf, xs, v_los, v_los_off, v_mic_val, σ_floor, i0, Nλ, L, BNatm)
+function kernel_to_dft_layout_2d_scalar_v_mic_gpu!(kbuf, xs, dx, v_los, v_los_off, v_mic_val, σ_floor, i0, Nλ, L, BNatm)
     j   = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     row = (blockIdx().y - 1) * blockDim().y + threadIdx().y
     # guard on BNatm (the active batch height), not size(kbuf,1): the launch ceil-rounds to
@@ -255,7 +256,7 @@ function kernel_to_dft_layout_2d_scalar_v_mic_gpu!(kbuf, xs, v_los, v_los_off, v
     xj = @inbounds xs[j]
     λ0 = @inbounds xs[i0]
     σx = max(xj * (v_mic_val / T(c_ms)), σ_floor)
-    Δx = (xj - λ0) - (@inbounds v_los[v_los_off + row]) / T(c_ms) * λ0
+    Δx = (@inbounds dx[j]) - (@inbounds v_los[v_los_off + row]) / T(c_ms) * λ0
     val = exp(-(Δx / σx)^2)
     d = j - i0
     idx = d >= 0 ? d + 1 : L + d + 1
@@ -279,7 +280,13 @@ end
 # NB: xs_gpu may be repurposed as scratch by macro kernels (e.g. hirano.jl stores
 # frequency-domain σ values there). xs_cpu is the authoritative wavelength grid
 # after initialization; never re-read xs_gpu to recover the grid.
-function _init_micro_params!(cmem, xs_h::AbstractVector{T}) where T<:AF
+#
+# `xs_exact` is the same grid at the precision it was generated at (Float64 from Korg); the
+# kernel offsets in dx_gpu are differenced from it (see _kernel_offsets). With the default
+# `xs_exact = xs_h` they are those of the rounded grid.
+function _init_micro_params!(cmem, xs_h::AbstractVector{T},
+                             xs_exact::AbstractVector{<:AF}=xs_h) where T<:AF
+    copyto!(cmem.dx_gpu, _kernel_offsets(xs_h, xs_exact))
     copyto!(cmem.xs_gpu, xs_h)
     cmem.xs_cpu = collect(T, xs_h)
     # from xs_cpu, not xs_h, so the cached value is by construction what
@@ -326,7 +333,7 @@ function _build_kernel_ft_1d!(cmem, xs_h::AbstractVector{T}, v_los_val::T, v_mic
     fill!(cmem.kr_1d, zero(T))
     ts = (256,); bs = (cld(Nλ, ts[1]),)
     @cuda threads=ts blocks=bs kernel_to_dft_layout_1d_gpu!(
-        cmem.kr_1d, cmem.xs_gpu, T(λ0), v_los_val, v_mic_val, σ_floor,
+        cmem.kr_1d, cmem.xs_gpu, cmem.dx_gpu, T(λ0), v_los_val, v_mic_val, σ_floor,
         Int32(i0), Int32(Nλ), Int32(L))
     normval = CUDA.sum(cmem.kr_1d)
     cmem.kr_1d ./= ifelse(iszero(normval), one(T), normval)
@@ -475,7 +482,7 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     ts = (32, 32)
     bs = (cld(cmem.Nλ, ts[1]), cld(Nrows, ts[2]))
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
-        cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
+        cmem.conv_gpu, cmem.xs_gpu, cmem.dx_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows))
     _normalize_rows!(cmem.conv_gpu, Nrows)
     _maybe_report_underflow!(cmem)
@@ -492,7 +499,7 @@ function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
     ts = (32, 32)
     bs = (cld(cmem.Nλ, ts[1]), cld(Nrows, ts[2]))
     @cuda threads=ts blocks=bs kernel_to_dft_layout_2d_gpu!(
-        cmem.conv_gpu, cmem.xs_gpu, v_los, Int32(0), v_mic, σ_floor,
+        cmem.conv_gpu, cmem.xs_gpu, cmem.dx_gpu, v_los, Int32(0), v_mic, σ_floor,
         Int32(i0), Int32(cmem.Nλ), Int32(cmem.L), Int32(Nrows), Int32(Nrows))
     _normalize_rows!(cmem.conv_gpu, Nrows)
     _maybe_report_underflow!(cmem)
@@ -633,7 +640,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     bs_k = (cld(bcmem.Nλ, ts2[1]), cld(BNatm, ts2[2]))
     v_los_off = Int32(tile_offset * Natm)
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_scalar_v_mic_gpu!(
-        bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
+        bcmem.conv_gpu, bcmem.xs_gpu, bcmem.dx_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(BNatm))
     _normalize_rows!(bcmem.conv_gpu, BNatm)
     # Restrict underflow count to the first BNatm rows; trailing rows of
@@ -683,7 +690,7 @@ function convolve_wavelength_axis_batched!(bcmem::BatchedMicroConvMem{T},
     bs_k = (cld(bcmem.Nλ, ts2[1]), cld(BNatm, ts2[2]))
     v_los_off = Int32(tile_offset * Natm)
     @cuda threads=ts2 blocks=bs_k kernel_to_dft_layout_2d_gpu!(
-        bcmem.conv_gpu, bcmem.xs_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
+        bcmem.conv_gpu, bcmem.xs_gpu, bcmem.dx_gpu, v_los_batch, v_los_off, v_mic, σ_floor,
         Int32(i0), Int32(bcmem.Nλ), Int32(bcmem.L), Int32(Natm), Int32(BNatm))
     _normalize_rows!(bcmem.conv_gpu, BNatm)
     # Restrict underflow count to the first BNatm rows; trailing rows of

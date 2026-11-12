@@ -62,13 +62,14 @@ function convolve_iso_rt_macro(xs::AA{T,1}, ys::AA{T,2}, ζ_rt::T) where T<:AF
     return _padded_convolve(collect(T, ys), kernel)
 end
 
-function compute_padded_iso_rt_kernel_1D!(kernel_row, xs, λc, ζ_rt, Nλ, pad_left)
+# `dx[j]` is the offset of sample j from the window center, `λc` the wavelength there
+function compute_padded_iso_rt_kernel_1D!(kernel_row, dx, λc, ζ_rt, Nλ, pad_left)
     # get thread index
     j = (blockIdx().x-1) * blockDim().x + threadIdx().x
 
     # evaluate the kernel
     if j <= Nλ
-        xj = c_ms * (xs[j] - λc) / λc
+        xj = c_ms * dx[j] / λc
         av = CUDA.abs(xj)
         z = av / ζ_rt
 
@@ -92,6 +93,8 @@ Arguments:
 - `xs::AbstractVector{<:Real}`: Wavelength grid (Å).
 - `ys::AbstractMatrix{<:Real}`: Input matrix with shape `(Natm, Nλ)`.
 - `ζ_rt::Real`: Isotropic macroturbulence velocity scale (m/s).
+- `xs_exact`: `xs` at the precision it was generated at; the kernel is placed from its
+  differences (see `_kernel_offsets`). Defaults to `xs` itself.
 
 Returns:
 - `out::CuArray{<:Real,2}`: Convolved matrix on the GPU, same shape as `ys`.
@@ -103,7 +106,7 @@ Notes:
 See also: [`convolve_iso_rt_macro`](@ref), [`gray_iso_rt_macro_kernel`](@ref)
 """
 function convolve_iso_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
-                                   ys::AA{T,2}, ζ_rt::T) where {T<:AF}
+                                   ys::AA{T,2}, ζ_rt::T; xs_exact=nothing) where {T<:AF}
     # short circuit before any copy so the caller's ys is returned unmodified
     if iszero(ζ_rt)
         return CuArray(ys)
@@ -113,6 +116,7 @@ function convolve_iso_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     xs_h = xs isa CA ? Array(xs) : collect(T, xs)
     copyto!(cmem.ys_gpu, ys)
     copyto!(cmem.xs_gpu, xs_h)
+    copyto!(cmem.dx_gpu, _kernel_offsets(xs_h, xs_exact))
 
     # compute velocity offset from discrete center
     i0 = length(xs_h) ÷ 2 + 1
@@ -132,7 +136,7 @@ function convolve_iso_rt_macro_gpu(cmem::MacroConvolutionMemory, xs::AA{T,1},
     ts1 = (256,)
     bs1 = (cld(cmem.Nλ, ts1[1]),)
     @cuda threads=ts1 blocks=bs1 compute_padded_iso_rt_kernel_1D!(kernel_row,
-                                                                  cmem.xs_gpu, λ0,
+                                                                  cmem.dx_gpu, λ0,
                                                                   ζ_rt, cmem.Nλ,
                                                                   cmem.pad_left)
 

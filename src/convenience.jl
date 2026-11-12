@@ -357,6 +357,10 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         cmem_cont = ConvolutionMemory(Nλ, Natm, Npad; T=G)
         cmem_mac = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
 
+        # Doppler-kernel offsets from the Float64 grid, not from its rounding to G
+        _init_micro_params!(cmem, λs_G, λs_korg)
+        _init_micro_params!(cmem_cont, λs_G, λs_korg)
+
         cfunc_flux_struct = calc_flux_quantities(αs, atm_gpu, gpu_mem, cmem, atm_gpu.v_mic)
         cfunc_dt_flux = cfunc_flux_struct.cfunc_dt
         cfunc_flux_struct_cont = calc_flux_quantities(αs_cont, atm_gpu, gpu_mem_cont, cmem_cont, atm_gpu.v_mic)
@@ -444,6 +448,10 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
         bcmem      = BatchedMicroConvMem(Nλ, Natm, B, Npad; T=G)
         bcmem_cont = BatchedMicroConvMem(Nλ, Natm, B, Npad; T=G)
 
+        # Doppler-kernel offsets from the Float64 grid, not from its rounding to G
+        _init_micro_params!(bcmem, λs_G, λs_korg)
+        _init_micro_params!(bcmem_cont, λs_G, λs_korg)
+
         # prime signal FFT caches: the forward FFT of the padded absorption signal
         # is tile-independent (only the Doppler filter changes per tile). The priming
         # call writes a throw-away Doppler filter and convolution product for Bcur=1,
@@ -499,12 +507,13 @@ function _calc_formation_temp_gpu(star::StellarProps, linelist; Δλ::T=0.01,
             μ_to_idx = Dict(μ => Int32(i) for (i, μ) in enumerate(unique_μ_sorted))
             v_losals_gpu = CuArray(unique_μ_sorted)
 
-            # evaluate all kernels in DFT layout with one 2D kernel launch
+            # evaluate all kernels in DFT layout with one 2D kernel launch, placed with the
+            # offsets of the Float64 grid that bcmem holds
             kbuf_mac = CUDA.zeros(G, N_unique, L_mac)
             ts_kc = (32, 32)
             bs_kc = (cld(Nλ, ts_kc[1]), cld(N_unique, ts_kc[2]))
             @cuda threads=ts_kc blocks=bs_kc compute_rt_macro_dft_layout_2d!(
-                kbuf_mac, gpu_mem.λs, v_losals_gpu, Int32(i0_mac), G(star.ζ),
+                kbuf_mac, bcmem.dx_gpu, λs_G[i0_mac], v_losals_gpu, Int32(i0_mac), G(star.ζ),
                 Int32(Nλ), Int32(L_mac))
             # TODO(zero-sum-guard): NaN if the kernel underflows; guard as in microturbulence.jl.
             kbuf_mac ./= sum(kbuf_mac, dims=2)

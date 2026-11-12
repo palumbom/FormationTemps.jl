@@ -118,6 +118,9 @@ radius `r_k = √(1-μ_k²)`, as a length-`Nλ` kernel centered at zero velocity
 (index `i0 = Nλ÷2+1`) on the wavelength grid `λs`. Convolving a ring's spectrum with this
 kernel performs the azimuthal average of Doppler-shifted spectra.
 
+`λs` supplies only the length and the velocity step, and need not be of the kernel's precision:
+pass the grid at the precision it was generated at. The kernel has the precision of `μ_k`.
+
 The kernel is the area-exact bin-integrated LOS velocity distribution, computed two ways
 depending on the rotation law:
 
@@ -136,13 +139,13 @@ low `vsini` where the kernel spans only a few pixels. See the "Integration Metho
 tolerances against `method=:disk`.
 """
 function _ring_doppler_kernel(μ_k::T, vsini::T, iₛ::T, α₂::T, α₄::T,
-                              λs::AA{T,1}, N_az::Int) where T<:AF
+                              λs::AA{<:AF,1}, N_az::Int) where T<:AF
     Nλ = length(λs)
     i0 = Nλ ÷ 2 + 1
     λ0 = λs[i0]
-    # velocity-grid spacing (m/s), uniform. c_ms is Float64, so narrow back to T: the
-    # helpers below take Δv::T, and without this a Float32 grid yields a Float64 Δv and no
-    # matching method. Identity when T === Float64.
+    # velocity-grid spacing (m/s), uniform, from two adjacent samples: `λs` must be the grid at
+    # the precision it was generated at, since the difference of two adjacent samples of a grid
+    # rounded to Float32 is not the spacing. Narrowed to T, which the helpers below take.
     Δv = T(c_ms * (λs[2] - λs[1]) / λ0)
     K = zeros(T, Nλ)
     r_k = sqrt(max(one(T) - μ_k^2, zero(T)))
@@ -382,11 +385,14 @@ function _calc_formation_temp_quadrature_gpu(star::StellarProps, linelist; Δλ:
     cmem_cont = ConvolutionMemory(Nλ, Natm, Npad; T=G)
     macmem = MacroConvolutionMemory(Nλ, Natm - 1, Npad; T=G)
 
+    # Doppler-kernel offsets from the Float64 grid, not from its rounding to G
+    _init_micro_params!(cmem, λs_G, λs_korg)
+    _init_micro_params!(cmem_cont, λs_G, λs_korg)
+
     # --- μ-quadrature ---
     μ_grid, μ_weights = Korg.RadiativeTransfer.generate_mu_grid(Nμ)
     iₛ = deg2rad(G(90) - G(star.istar))
     i0 = Nλ ÷ 2 + 1
-    λs_h = G.(collect(λs_korg))                     # host grid for ring-kernel build
     ζ = G(star.ζ)
 
     cfunc_dt_flux = CUDA.zeros(G, Natm - 1, Nλ)
@@ -412,14 +418,15 @@ function _calc_formation_temp_quadrature_gpu(star::StellarProps, linelist; Δλ:
         G_kc = calc_intensity_quantities_broadened!(αs_cont_b, atm_gpu, gpu_mem_cont, μ_k).cfunc_dt
 
         # μ-dependent macroturbulence; copy out of the shared macmem.out_gpu buffer
-        Gm  = copy(convolve_rt_macro_gpu(macmem, λs_G, G_k,  ζ, μ_k))
-        Gmc = copy(convolve_rt_macro_gpu(macmem, λs_G, G_kc, ζ, μ_k))
+        Gm  = copy(convolve_rt_macro_gpu(macmem, λs_G, G_k,  ζ, μ_k; xs_exact=λs_korg))
+        Gmc = copy(convolve_rt_macro_gpu(macmem, λs_G, G_kc, ζ, μ_k; xs_exact=λs_korg))
 
         if iszero(star.vsini)
             cfunc_dt_flux      .+= wq .* Gm
             cfunc_dt_flux_cont .+= wq .* Gmc
         else
-            K = _ring_doppler_kernel(μ_k, G(star.vsini), iₛ, G(star.α₂), G(star.α₄), λs_h, N_az)
+            # the Float64 grid: the kernel takes its velocity step from two adjacent samples
+            K = _ring_doppler_kernel(μ_k, G(star.vsini), iₛ, G(star.α₂), G(star.α₄), λs_korg, N_az)
             kft = _ring_kernel_ft_gpu(macmem, K, i0)
             # cached conv returns macmem.out_gpu; accumulate immediately before reuse
             cfunc_dt_flux      .+= wq .* convolve_rt_macro_gpu_cached(macmem, Gm,  kft)

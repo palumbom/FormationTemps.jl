@@ -38,6 +38,7 @@ mutable struct BatchedMicroConvMem{T<:AF} <: AbstractConvolutionMemory{T}
     # ── 1D R2C for real-space micro kernel (Tier 1: uniform v_mic) ──
     xs_gpu::CA{T,1}                        # wavelength grid (Nλ)
     xs_cpu::Vector{T}                      # CPU cache of wavelength grid, set once in _init_micro_params!
+    dx_gpu::CA{T,1}                        # kernel offsets xs[j] - xs[i0] (Nλ); set in _init_micro_params!
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
     plan_fwd_1d::CUDA.cuFFT.CuFFTPlan     # 1D R2C plan on kr_1d
@@ -85,7 +86,7 @@ function BatchedMicroConvMem(Nλ::Int, Natm::Int, B::Int, Npad::Int; T=Float64)
                                    zero(T), false, false,
                                    ys_gpu, signal_gpu, signal_ft_gpu, plan_fwd,
                                    kernel_ft_gpu, conv_ft_gpu, conv_gpu, plan_bwd,
-                                   xs_gpu, Vector{T}(undef, 0),
+                                   xs_gpu, Vector{T}(undef, 0), CUDA.zeros(T, Nλ),
                                    kr_1d, kernel_row_ft_1d, plan_fwd_1d, false,
                                    plan_fwd_kernel)
 end

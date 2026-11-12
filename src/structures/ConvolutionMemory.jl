@@ -47,6 +47,7 @@ mutable struct ConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     # 1D R2C FFT for real-space micro kernel (Tier 1: uniform v_mic)
     xs_gpu::CA{T,1}                        # wavelength grid (Nλ); may be used as scratch by macro kernels
     xs_cpu::Vector{T}                      # CPU cache of wavelength grid, set once in _init_micro_params!
+    dx_gpu::CA{T,1}                        # kernel offsets xs[j] - xs[i0] (Nλ); set in _init_micro_params!
     kr_1d::CA{T,1}                         # real kernel buffer (L)
     kernel_row_ft_1d::CuVector{Complex{T}} # FFT of 1D base kernel (nfreq)
     plan_fwd_1d::CUDA.cuFFT.CuFFTPlan     # 1D R2C plan on kr_1d
@@ -93,6 +94,7 @@ mutable struct MacroConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
     # ── macro-specific fields ──
     xs_gpu::CA{T,1}                        # wavelength grid for kernel evaluation (Nλ); hirano.jl reuses as scratch
     xs_cpu::Vector{T}                      # CPU cache of wavelength grid, set once in _init_micro_params!
+    dx_gpu::CA{T,1}                        # kernel offsets xs[j] - xs[i0] (Nλ); rewritten, like xs_gpu, by every macro convolution
     padded_kernel_gpu::CA{T,1}             # 1D padded kernel work buffer (L)
     shift_kernel_gpu::CA{T,1}              # 1D shifted kernel work buffer (L)
     out_gpu::CA{T,2}                       # output extraction buffer (Natm, Nλ)
@@ -110,6 +112,25 @@ mutable struct MacroConvolutionMemory{T<:AF} <: AbstractConvolutionMemory{T}
 end
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+
+# Offsets dx[j] = xs[j] - xs[i0] of the samples of a convolution kernel from the window center
+# (i0 = Nλ÷2+1), at the precision T of `xs_h`. `xs_exact` is the same grid at the precision it
+# was generated at (Float64 from Korg), and the offsets are differenced from it. The signal a
+# kernel is convolved with is sampled on the exact grid whatever T is, so the kernel has to be
+# placed on it too: a Float32 grid rounds every wavelength by up to half a ULP, which on a
+# fine grid is a sizable fraction of a pixel, and a kernel placed from differences of the
+# rounded grid is displaced by the rounding of the samples under it. With `xs_exact = xs_h`,
+# or `nothing`, the offsets are those of the rounded grid. The subtraction is elementwise on
+# collected values, the operation a device kernel would perform on `xs_h`, so a Float64 grid
+# gives the same bits either way.
+function _kernel_offsets(xs_h::AbstractVector{T}, xs_exact::AbstractVector{<:AF}) where T<:AF
+    xs_e = collect(xs_exact)
+    @assert length(xs_e) == length(xs_h) "xs_exact must be the grid of xs_h"
+    @assert all(isapprox.(xs_h, xs_e; rtol=4 * eps(T))) "xs_exact must be the grid of xs_h"
+    return T.(xs_e .- xs_e[length(xs_e) ÷ 2 + 1])
+end
+
+_kernel_offsets(xs_h::AbstractVector{<:AF}, ::Nothing) = _kernel_offsets(xs_h, xs_h)
 
 function is_fft_friendly_len(L::Int)
     n = L
@@ -315,7 +336,7 @@ function ConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                                 ys_gpu, signal_gpu,
                                 kernel_ft_gpu, signal_ft_gpu, conv_ft_gpu, conv_gpu,
                                 plan_fwd, plan_bwd,
-                                xs_gpu, Vector{T}(undef, 0),
+                                xs_gpu, Vector{T}(undef, 0), CUDA.zeros(T, Nλ),
                                 kr_1d, kernel_row_ft_1d, plan_fwd_1d, false, 0)
 end
 
@@ -360,7 +381,7 @@ function MacroConvolutionMemory(Nλ::Int, Natm::Int, Npad::Int; T=Float64)
                                      ys_gpu, signal_gpu,
                                      kernel_ft_gpu, signal_ft_gpu, conv_ft_gpu, conv_gpu,
                                      plan_fwd, plan_bwd,
-                                     xs_gpu, Vector{T}(undef, 0),
+                                     xs_gpu, Vector{T}(undef, 0), CUDA.zeros(T, Nλ),
                                      padded_kernel_gpu, shift_kernel_gpu, out_gpu,
                                      kr_1d, kernel_row_ft_1d, plan_fwd_1d, false,
                                      kc_1d, plan_bwd_1d, 0)

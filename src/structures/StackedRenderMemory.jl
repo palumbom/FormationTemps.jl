@@ -38,12 +38,13 @@ mutable struct StackedRenderMemory{T<:AF, V<:CA{T,1}, M<:CA{T,2}, MI<:CA{T,2},
 
     # ── per-component wavelength grids ──
     # cmems[b] is the ConvolutionMemory of the serial render of component b. It is read once,
-    # on the first render, to fill xs and σ_floor.
+    # on the first render, to fill xs, dx and σ_floor.
     const cmems::Vector{ConvolutionMemory{T}}
     const λs::V                     # (B*Nλ) grids of the contribution function
     const xs::V                     # (B*Nλ) grids of the Doppler kernels; valid once grids_latched
+    const dx::V                     # (B*Nλ) kernel offsets of each grid from its center; valid once grids_latched
     const σ_floor::V                # (B) Gaussian width floor of each grid; valid once grids_latched
-    grids_latched::Bool             # xs and σ_floor hold the values of cmems
+    grids_latched::Bool             # xs, dx and σ_floor hold the values of cmems
 
     # ── per-layer inputs (B*Natm) ──
     const v_los::V
@@ -96,8 +97,8 @@ larger matrix taken with `view`.
 
 The wavelength grid of every `mem` and the temperatures and Bézier geometry of every
 atmosphere are copied here, once; later changes to `mem.λs`, `zs_gpu` or `Ts_gpu` are not
-seen. Nothing is rendered, and a `cmem` need not have been used yet: its Doppler-kernel grid
-and `σ_floor` are read on the first render.
+seen. Nothing is rendered, and a `cmem` need not have been used yet: its Doppler-kernel grid,
+kernel offsets and `σ_floor` are read on the first render.
 """
 function StackedRenderMemory(mems::AbstractVector{<:GPUMemory{T}},
                              cmems::AbstractVector{<:ConvolutionMemory{T}},
@@ -121,13 +122,14 @@ function StackedRenderMemory(mems::AbstractVector{<:GPUMemory{T}},
     nfreq = fld(L, 2) + 1
     BNatm = B * Natm
 
-    # the grid of the contribution function is fixed by each mem; the Doppler-kernel grid and
-    # its σ_floor exist in a cmem only after its first use
+    # the grid of the contribution function is fixed by each mem; the Doppler-kernel grid, its
+    # kernel offsets and its σ_floor exist in a cmem only after its first use
     λs = CuVector{T}(undef, B * Nλ)
     for (b, mem) in enumerate(mems)
         copyto!(λs, (b - 1) * Nλ + 1, mem.λs, 1, Nλ)
     end
     xs = CUDA.zeros(T, B * Nλ)
+    dx = CUDA.zeros(T, B * Nλ)
     σ_floor = CUDA.zeros(T, B)
 
     v_los = CUDA.zeros(T, BNatm)
@@ -160,7 +162,7 @@ function StackedRenderMemory(mems::AbstractVector{<:GPUMemory{T}},
                                typeof(plan_fwd), typeof(plan_bwd)}(
         B, Natm, Nλ, L, pad_left, μ, iseven(Natm) || iseven(L),
         any(mem -> mem.use_anchored, mems),
-        collect(ConvolutionMemory{T}, cmems), λs, xs, σ_floor, false,
+        collect(ConvolutionMemory{T}, cmems), λs, xs, dx, σ_floor, false,
         v_los, v_mic, Ts, tau_ds, tau_alphaC,
         signal_ft, falses(B), kernel_ft, conv_ft, conv_gpu, plan_fwd, plan_bwd,
         τs, cfunc, out, 0)
