@@ -7,11 +7,10 @@
 # Case C: bit-equivalence on moderate v_los (the ifelse branch is not taken)
 # GPU only: a nonzero row sum whose reciprocal overflows still normalizes to unit sum
 #
-# On the CPU the guard replaces a zero-sum kernel divisor with 1, so the affected
-# row's convolved αs becomes exactly zero instead of NaN. On the GPU a row whose
-# kernel leaves the tap span is rendered by direct convolution with replicate
-# padding instead: a kernel entirely past the window reads the edge pixel, so
-# a redshifted row equals its first opacity.
+# The guard replaces a zero-sum kernel divisor with 1, which keeps the FFT finite.
+# Such a row has left the tap span, so on the CPU and the GPU alike it is then
+# rendered by direct convolution with replicate padding: a kernel entirely past
+# the window reads the edge pixel, so a redshifted row equals its first opacity.
 
 let
     using FormationTemps; FT = FormationTemps
@@ -42,8 +41,7 @@ let
             FT.convolve_wavelength_axis(xs, αs, v_los_A, v_mic_A)
         end
         @test all(isfinite, out_A_cpu)
-        @test all(out_A_cpu[3, :] .== 0.0)
-        @test count(iszero, out_A_cpu) == Nλ  # only row 3 is fully zero
+        @test all(out_A_cpu[3, :] .== αs[3, 1])
         # Surviving rows should be non-degenerate (the smooth input convolved
         # by a normalized Gaussian stays nonzero).
         for r in (1, 2, 4, 5)
@@ -55,7 +53,7 @@ let
             FT.convolve_wavelength_axis(xs, αs, v_extreme, 1200.0)
         end
         @test all(isfinite, out_B_cpu)
-        @test all(out_B_cpu .== 0.0)
+        @test all(out_B_cpu .== αs[:, 1:1])
 
         # ── Case C: moderate v_los, no warning, output is sane ───────────────
         # The guard's `ifelse(iszero(s), 1, s)` branch must NOT fire when

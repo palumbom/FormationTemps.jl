@@ -37,11 +37,11 @@ and a Doppler shift, using FFT convolution. The kernel width is wavelength-depen
 (constant in velocity units): σ(x) = x·v_mic/c.
 
 Scalar `v_los` and `v_mic` apply the same kernel to every row; vectors specify per-row
-values. The GPU implementation (`convolve_wavelength_axis_gpu`) builds the same
-kernel on device, so CPU and GPU agree to floating-point precision while the kernel lies inside
-the window's taps. Here the kernel is sampled on the window's taps only and renormalized, so a
-kernel that reaches past them is truncated; the GPU renders such a row by direct convolution
-over the kernel's whole support instead.
+values. The kernel is sampled on the window's taps and renormalized. A row whose kernel reaches
+past them, by `_DOPPLER_DOMAIN_SIGMAS` kernel widths of its center, is recomputed by direct
+convolution over the kernel's whole support with each source index clamped to the window
+(replicate padding). The GPU implementation (`convolve_wavelength_axis_gpu`) does the same with
+the same domain test and taps, so CPU and GPU agree to floating-point precision for every row.
 
 Padding is sized from the `v_los`/`v_mic` passed, so a large Doppler shift cannot wrap the
 padded linear convolution.
@@ -63,11 +63,14 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::T, v_mic::T) 
     kernel = g.(xs, λc)
     s = sum(kernel)
     kernel ./= ifelse(iszero(s), one(T), s)
-    iszero(s) && @warn "Doppler kernel underflowed (zero-sum); convolved αs set to zero. v_los probably exceeds wavelength window." maxlog=3
+    iszero(s) && @warn "Doppler kernel underflowed (zero-sum): its center lies far outside the wavelength window, and every row is rendered by direct convolution with the window's edge opacity. Check that v_los is in m/s." maxlog=3
 
     # kernel reaches |v_los| (shift) + ~3·v_mic (width); pad for both
     Npad = conv_npad_for_velocity(λ0, Δλ, conv_kernel_vmax(v_los, zero(T), v_mic))
-    return _padded_convolve(collect(T, ys), kernel; Npad=Npad)
+    out = _padded_convolve(collect(T, ys), kernel; Npad=Npad)
+    _doppler_in_domain_cpu(xs, v_los, v_mic, σ_floor) ||
+        _doppler_direct_rows_cpu!(out, ys, axes(ys, 1), xs, σ_floor, v_los, v_mic)
+    return out
 end
 
 function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::AA{T,1}, v_mic::AA{T,1}) where {T<:AF}
@@ -113,8 +116,10 @@ function convolve_wavelength_axis(xs::AA{T,1}, ys::AA{T,2}, v_los::AA{T,1}, v_mi
         @inbounds for j in 1:Nλ
             ys_out[t, j] = conv[pad_left + j]
         end
+        _doppler_in_domain_cpu(xs, v_los[t], v_mic[t], σ_floor) ||
+            _doppler_direct_rows_cpu!(ys_out, ys, t:t, xs, σ_floor, v_los[t], v_mic[t])
     end
-    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $(size(ys, 1)) row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $(size(ys, 1)) row(s): their kernel centers lie far outside the wavelength window, and those rows are rendered by direct convolution with the window's edge opacity. Check that v_los is in m/s." maxlog=3
     return ys_out
 end
 
@@ -127,7 +132,8 @@ In-place microturbulent broadening using pre-allocated [`CPUTileWorkspace`](@ref
 buffers.
 
 Scalar `v_los` and `v_mic` build one kernel and apply it to all atmosphere layers
-(the common case in disk integration). Vector arguments build per-row kernels.
+(the common case in disk integration). Vector arguments build per-row kernels. Rows outside the
+Doppler domain are recomputed by direct convolution, as in [`convolve_wavelength_axis`](@ref).
 """
 function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
                                   v_los::T, v_mic::T,
@@ -146,11 +152,13 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
     end
     s = sum(kvec)
     kvec ./= ifelse(iszero(s), one(T), s)
-    iszero(s) && @warn "Doppler kernel underflowed (zero-sum); convolved αs set to zero for all $Natm layer(s). v_los probably exceeds wavelength window." maxlog=3
+    iszero(s) && @warn "Doppler kernel underflowed (zero-sum): its center lies far outside the wavelength window, and all $Natm layer(s) are rendered by direct convolution with the window's edge opacity. Check that v_los is in m/s." maxlog=3
 
     _kernel_to_dft_layout!(ws.kernel_real, kvec, i0)
     mul!(ws.kernel_ft, ws.fft_plan, ws.kernel_real)
     _apply_fft_kernel!(out, ys, ws.kernel_ft, ws, Natm)
+    _doppler_in_domain_cpu(xs, v_los, v_mic, σ_floor) ||
+        _doppler_direct_rows_cpu!(out, ys, 1:Natm, xs, σ_floor, v_los, v_mic)
     return nothing
 end
 
@@ -185,8 +193,10 @@ function _convolve_micro_inplace!(out::AA{T,2}, xs::AA{T,1}, ys::AA{T,2},
         @inbounds for j in 1:Nλ
             out[t, j] = ws.result_buf[ws.pad_left + j]
         end
+        _doppler_in_domain_cpu(xs, v_los[t], v_mic[t], σ_floor) ||
+            _doppler_direct_rows_cpu!(out, ys, t:t, xs, σ_floor, v_los[t], v_mic[t])
     end
-    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $Natm row(s); those rows set to zero. v_los probably exceeds wavelength window." maxlog=3
+    n_underflow > 0 && @warn "Doppler kernel underflowed in $n_underflow of $Natm row(s): their kernel centers lie far outside the wavelength window, and those rows are rendered by direct convolution with the window's edge opacity. Check that v_los is in m/s." maxlog=3
     return nothing
 end
 
@@ -514,7 +524,8 @@ end
 # underflows the row is zero. After the inverse FFT, one launch recomputes every row whose kernel
 # reaches past the span by direct convolution: the same Gaussian over its whole support, each
 # source index clamped to the window. Rows inside the domain are not written and keep the bits of
-# the FFT convolution.
+# the FFT convolution. The CPU paths apply the same test and taps on the host
+# (_doppler_direct_rows_cpu!).
 
 # Kernel widths that bound the domain: a row keeps its FFT convolution when its kernel center lies
 # at least this many σx inside both ends of the tap span, where the kernel mass beyond the span,
@@ -545,13 +556,19 @@ const _DOPPLER_DIRECT_MAX_REACH = 1 << 24
 # velocity, which the fallback then renders as NaN.
 @inline function _doppler_row_in_domain(xs, dx, goff::Int32, i0::Int32, Nλ::Int32,
                                         v::T, vm::T, σ_floor::T) where T<:AF
-    @inbounds begin
-        s = v / T(c_ms) * xs[goff + i0]
-        k = T(_DOPPLER_DOMAIN_SIGMAS)
-        σ_lo = max(xs[goff + Int32(1)] * vm / T(c_ms), σ_floor)
-        σ_hi = max(xs[goff + Nλ] * vm / T(c_ms), σ_floor)
-        return (s - k * σ_lo >= dx[goff + Int32(1)]) & (s + k * σ_hi <= dx[goff + Nλ])
-    end
+    @inbounds return _doppler_in_domain(xs[goff + i0], xs[goff + Int32(1)], xs[goff + Nλ],
+                                        dx[goff + Int32(1)], dx[goff + Nλ], v, vm, σ_floor)
+end
+
+# The test itself, from the window's center, first and last wavelengths and the offsets of the
+# first and last from the center. The CPU paths call it too, so both sides pick the same rows.
+@inline function _doppler_in_domain(λ0::T, x_first::T, x_last::T, dx_first::T, dx_last::T,
+                                    v::T, vm::T, σ_floor::T) where T<:AF
+    s = v / T(c_ms) * λ0
+    k = T(_DOPPLER_DOMAIN_SIGMAS)
+    σ_lo = max(x_first * vm / T(c_ms), σ_floor)
+    σ_hi = max(x_last * vm / T(c_ms), σ_floor)
+    return (s - k * σ_lo >= dx_first) & (s + k * σ_hi <= dx_last)
 end
 
 # Unnormalized tap of a row's Doppler kernel at offset d from the window center i0, for shift s:
@@ -761,6 +778,113 @@ function _doppler_direct_rows!(out::CA{T,2}, out_off::Int, src::CA{T,2}, src_per
     return nothing
 end
 
+# ── CPU direct-convolution fallback ──────────────────────────────────────────
+
+# Whether a row on the host grid xs keeps its FFT convolution: the device test, with the offsets
+# of the first and last wavelengths differenced as _kernel_offsets does.
+@inline function _doppler_in_domain_cpu(xs::AA{T,1}, v::T, vm::T, σ_floor::T) where T<:AF
+    Nλ = length(xs)
+    i0 = Nλ ÷ 2 + 1
+    return _doppler_in_domain(xs[i0], xs[1], xs[Nλ], xs[1] - xs[i0], xs[Nλ] - xs[i0],
+                              v, vm, σ_floor)
+end
+
+# Host counterpart of doppler_direct_kernel!: overwrite rows `rows` of `out`, which share one
+# Doppler kernel (shift v, width vm), with the direct convolution of the same rows of `ys`. The
+# support, the taps (_doppler_tap) and the clamping are those of the device, so a row agrees with
+# the GPU to rounding. The sums are grouped differently: for each output the taps that read the
+# first or the last pixel enter through prefix and suffix masses, and the taps in between through
+# one dot product.
+function _doppler_direct_rows_cpu!(out::AA{T,2}, ys::AA{T,2}, rows, xs::AA{T,1}, σ_floor::T,
+                                   v::T, vm::T) where T<:AF
+    Nλ = length(xs)
+    @assert Nλ >= 2 "the Doppler fallback needs at least two wavelengths"
+    N32 = Int32(Nλ)
+    i0 = N32 ÷ Int32(2) + Int32(1)
+    dx = _kernel_offsets(xs, nothing)
+    λ0 = xs[i0]
+    s = v / T(c_ms) * λ0
+    Δλ = (dx[Nλ] - dx[1]) / T(Nλ - 1)
+    σc = max((λ0 + abs(s)) * vm / T(c_ms), σ_floor)
+    R = (sqrt(-log(eps(T))) + one(T)) * σc
+    if !(isfinite(s) && isfinite(R))
+        for t in rows
+            out[t, :] .= T(NaN)
+        end
+        return nothing
+    end
+    dlo_f = (s - R) / Δλ
+    dhi_f = (s + R) / Δλ
+    if dlo_f >= T(Nλ)
+        for t in rows
+            out[t, :] .= ys[t, 1]
+        end
+        return nothing
+    elseif dhi_f <= -T(Nλ)
+        for t in rows
+            out[t, :] .= ys[t, Nλ]
+        end
+        return nothing
+    end
+    cap = T(Nλ) + T(_DOPPLER_DIRECT_MAX_REACH)
+    dlo = unsafe_trunc(Int32, floor(max(dlo_f, -cap)))
+    dhi = unsafe_trunc(Int32, ceil(min(dhi_f, cap)))
+
+    # mass of the offsets that read the first pixel (d ≥ Nλ) or the last (d ≤ -Nλ) for every output
+    m_hi, c_hi = zero(T), zero(T)
+    for d in max(dlo, N32):dhi
+        m_hi, c_hi = _kahan_add(m_hi, c_hi, _doppler_tap(xs, dx, Int32(0), i0, N32, d, s, vm, σ_floor, Δλ))
+    end
+    m_lo, c_lo = zero(T), zero(T)
+    for d in dlo:min(dhi, -N32)
+        m_lo, c_lo = _kahan_add(m_lo, c_lo, _doppler_tap(xs, dx, Int32(0), i0, N32, d, s, vm, σ_floor, Δλ))
+    end
+
+    # the offsets in between, d = a + q - 1 for q ∈ 1:nk, with pre[q + 1] = Σ k[1:q] and
+    # suf[q] = Σ k[q:nk]
+    a = Int(max(dlo, Int32(1) - N32))
+    nk = Int(min(dhi, N32 - Int32(1))) - a + 1
+    k = Vector{T}(undef, nk)
+    for q in 1:nk
+        k[q] = _doppler_tap(xs, dx, Int32(0), i0, N32, Int32(a + q - 1), s, vm, σ_floor, Δλ)
+    end
+    pre = Vector{T}(undef, nk + 1)
+    suf = Vector{T}(undef, nk + 1)
+    pre[1] = zero(T)
+    c = zero(T)
+    for q in 1:nk
+        pre[q + 1], c = _kahan_add(pre[q], c, k[q])
+    end
+    suf[nk + 1] = zero(T)
+    c = zero(T)
+    for q in nk:-1:1
+        suf[q], c = _kahan_add(suf[q + 1], c, k[q])
+    end
+    S = (m_lo + pre[nk + 1]) + m_hi
+
+    row = Vector{T}(undef, Nλ)
+    for t in rows
+        copyto!(row, view(ys, t, :))
+        y_first = row[1]
+        y_last = row[Nλ]
+        for i in 1:Nλ
+            # output i reads pixel i - d: the first for d ≥ i - 1 (q ≥ q_hi), the last for
+            # d ≤ i - Nλ (q ≤ q_lo), and pixel off - q in between
+            q_hi = i - a
+            q_lo = i - Nλ - a + 1
+            off = i - a + 1
+            acc = zero(T)
+            @inbounds @simd for q in max(q_lo + 1, 1):min(q_hi - 1, nk)
+                acc = muladd(k[q], row[off - q], acc)
+            end
+            mass_first = m_hi + suf[clamp(q_hi, 1, nk + 1)]
+            mass_last = m_lo + pre[clamp(q_lo, 0, nk) + 1]
+            out[t, i] = ((acc + y_last * mass_last) + y_first * mass_first) / S
+        end
+    end
+    return nothing
+end
+
 # build per-row kernels into conv_gpu and normalize them
 function _build_per_row_kernels!(cmem, xs_h::AbstractVector{T},
                                   v_los::CA{T,1}, v_mic::T) where T<:AF
@@ -822,8 +946,8 @@ build per-row kernels via batch R2C FFT.
 A row whose kernel reaches past the tap span (the `Nλ` taps of the window), by more than
 `_DOPPLER_DOMAIN_SIGMAS` kernel widths of its center, is recomputed after the FFT by direct
 convolution with each source index clamped to the window (replicate padding); every other row is
-the FFT convolution. The CPU [`convolve_wavelength_axis`](@ref) truncates such a kernel at the
-window instead, so the two agree only inside that domain.
+the FFT convolution. The CPU [`convolve_wavelength_axis`](@ref) does the same, so the two agree to
+floating-point precision for every row.
 
 The fallback reads `ys` on every call, also when `cmem.signal_cached` skips the forward FFT, so
 `ys` must always be the opacities whose padded-signal FFT `cmem` holds. A host `ys` is copied to
