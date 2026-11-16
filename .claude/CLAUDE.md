@@ -243,7 +243,11 @@ function of the row's inputs and `_DOPPLER_DIRECT_THREADS` alone (the kernel mas
 a fixed tree over that many lanes, and the numerator taps go into four running sums by their
 position in a tile), so a row has the same bits alone, in a batch or in a stack. Its tap sums are
 compensated except at Float64 (`_fallback_mac`). The
-launch allocates nothing and reads nothing back, so the render stays capturable.
+launch allocates nothing and reads nothing back, so the render stays capturable. One thread per
+block evaluates the domain test and the block reads its answer from shared memory. Evaluated by
+every thread, the test's Float64 divisions dominate the launch in the batched `:disk` path, where
+almost every block is inside the domain and returns at once. No test catches moving it back; it
+shows only in the device time of a Float64 batched convolution.
 
 The CPU paths (`convolve_wavelength_axis`, `_convolve_micro_inplace!`, every overload) end each
 row, or each call for a scalar kernel, with the same fallback on the host

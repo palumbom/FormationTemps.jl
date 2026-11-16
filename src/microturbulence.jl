@@ -648,15 +648,25 @@ function doppler_direct_kernel!(out::CDM{T}, out_off::Int32, src::CDM{T}, src_pe
     row = Int32(blockIdx().x)
     t = Int32(threadIdx().x)
     nt = Int32(blockDim().x)
-    i = (Int32(blockIdx().y) - Int32(1)) * nt + t
     g = (row - Int32(1)) ÷ grid_rows
     goff = g * Nλ
+    # The domain test is the same for every thread of the block, so one thread evaluates it and
+    # the block reads its answer: its divisions are paid once per block, which at Float64 is what
+    # a launch costs when every row is inside the domain. The whole block returns together, so
+    # no thread is left waiting at a later barrier.
+    in_dom = CuStaticSharedArray(Int32, 1)
+    if t == Int32(1)
+        @inbounds in_dom[1] = _doppler_row_in_domain(
+            xs, dx, goff, i0, Nλ, _row_value(v_los, v_los_off, row),
+            _row_value_mod(v_mic, v_mic_period, row), _row_value(σ_floor, Int32(0), g + Int32(1)))
+    end
+    sync_threads()
+    @inbounds in_dom[1] != Int32(0) && return nothing
+
+    i = (Int32(blockIdx().y) - Int32(1)) * nt + t
     v = _row_value(v_los, v_los_off, row)
     vm = _row_value_mod(v_mic, v_mic_period, row)
     σf = _row_value(σ_floor, Int32(0), g + Int32(1))
-    # the same for every thread of the block, so no thread is left waiting at a barrier
-    _doppler_row_in_domain(xs, dx, goff, i0, Nλ, v, vm, σf) && return nothing
-
     r_src = (row - Int32(1)) % src_period + Int32(1)
     active = i <= Nλ
     λ0 = @inbounds xs[goff + i0]
