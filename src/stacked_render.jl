@@ -14,22 +14,34 @@ component_rows(smem::StackedRenderMemory, b::Integer) =
     ((b - 1) * smem.Natm + 1):(b * smem.Natm)
 
 """
-    set_signal_ft!(smem, b, signal_ft)
+    set_signal_ft!(smem, b, signal_ft, αs)
 
-Copy the padded-signal FFT of component `b` into `smem`. `signal_ft` is `(Natm, nfreq)`: what
-`cmem.signal_ft_gpu` holds after a serial render of that component's opacities on its own
-`ConvolutionMemory`, the `cmems[b]` that `smem` was built from. Call it again whenever the
-component's opacities change.
+Copy the padded-signal FFT of component `b` and its opacities into `smem`. `signal_ft` is
+`(Natm, nfreq)`: what `cmem.signal_ft_gpu` holds after a serial render of that component's
+opacities `αs` (`Natm × Nλ`) on its own `ConvolutionMemory`, the `cmems[b]` that `smem` was built
+from. Call it again whenever the component's opacities change.
+
+The opacities are what the direct-convolution fallback reads for a row whose Doppler kernel
+leaves the tap span, as the serial render reads the opacities it is passed; with them a stacked
+component is the same bits as its serial render in every row.
 """
-function set_signal_ft!(smem::StackedRenderMemory{T}, b::Integer,
-                        signal_ft::CA{Complex{T},2}) where T<:AF
+function set_signal_ft!(smem::StackedRenderMemory{T}, b::Integer, signal_ft::CA{Complex{T},2},
+                        αs::AA{T,2}) where T<:AF
     @assert 1 <= b <= smem.B "component $b is outside 1:$(smem.B)"
     nfreq = size(smem.signal_ft, 2)
     @assert size(signal_ft) == (smem.Natm, nfreq) "signal_ft must be (Natm, nfreq)"
-    view(smem.signal_ft, component_rows(smem, b), :) .= signal_ft
+    @assert size(αs) == (smem.Natm, smem.Nλ) "αs must be (Natm, Nλ)"
+    rows = component_rows(smem, b)
+    view(smem.signal_ft, rows, :) .= signal_ft
+    view(smem.αs, rows, :) .= (αs isa CuArray ? αs : CuArray(αs))
     smem.signal_set[b] = true
     return nothing
 end
+
+set_signal_ft!(::StackedRenderMemory, ::Integer, ::CA{<:Complex,2}) =
+    throw(ArgumentError("set_signal_ft! takes the component's opacities as well: " *
+                        "set_signal_ft!(smem, b, signal_ft, αs). The stacked render reads them " *
+                        "for rows whose Doppler kernel leaves the tap span."))
 
 # Copy the Doppler-kernel grid, the kernel offsets and the Gaussian width floor of every
 # component's ConvolutionMemory into smem.xs, smem.dx and smem.σ_floor. A ConvolutionMemory
@@ -162,7 +174,7 @@ Column `b` of `smem.intensity` is bit-identical to the serial render of componen
 Every one of those `ConvolutionMemory`s must have rendered at least once before the first
 call, which is what sets its wavelength grid, kernel offsets and `σ_floor`; the first call
 copies them into `smem`, and no later call reads a `ConvolutionMemory`. Every component's
-signal FFT must have been handed over with [`set_signal_ft!`](@ref).
+signal FFT and opacities must have been handed over with [`set_signal_ft!`](@ref).
 
 Afterwards the valid columns of `smem.conv_gpu` hold the convolved opacities and `smem.τs` and
 `smem.cfunc` the optical depths and contribution functions, in the stacked row layout.
@@ -195,10 +207,13 @@ function render_stacked!(smem::StackedRenderMemory{T}) where T<:AF
     _normalize_rows!(smem.conv_gpu, BNatm)
     _maybe_report_underflow!(smem)
 
-    # convolve every row with its kernel
+    # convolve every row with its kernel, then recompute the rows whose kernel leaves the tap
+    # span from the component's opacities and grid, as _irfft_and_extract! does serially
     mul!(smem.kernel_ft, smem.plan_fwd, smem.conv_gpu)
     smem.conv_ft .= smem.signal_ft .* smem.kernel_ft
     mul!(smem.conv_gpu, smem.plan_bwd, smem.conv_ft)
+    _doppler_direct_rows!(smem.conv_gpu, smem.pad_left, smem.αs, BNatm, smem.xs, smem.dx, Natm,
+                          smem.σ_floor, smem.v_los, 0, smem.v_mic, BNatm, Nλ, BNatm)
     αs_conv = @view smem.conv_gpu[:, (smem.pad_left + 1):(smem.pad_left + Nλ)]
 
     # compute taus: one thread per (component, wavelength), each a serial loop over the layers,

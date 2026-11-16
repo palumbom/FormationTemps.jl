@@ -5,10 +5,13 @@
 # Case A: per-row underflow (vector v_los with one extreme entry)
 # Case B: scalar-v_los whole-column wipe-out
 # Case C: bit-equivalence on moderate v_los (the ifelse branch is not taken)
+# GPU only: a nonzero row sum whose reciprocal overflows still normalizes to unit sum
 #
-# The guard replaces a zero-sum kernel divisor with 1, so the affected row's
-# convolved αs becomes exactly zero (the discrete-convolution limit "shifted
-# out of window contributes nothing") instead of NaN.
+# On the CPU the guard replaces a zero-sum kernel divisor with 1, so the affected
+# row's convolved αs becomes exactly zero instead of NaN. On the GPU a row whose
+# kernel leaves the tap span is rendered by direct convolution with replicate
+# padding instead: a kernel entirely past the window reads the edge pixel, so
+# a redshifted row equals its first opacity.
 
 let
     using FormationTemps; FT = FormationTemps
@@ -86,7 +89,7 @@ let
             end
             out_A_gpu_h = Array(out_A_gpu)
             @test all(isfinite, out_A_gpu_h)
-            @test all(out_A_gpu_h[3, :] .== 0.0)
+            @test all(out_A_gpu_h[3, :] .== αs[3, 1])
 
             # CPU/GPU agreement on the surviving rows
             for r in (1, 2, 4, 5)
@@ -103,7 +106,7 @@ let
             end
             out_B_gpu_h = Array(out_B_gpu)
             @test all(isfinite, out_B_gpu_h)
-            @test all(out_B_gpu_h .== 0.0)
+            @test all(out_B_gpu_h .== αs[:, 1:1])
 
             # Case C on GPU: moderate v_los on uniform αs, should equal 1
             cmem_C = FT.ConvolutionMemory(Nλ, Natm, Npad)
@@ -126,7 +129,7 @@ let
             end
             out_D_gpu_h = Array(out_D_gpu)
             @test all(isfinite, out_D_gpu_h)
-            @test all(out_D_gpu_h[3, :] .== 0.0)
+            @test all(out_D_gpu_h[3, :] .== αs[3, 1])
             # uniform v_mic vector should match the scalar v_mic path bit-tight
             @test maximum(abs.(out_D_gpu_h .- out_A_gpu_h)) < 1e-12
 
@@ -170,12 +173,13 @@ let
                 end
                 @test cmem_P.n_kernel_builds == FT._UNDERFLOW_EAGER_BUILDS + 1
 
-                # ...and the guard still fired: row 3 is zero, nothing is NaN. Read out_P
-                # before the next convolution — it is a view into cmem_P.conv_gpu, which every
-                # subsequent build overwrites (CLAUDE.md, "results alias workspace scratch").
+                # ...and the row is still rendered: row 3 reads the window's first pixel and
+                # nothing is NaN. Read out_P before the next convolution — it is a view into
+                # cmem_P.conv_gpu, which every subsequent build overwrites (CLAUDE.md, "results
+                # alias workspace scratch").
                 out_P_h = Array(out_P)
                 @test all(isfinite, out_P_h)
-                @test all(out_P_h[3, :] .== 0.0)
+                @test all(out_P_h[3, :] .== αs[3, 1])
 
                 # The stride half of the policy, without doing thousands of builds: seed the
                 # counter so the next build lands exactly on a checkpoint. The
@@ -203,6 +207,61 @@ let
                 @test_logs (:warn, r"Doppler kernel underflowed") match_mode=:any begin
                     FT.convolve_wavelength_axis_batched!(bcmem_P, xs, αs, v_los_b, 1200.0, 1)
                 end
+            end
+
+            # ── Subnormal row sums: the reciprocal of a nonzero sum can overflow ──────
+            # A kernel whose center sits about ten σ past the tap span (Float32) has only
+            # subnormal taps, and below 1/floatmax(T) the reciprocal of their sum is Inf.
+            # Such a row must still reach unit sum; every row whose reciprocal is finite
+            # must keep the bits of x * (1/s).
+            @testset "subnormal row sums" begin
+                for T in (Float32, Float64)
+                    Lr = 300
+                    cols = 1:13:248   # 20 taps across the lanes, the 4-run loop and the tail loop
+                    rows = zeros(T, 4, Lr)
+                    # every value below is a dyadic multiple, so its sum is exact in any order
+                    rows[1, cols] .= T.(1:20) .* T(0.125)                  # normal sum
+                    rows[2, cols[1:3]] .= T.(1:3) .* (floatmin(T) / 8)     # subnormal sum, finite 1/s
+                    rows[3, cols] .= T.(1:20) .* nextfloat(zero(T))        # subnormal sum, 1/s = Inf
+                    # row 4 stays zero
+                    A = CuArray(rows)
+                    FT._normalize_rows!(A, 4)
+                    out = Array(A)
+
+                    @test all(isfinite, out)
+                    for r in (1, 2)
+                        s = sum(rows[r, :])
+                        @test isfinite(one(T) / s)
+                        @test out[r, :] == rows[r, :] .* (one(T) / s)
+                    end
+                    s3 = sum(rows[3, :])
+                    @test !iszero(s3) && isinf(one(T) / s3)
+                    exact = big.(1:20) ./ 210
+                    @test all(abs.(big.(out[3, cols]) .- exact) .<= 2 * eps(T) .* exact)
+                    @test abs(sum(big.(out[3, :])) - 1) <= 2 * eps(T)
+                    @test count(!iszero, out[3, :]) == 20
+                    @test all(iszero, out[4, :])
+                end
+
+                # A per-row kernel build at Float32 with one row's center 9.8 σx past the tap
+                # span. Its edge tap is subnormal and every other tap is smaller by a factor
+                # over e^8, so the row sum lies between that tap and twice it. The kernels are
+                # read before the FFT: the convolution renders such a row by the direct
+                # fallback, which would hide a non-finite kernel in that row.
+                T = Float32
+                σx = λ0 * 1200.0 / FT.c_ms
+                k_past = 9.8
+                edge_tap = T(exp(-k_past^2))
+                @test !iszero(edge_tap) && isinf(one(T) / (2 * edge_tap))
+                v_band = ((Nλ ÷ 2) * Δλ + k_past * σx) / λ0 * FT.c_ms
+                v_los_S = fill(T(v_moderate), Natm)
+                v_los_S[3] = T(v_band)
+                cmem_S = FT.ConvolutionMemory(Nλ, Natm, Npad; T=T)
+                FT._init_micro_params!(cmem_S, T.(xs), xs)
+                FT._build_per_row_kernels!(cmem_S, cmem_S.xs_cpu, CuArray(v_los_S), T(1200))
+                K = Array(cmem_S.conv_gpu)
+                @test all(isfinite, K)
+                @test abs(sum(big.(K[3, :])) - 1) <= 2 * eps(T)
             end
         end
     end

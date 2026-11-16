@@ -55,7 +55,8 @@ mutable struct StackedRenderMemory{T<:AF, V<:CA{T,1}, M<:CA{T,2}, MI<:CA{T,2},
 
     # ── Doppler convolution (B*Natm rows) ──
     const signal_ft::C              # (B*Natm, nfreq) padded-signal FFT of every component
-    const signal_set::BitVector     # components whose signal FFT has been set
+    const αs::M                     # (B*Natm, Nλ) opacities of every component, read by the direct-convolution fallback
+    const signal_set::BitVector     # components whose signal FFT and opacities have been set
     const kernel_ft::C              # (B*Natm, nfreq) FFT of the per-row Doppler kernels
     const conv_ft::C                # (B*Natm, nfreq) convolution product
     # (B*Natm, L) per-row kernels, then the inverse FFT result. _maybe_report_underflow!
@@ -149,6 +150,7 @@ function StackedRenderMemory(mems::AbstractVector{<:GPUMemory{T}},
     end
 
     signal_ft = CuMatrix{Complex{T}}(undef, BNatm, nfreq)
+    αs = CUDA.zeros(T, BNatm, Nλ)
     kernel_ft = CuMatrix{Complex{T}}(undef, BNatm, nfreq)
     conv_ft = CuMatrix{Complex{T}}(undef, BNatm, nfreq)
     conv_gpu = CuMatrix{T}(undef, BNatm, L)
@@ -164,7 +166,7 @@ function StackedRenderMemory(mems::AbstractVector{<:GPUMemory{T}},
         any(mem -> mem.use_anchored, mems),
         collect(ConvolutionMemory{T}, cmems), λs, xs, dx, σ_floor, false,
         v_los, v_mic, Ts, tau_ds, tau_alphaC,
-        signal_ft, falses(B), kernel_ft, conv_ft, conv_gpu, plan_fwd, plan_bwd,
+        signal_ft, αs, falses(B), kernel_ft, conv_ft, conv_gpu, plan_fwd, plan_bwd,
         τs, cfunc, out, 0)
 end
 

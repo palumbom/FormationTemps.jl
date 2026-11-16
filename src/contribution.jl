@@ -1,5 +1,16 @@
 E_2(τ) = exponential_integral_2_gpu(τ)
 
+# The opacities the Doppler convolution reads. Its direct-convolution fallback reads them on every
+# call, also when cmem.signal_cached skips the forward FFT, so they must be this call's: a
+# ConvolutionMemory and GPUMemory shared by several opacities hold in mem.αs whichever was copied
+# last. A device array is read in place; a host array is uploaded into mem.αs on every call.
+_opacity_source!(mem::GPUMemory, αs_init::CuArray{T,2}) where T<:AF = αs_init
+
+function _opacity_source!(mem::GPUMemory, αs_init::AA{T,2}) where T<:AF
+    copyto!(mem.αs, αs_init)
+    return mem.αs
+end
+
 """
     calc_intensity_quantities(αs_init, atm, mem, cmem, μ_tile, v_los, v_mic)
 
@@ -46,8 +57,7 @@ function calc_intensity_quantities_inplace!(αs_init::AA{T,2}, atm::AtmosphereGP
                                             cmem::AbstractConvolutionMemory, μ_tile::T, v_los::CA{T,1},
                                             v_mic::Union{T, CA{T,1}}) where T<:AF
     # micro-broadening + tau (same as calc_intensity_cfunc!)
-    cmem.signal_cached || copyto!(mem.αs, αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, v_los, v_mic)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, _opacity_source!(mem, αs_init), v_los, v_mic)
     if mem.use_anchored
         calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
     else
@@ -91,8 +101,7 @@ See also: [`calc_intensity_quantities`](@ref)
 function calc_flux_quantities(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
                               cmem::AbstractConvolutionMemory, v_mic::Union{T, CA{T,1}}) where T<:AF
     # micro-broadening + tau (stationary frame: zero v_los)
-    cmem.signal_cached || copyto!(mem.αs, αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, mem.v_los_zeros, v_mic)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, _opacity_source!(mem, αs_init), mem.v_los_zeros, v_mic)
     if mem.use_anchored
         calc_tau_anchored_gpu!(one(T), mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
     else
@@ -114,9 +123,7 @@ end
 function calc_intensity_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
                                cmem::AbstractConvolutionMemory, μ_tile::T, v_los::CA{T,1},
                                v_mic::Union{T, CA{T,1}}) where T<:AF
-    # copy opacities (skip when signal FFT is cached — αs unchanged)
-    cmem.signal_cached || copyto!(mem.αs, αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, v_los, v_mic)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, _opacity_source!(mem, αs_init), v_los, v_mic)
 
     # compute taus
     if mem.use_anchored
@@ -172,8 +179,7 @@ end
 function calc_intensity_direct!(out::CA{T,1}, αs_init::AA{T,2}, atm::AtmosphereGPU{T},
                                 mem::GPUMemory, cmem::AbstractConvolutionMemory, μ_tile::T,
                                 v_los::CA{T,1}, v_mic::Union{T, CA{T,1}}) where T<:AF
-    cmem.signal_cached || copyto!(mem.αs, αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, v_los, v_mic)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, _opacity_source!(mem, αs_init), v_los, v_mic)
     if mem.use_anchored
         calc_tau_anchored_gpu!(μ_tile, mem.log_τ_ref, mem.ifactor_base, αs_gpu, mem.τs)
         cfunc_reduce_intensity!(out, μ_tile, atm.Ts_gpu, mem.λs, mem.τs)
@@ -188,8 +194,7 @@ end
 function calc_flux_cfunc!(αs_init::AA{T,2}, atm::AtmosphereGPU{T}, mem::GPUMemory,
                          cmem::AbstractConvolutionMemory, v_mic::Union{T, CA{T,1}}) where T<:AF
     # micro-broadening (stationary frame: zero v_los)
-    cmem.signal_cached || copyto!(mem.αs, αs_init)
-    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, mem.αs, mem.v_los_zeros, v_mic)
+    αs_gpu = convolve_wavelength_axis_gpu(cmem, mem.λs, _opacity_source!(mem, αs_init), mem.v_los_zeros, v_mic)
 
     # compute taus
     if mem.use_anchored
