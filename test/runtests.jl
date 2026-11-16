@@ -65,4 +65,5 @@ if use_gpu
     include("test_varying_sigma.jl")
     include("test_gpu_precision.jl")
     include("test_graph_capture.jl")
+    include("test_doppler_fallback_parity.jl")
 end

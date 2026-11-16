@@ -252,7 +252,8 @@ both sides recompute the same rows from the same taps; a change to either functi
 The host groups its sums differently (the taps that read an edge pixel enter through prefix and
 suffix masses, the rest through one dot product), so CPU and GPU agree on those rows to rounding,
 not bit for bit. It allocates, which the tile workspace otherwise avoids, but only for a row that
-needs it.
+needs it. `test/test_doppler_fallback_parity.jl` (GPU-only) pins the CPU/GPU agreement on such rows,
+the edge copy of a kernel wholly past one end, and the unit normalization.
 
 The fallback needs the unconvolved opacities on every call, also when `signal_cached` skips the
 forward FFT, and a `ConvolutionMemory` shared by several opacities (Anemoi renders all its
